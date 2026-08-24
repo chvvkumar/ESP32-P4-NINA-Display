@@ -83,7 +83,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 76
+#define APP_CONFIG_VERSION 77
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -555,6 +555,14 @@ typedef struct {
                                        // 0 = Dashboard (arc, default),
                                        // 1 = Image-forward.
                                        // Values above 1 fall back to 0.
+
+    // Added after v76 (global audio mute) — must stay at end to preserve NVS binary compatibility
+    bool     audio_muted;              // v77: silence ALL sound (voice alerts,
+                                       // event phrases, connection announcements,
+                                       // boot jingle) at the audio_alert enqueue
+                                       // gate. The web test/preview endpoints
+                                       // bypass it so the speaker stays
+                                       // testable while muted. Default false.
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -5713,14 +5721,14 @@ _Static_assert(offsetof(app_config_t, nina_layout) ==
 _Static_assert(sizeof(app_config_v74_t) <= sizeof(app_config_t),
                "v74 snapshot must not exceed the current config struct");
 
-/* ── Version 75 config struct — used only for NVS migration to v76 ──── */
-/* v76 appends NO field: it only widens the value range of the existing  */
-/* voice_notify_mask (bits 12-26 become the per-event phrase gates), so  */
-/* this snapshot is byte-identical to app_config_t as of v75. It is      */
-/* still spelled out in full rather than aliased to app_config_t so that  */
-/* a later version appending a field cannot silently change what a v75    */
-/* blob means. Same body as the v74 snapshot plus the nina_layout[]       */
-/* uint8_t array v75 added at the end.                                    */
+/* ── Version 75 config struct — used only for NVS migration ─────────── */
+/* v76 appended NO field: it only widened the value range of the existing */
+/* voice_notify_mask (bits 12-26 become the per-event phrase gates), so   */
+/* this snapshot is byte-identical to app_config_t AS OF v75/v76 (v77     */
+/* then appended audio_muted past it). It is spelled out in full rather   */
+/* than aliased to app_config_t so that a later version appending a field */
+/* cannot silently change what a v75 blob means. Same body as the v74     */
+/* snapshot plus the nina_layout[] uint8_t array v75 added at the end.    */
 typedef struct {
     uint32_t config_version;
     char api_url[3][128];
@@ -5908,15 +5916,35 @@ typedef struct {
     uint8_t  nina_layout[MAX_NINA_INSTANCES];
 } app_config_v75_t;
 
-/* v76 adds no field, so the v75 snapshot must be exactly the current
- * struct: same size AND same trailing field offset. If a future version
- * appends a field, the size assert below flips to != and this pair must
- * be relaxed to the <= / end-of-last-field form the v62..v74 asserts use. */
+/* v77 appended audio_muted, so the equality asserts v76 used are relaxed
+ * to the <= / same-trailing-field-offset form the v62..v74 asserts use. */
 _Static_assert(offsetof(app_config_v75_t, nina_layout) ==
                    offsetof(app_config_t, nina_layout),
                "app_config_v75_t snapshot drifted from app_config_t layout");
-_Static_assert(sizeof(app_config_v75_t) == sizeof(app_config_t),
-               "v76 must not change app_config_t layout; it only widens voice_notify_mask");
+_Static_assert(sizeof(app_config_v75_t) <= sizeof(app_config_t),
+               "v75 snapshot must not exceed the current config struct");
+
+/* ── Version 76 config struct — used only for NVS migration to v77 ──── */
+/* v76 appended NO field over v75 (it only widened the voice_notify_mask
+ * value range), so its layout is byte-for-byte the v75 snapshot. Both
+ * snapshots are FROZEN forever, so aliasing one to the other cannot
+ * drift the way aliasing to the live app_config_t would; spelling the
+ * ~180-line body out a second time would only invite copy divergence. */
+typedef app_config_v75_t app_config_v76_t;
+
+/* v75 and v76 snapshots are the same layout by construction (typedef);
+ * the asserts below pin the relationship to the LIVE struct instead:
+ * v77's audio_muted (bool, align 1) is the first field past the v76
+ * snapshot's last field, and the snapshot never exceeds the live struct
+ * (migrate_from_v76 memcpy's sizeof(app_config_v76_t) into it). */
+_Static_assert(sizeof(app_config_v76_t) == sizeof(app_config_v75_t),
+               "v76 layout must equal v75 (v76 appended no field)");
+_Static_assert(offsetof(app_config_t, audio_muted) ==
+                   offsetof(app_config_v76_t, nina_layout) +
+                       sizeof(((app_config_v76_t *)0)->nina_layout),
+               "app_config_v76_t snapshot drifted from app_config_t layout");
+_Static_assert(sizeof(app_config_v76_t) <= sizeof(app_config_t),
+               "v76 snapshot must not exceed the current config struct");
 
 
 

@@ -26,7 +26,7 @@
 #include "page_registry.h"
 #include "nina_image_page.h"
 #include "moon_interaction.h"
-#include "nina_settings_tabview.h"
+#include "settings_hub.h"
 #include "nina_toast.h"
 #include "nina_alerts.h"
 #include "nina_safety.h"
@@ -466,7 +466,7 @@ static void hide_page_at(int idx) {
         }
     }
     else if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) {
-        settings_tabview_destroy();
+        settings_hub_destroy();
         settings_obj = NULL;
         /* Settings is a modal surface — unfreeze the arbiter on destroy. */
         nav_arbiter_notify_modal_close(esp_timer_get_time() / 1000);
@@ -491,13 +491,13 @@ static void show_page_at(int idx) {
     }
     else if (idx == SETTINGS_PAGE_IDX(page_count)) {
         if (!settings_obj) {
-            settings_obj = settings_tabview_create(main_cont);
+            settings_obj = settings_hub_create(main_cont);
             /* Settings is a modal surface — freeze the arbiter on create.
              * Paired with the close in hide_page_at()'s destroy branch. */
             nav_arbiter_notify_modal_open();
         }
         lv_obj_clear_flag(settings_obj, LV_OBJ_FLAG_HIDDEN);
-        settings_tabview_refresh();
+        settings_hub_refresh();
     }
 }
 
@@ -633,7 +633,7 @@ void nina_dashboard_apply_theme(int theme_index) {
     ops_apply_theme(PAGE_IDX_CLOCK);
     for (int s = 0; s < IMG_SRC_COUNT; s++) ops_apply_theme(PAGE_IDX_IMG_GOES + s);
     ops_apply_theme(PAGE_IDX_SUMMARY);
-    if (settings_obj) settings_tabview_apply_theme();
+    if (settings_obj) settings_hub_apply_theme();
     ops_apply_theme(SYSINFO_PAGE_IDX(page_count));
     nina_graph_overlay_apply_theme();
     nina_info_overlay_apply_theme();

@@ -234,7 +234,9 @@
     /* -- ADS-B Radar Scope icon style (v71) -- */ \
     INT_RESET (flights_icon_style,           "flights_icon_style",           0,     0,     1)     /* Radar Scope contact glyph: 0 = arrows, 1 = aircraft silhouettes */ \
     /* -- Clock page layout (v72) -- */ \
-    INT_RESET (clock_layout,                 "clock_layout",                 0,     0,     6)     /* 0 = Classic (default), 1 = Console 92, 2 = Broadside, 3 = Evensong, 4 = Blueprint, 5 = Transit Line, 6 = Night Network. RESET, not clamp: layouts are unordered names, so an unknown index falls back to Classic, never to whichever layout sits at the far bound */
+    INT_RESET (clock_layout,                 "clock_layout",                 0,     0,     6)     /* 0 = Classic (default), 1 = Console 92, 2 = Broadside, 3 = Evensong, 4 = Blueprint, 5 = Transit Line, 6 = Night Network. RESET, not clamp: layouts are unordered names, so an unknown index falls back to Classic, never to whichever layout sits at the far bound */ \
+    /* -- Global audio mute (v77) -- */ \
+    BOOL      (audio_muted,                  "audio_muted",                  false) /* silence EVERY sound (voice alerts, event phrases, connection announcements, boot jingle) at the audio_alert enqueue gate; the web test/preview endpoints bypass it so the speaker stays testable while muted */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

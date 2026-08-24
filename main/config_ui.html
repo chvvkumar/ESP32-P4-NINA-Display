@@ -434,6 +434,17 @@
       background: rgba(255, 255, 255, 0.02);
     }
     .top-nav .github-link:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.3); background: rgba(255, 255, 255, 0.04); }
+    /* quick controls: instant device toggles, right of the GitHub link; grows later */
+    .top-nav .quick-controls { display: flex; align-items: center; gap: 8px; }
+    .top-nav .qc-btn {
+      color: var(--text-hint); font-family: inherit; font-size: 0.75rem; font-weight: 500;
+      display: flex; align-items: center; gap: 6px; cursor: pointer;
+      padding: 7px 12px; border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px; transition: all 0.2s ease;
+      background: rgba(255, 255, 255, 0.02); white-space: nowrap;
+    }
+    .top-nav .qc-btn:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.3); background: rgba(255, 255, 255, 0.04); }
+    .top-nav .qc-btn.muted { color: #60a5fa; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.15); }
     .top-nav .update-pill {
       color: var(--accent); font-family: inherit; font-size: 0.72rem; font-weight: 600;
       display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
@@ -1031,6 +1042,12 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           GitHub
         </a>
+        <span class="quick-controls" id="quickControls">
+          <button type="button" class="qc-btn" id="muteBtn" title="Mute all audio">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path id="muteIconOn" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path id="muteIconOff" style="display:none" d="M16 9l6 6M22 9l-6 6"/></svg>
+            <span id="muteLabel">Mute</span>
+          </button>
+        </span>
       </div>
     </div>
     <div class="nav-row2">
@@ -5975,8 +5992,31 @@
        so they don't fire onto the device's few httpd workers mid-load. The GitHub
        update check (~7s) runs once in the background, lightly delayed, after that
        work so the badge populates on every tab without opening System. */
+    /* === Quick controls: global audio mute (nav bar) ===
+       Instant path through the Control API (deferred NVS save, no dirty
+       state); independent of the Behavior tab save model. */
+    function renderMute(muted){
+      var btn=$('muteBtn');
+      if(!btn) return;
+      btn.classList.toggle('muted',!!muted);
+      btn.title=muted?'Audio muted - click to unmute':'Mute all audio';
+      $('muteLabel').textContent=muted?'Muted':'Mute';
+      $('muteIconOn').style.display=muted?'none':'';
+      $('muteIconOff').style.display=muted?'':'none';
+    }
+    $('muteBtn').addEventListener('click',function(){
+      fetch('/api/control/toggle?name=audio_muted',{method:'POST'})
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(function(it){ renderMute(it.value); })
+        .catch(function(){});
+    });
+
     cfgOverlay('loading');
     loadConfig().then(function(){
+      fetch('/api/control/get?name=audio_muted')
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+        .then(function(it){ renderMute(it.value); })
+        .catch(function(){});
       loadVersion();
       refreshNavMetrics();
       setInterval(refreshNavMetrics, 5000);

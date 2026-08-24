@@ -277,7 +277,10 @@ static TaskHandle_t ha_task_handle = NULL;
 octoprint_data_t octoprint_data;
 static TaskHandle_t octoprint_task_handle = NULL;
 
-static demo_task_params_t demo_params;
+/* True while the demo generator owns the instance structs. Poll tasks park on
+ * it (touch nothing); set/cleared only by data_update_task around
+ * demo_data_start()/demo_data_stop(). */
+static _Atomic bool demo_active = false;
 
 /**
  * @brief Page-change callback from the dashboard — signals the data task to re-tune polling.
@@ -448,10 +451,10 @@ void instance_poll_task(void *arg) {
     // Wait for WiFi
     xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT, pdFALSE, pdFALSE, portMAX_DELAY);
 
-    // Boot probe: check connectivity immediately
+    // Boot probe: check connectivity immediately (skipped while demo owns the structs)
     {
         const char *url = app_config_get_instance_url(idx);
-        if (strlen(url) > 0 && app_config_is_instance_enabled(idx)) {
+        if (!demo_active && strlen(url) > 0 && app_config_is_instance_enabled(idx)) {
             nina_connection_set_connecting(idx);
             if (nina_client_dns_check(url)) {
                 nina_client_poll_heartbeat(url, ctx->client, idx);
@@ -473,6 +476,11 @@ void instance_poll_task(void *arg) {
             vTaskDelay(pdMS_TO_TICKS(500));
         }
         if (ctx->shutdown) break;
+
+        if (demo_active) {                      /* demo owns the instance structs */
+            ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
+            continue;                           /* touch nothing: no polls, no conn reports */
+        }
 
         const char *url = app_config_get_instance_url(idx);
 
@@ -1376,6 +1384,85 @@ void fetch_worker_task(void *arg) {
 }
 
 // =============================================================================
+// Network-stack bring-up — MQTT, per-instance pollers, feature pollers, fetch
+// worker. Runs once: on a normal boot at the old inline location, or on the
+// first demo-OFF transition after a demo boot (which skipped all of this).
+// Everything inside is already ensure-style or handle-guarded; the single
+// guard makes the whole block idempotent regardless.
+// =============================================================================
+
+static void ensure_network_stack(void) {
+    static bool s_net_stack_started = false;
+    if (s_net_stack_started) {
+        return;
+    }
+    s_net_stack_started = true;
+
+    // Start MQTT if enabled
+    mqtt_ha_start();
+
+    instance_count = app_config_get_instance_count();
+    ESP_LOGI(TAG, "Spawning %d per-instance poll tasks", instance_count);
+
+    /* Spawn per-instance poll tasks (boot probe + WS start happen inside each task) */
+    for (int i = 0; i < instance_count; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "poll_%d", i);
+        /* Pin poll tasks to Core 0 (networking), leaving Core 1 for UI/LVGL. */
+        poll_contexts[i].task_handle = psram_task_spawn(
+            instance_poll_task, name, 8192, &poll_contexts[i], 4, 0);
+        poll_task_handles[i] = poll_contexts[i].task_handle;
+    }
+
+    /* Spawn AllSky poll task (pinned to Core 0, networking).
+     * On a demo boot allsky_data_init already ran in the demo branch; a second
+     * init would leak the mutex, so guard on it. */
+    if (allsky_data.mutex == NULL) {
+        allsky_data_init(&allsky_data);
+    }
+    if (app_config_get()->allsky_enabled) {
+        allsky_task_handle = psram_task_spawn(allsky_poll_task, "allsky", 6144, NULL, 3, 0);
+    }
+
+    /* JSON Display poll task (pinned to Core 0, networking).
+     * json_data_init runs UNCONDITIONALLY so the mutex exists before any later
+     * web-handler-triggered enable + page entry; json_ensure_task_running()
+     * spawns the task itself only when the page is enabled — same call the web
+     * handler makes on a runtime enable. */
+    json_client_init(&json_data);
+    json_ensure_task_running();
+
+    /* Home Assistant poll task (pinned to Core 0, networking).
+     * ha_client_init runs UNCONDITIONALLY so the mutex exists before any later
+     * web-handler-triggered enable + page entry; the enable check lives inside
+     * ha_ensure_task_running(). */
+    ha_client_init(&ha_data);
+    ha_ensure_task_running();
+
+    /* OctoPrint poll task (pinned to Core 0, networking).
+     * octoprint_client_init runs UNCONDITIONALLY so the mutex exists before any
+     * later web-handler-triggered enable + page entry; the enable check lives
+     * inside octoprint_ensure_task_running(). */
+    octoprint_client_init(&octoprint_data);
+    octoprint_ensure_task_running();
+
+    /* ADS-B poll task (pinned to Core 0, networking). adsb_ensure_task_running()
+     * does its own init and its own flights_enabled check, so this one call
+     * covers both boot and the runtime enable from the web handler. */
+    adsb_ensure_task_running();
+
+    /* Image pages (GOES / Moon / Solar / Custom). Mutexes for all four, a
+     * PSRAM poller for each source enabled in config; disabled sources spawn
+     * lazily on the first enable/entry (image_page_ensure_task_running). */
+    image_page_init(true);
+
+    /* Spawn async fetch worker (pinned to Core 0, networking) */
+    if (s_fetch_queue && s_fetch_result_queue) {
+        psram_task_spawn(fetch_worker_task, "fetch_wk", 8192, NULL, 4, 0);
+    }
+}
+
+// =============================================================================
 // UI Coordinator Task — fast loop, never blocks on HTTP data polling
 // =============================================================================
 
@@ -1457,13 +1544,9 @@ void data_update_task(void *arg) {
         instance_count = app_config_get_instance_count();
         instance_count = 3;  /* demo mode always shows all 3 instance profiles */
 
-        /* Prepare demo task parameters */
-        demo_params.instances = instances;
-        demo_params.allsky = &allsky_data;
-        demo_params.instance_count = instance_count;
-
-        /* Spawn demo data generator on Core 0 */
-        psram_task_spawn(demo_data_task, "demo", 6144, &demo_params, 4, 0);
+        /* Start demo data generator (spawns the persistent demo task) */
+        demo_active = true;
+        demo_data_start(instances, allsky_task_handle ? NULL : &allsky_data, 3);
 
         goto main_loop;
     }
@@ -1583,64 +1666,9 @@ void data_update_task(void *arg) {
     }
 
 boot_update_check_done:
-    // Start MQTT if enabled
-    mqtt_ha_start();
-
-    instance_count = app_config_get_instance_count();
-    ESP_LOGI(TAG, "Spawning %d per-instance poll tasks", instance_count);
-
-    /* Spawn per-instance poll tasks (boot probe + WS start happen inside each task) */
-    for (int i = 0; i < instance_count; i++) {
-        char name[16];
-        snprintf(name, sizeof(name), "poll_%d", i);
-        /* Pin poll tasks to Core 0 (networking), leaving Core 1 for UI/LVGL. */
-        poll_contexts[i].task_handle = psram_task_spawn(
-            instance_poll_task, name, 8192, &poll_contexts[i], 4, 0);
-        poll_task_handles[i] = poll_contexts[i].task_handle;
-    }
-
-    /* Spawn AllSky poll task (pinned to Core 0, networking) */
-    allsky_data_init(&allsky_data);
-    if (app_config_get()->allsky_enabled) {
-        allsky_task_handle = psram_task_spawn(allsky_poll_task, "allsky", 6144, NULL, 3, 0);
-    }
-
-    /* JSON Display poll task (pinned to Core 0, networking).
-     * json_data_init runs UNCONDITIONALLY so the mutex exists before any later
-     * web-handler-triggered enable + page entry; json_ensure_task_running()
-     * spawns the task itself only when the page is enabled — same call the web
-     * handler makes on a runtime enable. */
-    json_client_init(&json_data);
-    json_ensure_task_running();
-
-    /* Home Assistant poll task (pinned to Core 0, networking).
-     * ha_client_init runs UNCONDITIONALLY so the mutex exists before any later
-     * web-handler-triggered enable + page entry; the enable check lives inside
-     * ha_ensure_task_running(). */
-    ha_client_init(&ha_data);
-    ha_ensure_task_running();
-
-    /* OctoPrint poll task (pinned to Core 0, networking).
-     * octoprint_client_init runs UNCONDITIONALLY so the mutex exists before any
-     * later web-handler-triggered enable + page entry; the enable check lives
-     * inside octoprint_ensure_task_running(). */
-    octoprint_client_init(&octoprint_data);
-    octoprint_ensure_task_running();
-
-    /* ADS-B poll task (pinned to Core 0, networking). adsb_ensure_task_running()
-     * does its own init and its own flights_enabled check, so this one call
-     * covers both boot and the runtime enable from the web handler. */
-    adsb_ensure_task_running();
-
-    /* Image pages (GOES / Moon / Solar / Custom). Mutexes for all four, a
-     * PSRAM poller for each source enabled in config; disabled sources spawn
-     * lazily on the first enable/entry (image_page_ensure_task_running). */
-    image_page_init(true);
-
-    /* Spawn async fetch worker (pinned to Core 0, networking) */
-    if (s_fetch_queue && s_fetch_result_queue) {
-        psram_task_spawn(fetch_worker_task, "fetch_wk", 8192, NULL, 4, 0);
-    }
+    /* MQTT + all poll tasks + fetch worker (factored so the first demo-OFF
+     * transition after a demo boot can bring the same stack up late). */
+    ensure_network_stack();
 
 main_loop:
     while (1) {
@@ -1943,10 +1971,51 @@ main_loop:
             clock_page_active = on_clock;
         }
 
-        // Re-read instance count from config so API URL changes take effect live
-        // In demo mode, keep instance_count at 3 (set during task init)
-        if (!app_config_get()->demo_mode) {
-            instance_count = app_config_get_instance_count();
+        /* ── Demo mode live transitions ──
+         * Reconcile the config flag against the generator each cycle: no
+         * reboot needed in either direction. ON gates the pollers first so
+         * nothing writes over demo data; OFF waits (bounded, <=3 s) for the
+         * demo task's stop cleanup, then hands the structs back to real
+         * polling with fresh poll state. */
+        {
+            bool want = app_config_get()->demo_mode;
+            if (want && !demo_data_is_running()) {
+                demo_active = true;                       /* gate pollers first */
+                for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+                    if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
+                    nina_websocket_stop(i);               /* real WS must not write over demo data */
+                }
+                instance_count = 3;
+                demo_data_start(instances, allsky_task_handle ? NULL : &allsky_data, 3);
+                nav_arbiter_notify_topology_changed();
+            } else if (!want && demo_active) {
+                /* OFF path keyed on demo_active, not demo_data_is_running():
+                 * a failed demo spawn latches demo_active with no generator,
+                 * and the gate must still drop or pollers park forever. */
+                if (demo_data_is_running()) {
+                    demo_data_stop();
+                    for (int i = 0; i < 30 && demo_data_is_running(); i++) {
+                        vTaskDelay(pdMS_TO_TICKS(100));
+                    }
+                    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {   /* fresh poll state for the real world */
+                        nina_poll_state_init(&poll_states[i]);
+                        poll_contexts[i].filters_synced = false;
+                        poll_contexts[i].last_heartbeat_ms = 0;
+                    }
+                    ensure_network_stack();               /* no-op on a normal boot; first spawn after a demo boot */
+                }
+                demo_active = false;
+                instance_count = app_config_get_instance_count();
+                for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+                    if (poll_task_handles[i]) xTaskNotifyGive(poll_task_handles[i]);
+                }
+                nav_arbiter_notify_topology_changed();
+            }
+            /* Re-read instance count from config so API URL changes take
+             * effect live; in demo mode it stays pinned at 3. */
+            if (!want) {
+                instance_count = app_config_get_instance_count();
+            }
         }
 
         // Check for debug mode toggle

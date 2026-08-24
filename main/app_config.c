@@ -931,6 +931,9 @@ static void set_defaults(app_config_t *cfg) {
     // in validate_config() the same way instance_enabled[] is.
     memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));  // 0 = Dashboard (arc)
 
+    // v77 addition (global audio mute). Also a SETTINGS_TABLE row.
+    cfg->audio_muted = false;           // sound on by default
+
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
 
@@ -3080,23 +3083,28 @@ static void migrate_from_v74(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v74 to v%d", APP_CONFIG_VERSION);
 }
 
-/* --- v75 -> v76 migration: appends NOTHING. v76 only widens the value range
- *     of the existing voice_notify_mask: bits 12-26 become the per-event
- *     spoken-phrase gates (VOICE_EVENT_BIT_BASE + voice_event_t, see
- *     main/audio_alert.h), where they used to be clamped away by
- *     validate_config. sizeof(app_config_v75_t) == sizeof(app_config_t) (a
- *     _Static_assert in app_config.h holds that), so this is a full-struct
- *     copy, not a prefix copy.
+/* --- v75 -> current migration: v76 appended NOTHING (it only widened the
+ *     value range of the existing voice_notify_mask: bits 12-26 became the
+ *     per-event spoken-phrase gates, VOICE_EVENT_BIT_BASE + voice_event_t,
+ *     see main/audio_alert.h, where they used to be clamped away by
+ *     validate_config), then v77 appended audio_muted past the snapshot.
  *
- *     Every OTHER migration path reaches the same state through the
- *     voice_event_bits_default() fixup at the dispatcher tail; only this one
- *     sets the bits inline, because the tail is bounded at version_check < 75
- *     so it cannot double-run over a path that already handled them. --- */
+ *     Every OTHER pre-v75 migration path reaches the same mask state through
+ *     the voice_event_bits_default() fixup at the dispatcher tail; only this
+ *     one (and migrate_from_v76, which copies a mask the user could already
+ *     edit and so must NOT re-OR it) sets the bits inline, because the tail
+ *     is bounded at version_check < 75 so it cannot double-run over a path
+ *     that already handled them. --- */
 static void migrate_from_v75(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
     size_t copy = raw_size < sizeof(app_config_v75_t) ? raw_size : sizeof(app_config_v75_t);
     memcpy(cfg, raw, copy);
+
+    /* audio_muted (v77) sits right past the snapshot's last field, so the
+     * snapshot's tail padding can land on it; re-assert the default: sound
+     * on, matching a fresh install. */
+    cfg->audio_muted = false;
 
     /* Turn the 15 new per-event phrases ON for upgraders, matching a fresh
      * install. The stored v75 mask kept only bits 0-11 (validate_config
@@ -3107,6 +3115,28 @@ static void migrate_from_v75(const void *raw, size_t raw_size, app_config_t *cfg
 
     cfg->config_version = APP_CONFIG_VERSION;
     ESP_LOGI(TAG, "Migrated config from v75 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v76 -> v77 migration: appends audio_muted, the global "silence every
+ *     sound" toggle enforced at the audio_alert enqueue gate. Additive and at
+ *     the very end, so this stays a plain prefix memcpy like every migration
+ *     around it. Unlike migrate_from_v75, the mask is copied UNTOUCHED: a v76
+ *     user could already edit bits 12-26, so re-ORing them would overwrite a
+ *     deliberate off choice. --- */
+static void migrate_from_v76(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t copy = raw_size < sizeof(app_config_v76_t) ? raw_size : sizeof(app_config_v76_t);
+    memcpy(cfg, raw, copy);
+
+    /* The field sits right past the v76 snapshot, so memcpy(copy) never
+     * touches it on purpose; the snapshot's tail padding (it ends on a
+     * uint8_t array but aligns to 4) can still land on it, so re-assert the
+     * default: sound on, matching a fresh install. */
+    cfg->audio_muted = false;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v76 to v%d", APP_CONFIG_VERSION);
 }
 
 
@@ -3917,6 +3947,11 @@ static bool validate_config(app_config_t *cfg) {
         }
     }
 
+    /* Global audio mute (v77): canonicalize a stale blob byte to a strict
+     * 0/1, same shape as the flights_enabled bools below. Its SETTINGS_TABLE
+     * BOOL row handles default + web parse; the clamp there is a no-op. */
+    cfg->audio_muted = cfg->audio_muted ? true : false;
+
     /* ADS-B page (v68). The six numeric flights_* fields are SETTINGS_TABLE
      * rows, so settings_clamp_apply() above already applied their ranges
      * (interval 2-60 s, range 10-250 nm, gate 0-89 deg, up-azimuth 0-359 deg,
@@ -4047,11 +4082,21 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 76) {
+        /* v76 -> v77: appended audio_muted (global audio mute). tiles_loaded
+         * stays false: a v76 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. Safe to
+         * write back immediately: all dispatcher-tail fixups below are
+         * excluded by their literal version bounds. */
+        migrate_from_v76(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 75) {
-        /* v75 -> v76: NO field appended. Only the value range of
-         * voice_notify_mask widened (bits 12-26 = the per-event spoken
-         * phrases), so the struct size is unchanged and the migration is a
-         * full-struct copy plus the mask OR. tiles_loaded stays false: a v75
+        /* v75 -> v77: v76 appended NO field (only the value range of
+         * voice_notify_mask widened, bits 12-26 = the per-event spoken
+         * phrases) and v77 appended audio_muted, so the migration is a
+         * prefix copy plus the mask OR. tiles_loaded stays false: a v75
          * device already keeps its tiles in the "json_tiles"/"ha_tiles" NVS
          * keys, so the tail loads them. Safe to write back immediately: all
          * three dispatcher-tail fixups below are excluded by their literal

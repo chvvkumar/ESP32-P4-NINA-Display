@@ -53,7 +53,8 @@
 #include "weather_client.h"
 #include "ui/nina_spotify.h"
 #include "wifi_manager.h"
-#include "ui/nina_settings_tabview.h"
+#include "wifi_join.h"
+#include "ui/settings_hub.h"
 #include "ui/nina_thumbnail.h"
 #include "ui/nina_setup_screen.h"
 #include "ui/nina_setup_hint.h"
@@ -326,6 +327,27 @@ int wifi_get_current_network_index(void)
     return current_network_index;
 }
 
+/* ── wifi_join backend hooks (see wifi_manager.h) ── */
+
+void wifi_suspend_auto_reconnect(void)
+{
+    esp_timer_stop(wifi_reconnect_timer);
+}
+
+void wifi_resume_auto_reconnect(void)
+{
+    esp_timer_stop(wifi_reconnect_timer);
+    esp_timer_start_once(wifi_reconnect_timer, 1000000ULL);
+}
+
+void wifi_manager_adopt_slot(int index)
+{
+    if (index < 0 || index > 2) return;
+    current_network_index = index;
+    wifi_attempt_count = 0;
+    networks_tried = 0;
+}
+
 void wifi_apply_tx_power(uint8_t dbm)
 {
     /* Same whitelist validate_config() enforces, repeated here because this is
@@ -380,6 +402,12 @@ void wifi_apply_tx_power(uint8_t dbm)
 static void wifi_reconnect_cb(void *arg)
 {
     if (manual_switch_pending) {
+        return;
+    }
+    if (wifi_join_active()) {
+        /* On-device join owns the radio: a callback already dispatched when
+         * the join suspended the timer must not race its config swap (mirror
+         * of the manual_switch_pending guard above). */
         return;
     }
 
@@ -484,6 +512,26 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         perf_counter_increment(&g_perf.wifi_disconnect_count);
         esp_wifi_set_mode(WIFI_MODE_APSTA);
 
+        /* On-device join in progress: the wifi_join worker owns recovery, so
+         * skip both the manual-switch completion and the reconnect-timer arm.
+         * The APSTA re-enable above already ran, keeping the config AP
+         * reachable if the attempt strands the panel. */
+        if (wifi_join_active()) {
+            wifi_join_note_disconnect(disc->reason);
+            /* A manual saved-network switch must still complete even while a
+             * scan/join gates this handler, or manual_switch_pending strands
+             * true and permanently disables the reconnect walk. Mirrors the
+             * normal completion branch below. */
+            if (manual_switch_pending) {
+                manual_switch_pending = false;
+                if (pending_switch_index >= 0) {
+                    wifi_connect_to_slot(pending_switch_index);
+                    pending_switch_index = -1;
+                }
+            }
+            return;
+        }
+
         if (manual_switch_pending) {
             manual_switch_pending = false;
             if (pending_switch_index >= 0) {
@@ -501,16 +549,20 @@ static void event_handler(void *arg, esp_event_base_t event_base,
         wifi_attempt_count = 0;
         networks_tried = 0;
         ota_github_note_network_ready();  /* boot-health milestone for the rollback confirm guard */
+        wifi_join_note_got_ip();
 
-        /* Show green toast with connected network name and refresh settings UI */
+        /* Show green toast with connected network name and refresh settings UI.
+         * Suppressed during an on-device join: the join flow shows its own
+         * success screen, and current_network_index is not yet adopted so the
+         * toast would name the wrong SSID. */
         {
             const app_config_t *cfg = app_config_get();
             const char *ssid = cfg->wifi_networks[current_network_index].ssid;
-            if (ssid[0] != '\0') {
+            if (ssid[0] != '\0' && !wifi_join_active()) {
                 nina_toast_show_fmt(TOAST_SUCCESS, "Connected to %s", ssid);
             }
             if (lvgl_port_lock(100)) {
-                settings_tabview_refresh();
+                settings_hub_refresh();
                 lvgl_port_unlock();
             }
         }
@@ -771,6 +823,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Configured instances: %d", instance_count);
 
     wifi_init();
+    wifi_join_init();   /* on-device scan/join backend (Panel Mode WiFi screens) */
 
     /* Log esp-hosted host + C6 coprocessor firmware versions (diagnostic; readable
      * via /api/logs). A host/slave version mismatch is the top cause of SDIO
