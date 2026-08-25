@@ -69,22 +69,22 @@
 /* Channel table (config field clouds_channel, 0..2). All six layer names and
  * their PT10M DescribeDomains lists verified live 2026-08-18; a wrong name
  * returns a 460 B XML ServiceException, so a typo cannot silently serve the
- * wrong picture. blank_pct is the per-channel pure-black sample fraction above
- * which clouds_frame_incomplete() calls the frame a hole (see the measurements
+ * wrong picture. blank_pct is the near-black sample fraction above which
+ * clouds_frame_incomplete() calls the frame a blank slot (see the measurements
  * at that function). */
 typedef struct {
     const char *east;       /* GIBS layer name, GOES-East */
     const char *west;       /* GIBS layer name, GOES-West */
     const char *label;      /* overlay strip caption */
-    uint8_t     blank_pct;  /* > this % of samples pure black = incomplete frame */
+    uint8_t     blank_pct;  /* > this % of samples near black = blank (not ingested) frame */
 } clouds_channel_t;
 
 #define CLOUDS_CHANNEL_COUNT 3
 
 static const clouds_channel_t s_clouds_channels[CLOUDS_CHANNEL_COUNT] = {
-    { "GOES-East_ABI_GeoColor",              "GOES-West_ABI_GeoColor",              "GeoColor", 3  },
-    { "GOES-East_ABI_Band13_Clean_Infrared", "GOES-West_ABI_Band13_Clean_Infrared", "Clean IR", 10 },
-    { "GOES-East_ABI_Air_Mass",              "GOES-West_ABI_Air_Mass",              "Air Mass", 80 },
+    { "GOES-East_ABI_GeoColor",              "GOES-West_ABI_GeoColor",              "GeoColor", 90 },
+    { "GOES-East_ABI_Band13_Clean_Infrared", "GOES-West_ABI_Band13_Clean_Infrared", "Clean IR", 90 },
+    { "GOES-East_ABI_Air_Mass",              "GOES-West_ABI_Air_Mass",              "Air Mass", 90 },
 };
 
 /* Row for @p ch; an out-of-range value falls back to GeoColor rather than
@@ -409,35 +409,67 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
 /* ---- blank / partial frame detection ---- */
 
 /* GIBS answers HTTP 200 for a slot whose tiles are missing: a BLANK frame is the
- * selected vector basemap overlay drawn over black (~99% pure black, and pure
- * black everywhere when the basemap is "none"), and a
- * PARTIAL frame (tiles not yet ingested) has rectangular pure-black blocks.
- * Sample every CLOUDS_BLANK_STEP-th pixel of every CLOUDS_BLANK_STEP-th row
- * (8100 samples of a 720x720 frame) and call the frame incomplete when more
- * than the channel's blank_pct percent of them are 0x0000. Raw decoded pixels,
- * before any bake or Red Night remap.
+ * selected vector basemap overlay drawn over black (~98 % near black on the
+ * sample grid, and black everywhere when the basemap is "none"). Sample every
+ * CLOUDS_BLANK_STEP-th pixel of every CLOUDS_BLANK_STEP-th row (8100 samples of
+ * a 720x720 frame) and call the frame incomplete when more than blank_pct of
+ * them are near black (all channels below 24). Raw decoded pixels, before any
+ * bake or Red Night remap.
  *
- * The threshold is PER CHANNEL because the channels differ enormously in how
- * much legitimate black they contain. Measured 2026-08-18 on real 720x720
- * zoom-7 GetMaps over Kansas / Florida / the Gulf (black = RGB565 0x0000 on the
- * same 8-px sample grid this function uses):
+ * The test catches BLANK slots only. It does not try to catch partially
+ * ingested frames (one black quadrant): blackness cannot separate those from
+ * a real night frame (2026-08-24: a GeoColor night frame over Missouri is 8 %
+ * near black on stb and the HW decoder crushes the dark night side to exact
+ * zero, so an exact-0x0000 gate at 3 % rejected every real frame and the page
+ * went black). Partials self-heal instead: the poller re-fetches the newest
+ * two slots every poll and a same-stamp slot is replaced when its hash changes.
  *
- *   GeoColor   0.00 - 0.09 %   (dark navy night, never pure black)  -> 3
- *   Clean IR   0.00 %          (warm clear ground is mid-grey, not
- *                               black; no day/night swing, it is a
- *                               temperature product)                -> 10
- *   Air Mass  17.3 - 54.2 %    (the product itself renders large pure
- *                               black areas)                        -> 80
- *   blank/partial (any channel) 95.4 - 100 %  (overlay over black)
- *
- * Clean IR gets 10 rather than 3 purely as headroom over a hotter scene than
- * the ones sampled; blanks sit at 95 %+, so the extra slack costs no detection
- * power. Air Mass at 80 still separates a real frame (54 % worst case) from a
- * blank (95 %), but a partially ingested Air Mass frame does slip through.
- * ponytail: single global number would reject every Air Mass frame; per-channel
- * table entry is the cheapest fix. Upgrade path if partial Air Mass frames
- * annoy: compare the black mask against the previous frame for the same stamp. */
+ * Measured on real 720x720 GetMaps (near-black share of the sample grid):
+ *   GeoColor  day 1.5 %, night 8 %      Clean IR  0 %      Air Mass  20 %
+ *   (author's earlier pure-black survey saw Air Mass up to 54 %)
+ *   blank, any channel: 96 - 98 %
+ * 90 clears the worst real frame by 36 points and sits 6 under a blank. The
+ * per-channel table column stays (it is the layer table anyway) so a channel
+ * can still be tuned individually. */
 #define CLOUDS_BLANK_STEP 8      /* sample stride, pixels and rows */
+
+/* Missing-tile (partial ingest) detection. A tile GIBS has not ingested yet is
+ * rendered EXACTLY black (0x0000 from either decoder), while the same area in
+ * the neighbouring frame of the loop (10 min apart) is lit. Night sky is dark
+ * in both, so it never trips this. Count, on the CLOUDS_BLANK_STEP grid, the
+ * samples that are lit in @p ref (any channel >= 24) and exactly zero in @p f;
+ * call @p f partial when they exceed CLOUDS_HOLE_PCT of the lit samples.
+ *
+ * Threshold math (zoom 6, 720 px): the day/night terminator moves ~90 px in
+ * the 10 min between frames, so at dusk up to ~12 % of samples go lit -> dark
+ * (and the HW decoder crushes dark to exact zero). ONE missing 256 px tile is
+ * also ~12 %. Those two cannot be told apart, so the bar sits at 30: catches
+ * the multi-tile holes seen after a channel change (45-55 % of the frame),
+ * never a terminator; a single-tile hole is left to the re-fetch to heal.
+ * Needs at least 1/20 of the grid lit in @p ref to say anything (a blank
+ * reference is no reference). Both buffers w x h, same stride. */
+#define CLOUDS_HOLE_PCT 30
+static inline bool clouds_frame_holes(const uint16_t *f, const uint16_t *ref,
+                                      int w, int h, int stride_px)
+{
+    if (f == NULL || ref == NULL || w <= 0 || h <= 0) return false;
+    if (stride_px < w) stride_px = w;
+    uint32_t n = 0, lit = 0, hole = 0;
+    for (int y = 0; y < h; y += CLOUDS_BLANK_STEP) {
+        const uint16_t *fr = f   + (size_t)y * (size_t)stride_px;
+        const uint16_t *rr = ref + (size_t)y * (size_t)stride_px;
+        for (int x = 0; x < w; x += CLOUDS_BLANK_STEP) {
+            n++;
+            uint16_t v = rr[x];
+            bool is_lit = (v >> 11) >= 3 || ((v >> 5) & 0x3F) >= 6 || (v & 0x1F) >= 3;
+            if (!is_lit) continue;
+            lit++;
+            if (fr[x] == 0x0000u) hole++;
+        }
+    }
+    if (lit * 20u < n) return false;
+    return hole * 100u > lit * (uint32_t)CLOUDS_HOLE_PCT;
+}
 
 static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h,
                                            int stride_px, uint8_t ch)
@@ -449,7 +481,14 @@ static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h,
         const uint16_t *row = rgb565 + (size_t)y * (size_t)stride_px;
         for (int x = 0; x < w; x += CLOUDS_BLANK_STEP) {
             n++;
-            if (row[x] == 0x0000u) black++;
+            /* NEAR black (every channel < 24, i.e. R5 < 3, G6 < 6, B5 < 3),
+             * not exactly 0x0000: the P4 hardware JPEG path crushes dark
+             * values to 0 where stb keeps 1-3, so an exact-zero test read a
+             * real night frame as 7-8 % black on HW vs <1 % on stb and the
+             * thresholds flipped with the decoder. Both decoders agree on
+             * "below 24". */
+            uint16_t v = row[x];
+            if ((v >> 11) < 3 && ((v >> 5) & 0x3F) < 6 && (v & 0x1F) < 3) black++;
         }
     }
     return black * 100u > n * (uint32_t)clouds_channel(ch)->blank_pct;

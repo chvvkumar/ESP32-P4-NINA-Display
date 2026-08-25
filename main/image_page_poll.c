@@ -547,15 +547,33 @@ static bool anim_frame_url(image_page_t *p, const app_config_t *cfg, const char 
  * is not held, so the existing paths re-fetch it on the next poll (times[0]/[1]
  * every poll; older slots via retry_backfill). Not a failure: no caption, no
  * toast, no spine backoff. Radar (and a NULL frame) always returns false. */
+static uint32_t anim_stamp(image_page_t *p, int i);
+/* image_page_ring_with_neighbour adapter: @p arg is the fresh image_frame_t. */
+static bool clouds_holes_cb(const uint16_t *ref, int w, int h, void *arg)
+{
+    const image_frame_t *f = arg;
+    if (w != f->w || h != f->h) return false;
+    return clouds_frame_holes((const uint16_t *)f->buf, ref, w, h, w);
+}
+
 static bool clouds_drop_incomplete(image_page_t *p, const app_config_t *cfg,
                                    image_frame_t *f, uint8_t **src, int i)
 {
     if (p->src != IMG_SRC_CLOUDS || f->buf == NULL) return false;
-    if (!clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w,
-                                 cfg->clouds_channel)) return false;
     anim_state_t *a = &s_anim[p->src];
-    ESP_LOGI(TAG, "clouds: slot %s incomplete, will retry",
-             (i >= 0 && i < a->ntimes) ? a->times[i] : "?");
+    const char *why = NULL;
+    if (clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w,
+                                cfg->clouds_channel)) {
+        why = "blank";
+    } else if (image_page_ring_with_neighbour(p, anim_stamp(p, i), clouds_holes_cb, f)) {
+        /* Missing tiles: exactly black here, lit in the neighbouring frame.
+         * Seen after a channel change, when the whole ring is fetched fresh and
+         * the newest slots are still being ingested. */
+        why = "has missing tiles";
+    }
+    if (why == NULL) return false;
+    ESP_LOGI(TAG, "clouds: slot %s %s, will retry",
+             (i >= 0 && i < a->ntimes) ? a->times[i] : "?", why);
     heap_caps_free(f->buf);
     f->buf = NULL;
     if (*src) {
@@ -607,6 +625,47 @@ static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const cha
  * attempt per stamp per poll). */
 #define RADAR_BACKFILL_GAP_MS 1000
 
+/* Transient PSRAM one frame decode needs on top of the frame itself: the stb
+ * software path holds an RGB888 buffer (~1.55 MB) plus the RGB565 output
+ * (~1.04 MB) at the same time. The hardware JPEG path needs only the latter;
+ * the conservative figure is the one that has to hold. */
+#define ANIM_DECODE_TRANSIENT_BYTES ((size_t)2600 * 1024)
+
+/* PSRAM headroom for one more animated frame, and the ONE place the ring is
+ * allowed to shrink. Without it the ring grows until the largest free block no
+ * longer fits a decode; the decode then fails every poll, the spine backs off,
+ * and the newest frame never updates again while the old ones keep animating.
+ *
+ * @p newest true = the frame the page exists to show: evict one frame from the
+ * oldest end when the decode would not fit, and attempt it regardless (if it
+ * still fails the existing backoff applies). false = an optional history frame:
+ * check only, never evict — freeing history to fetch history just re-fills the
+ * slot, and every extra download is radio time this panel pays for.
+ * ponytail: `need` is the stb worst case (3.64 MB); the HW JPEG path needs
+ * ~2.2 MB, so this can evict one frame more than strictly necessary. Tighten
+ * per source if a shorter loop is ever noticed on a healthy heap. */
+static bool anim_decode_headroom(image_page_t *p, bool newest)
+{
+    /* A panel-sized frame (clouds 720x720); radar frames are smaller, so this
+     * only ever errs toward more headroom. */
+    const size_t need = (size_t)SCREEN_SIZE * SCREEN_SIZE * 2 + ANIM_DECODE_TRANSIENT_BYTES;
+    if (!newest) {
+        if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= need) return true;
+        ESP_LOGW(TAG, "%s backfill stopped: PSRAM headroom", p->name);
+        return false;
+    }
+    /* At most ONE drop per poll: freed holes rarely coalesce into one block, so
+     * a loop could collapse a 10-frame ring in a single poll. If one drop is not
+     * enough the decode fails, the spine backs off, and the next poll drops the
+     * next frame; the ring converges over a few intervals instead of at once. */
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) < need &&
+        image_page_ring_drop_oldest(p)) {
+        ESP_LOGI(TAG, "%s ring: dropped oldest frame for decode headroom, %d left",
+                 p->name, image_page_ring_count(p));
+    }
+    return true;
+}
+
 static void anim_backfill(image_page_t *p, const app_config_t *cfg, int first)
 {
     int cap = image_page_ring_capacity(p);
@@ -657,6 +716,10 @@ static void anim_backfill(image_page_t *p, const app_config_t *cfg, int first)
          * under the settings that just won. Safe to call from here: it runs on
          * this task, and no insert is in flight at this point in the loop. */
         image_page_ring_retransform_if_requested(p);
+
+        /* Optional history frame: only fetch it if its decode can actually land
+         * (one WARN per backfill attempt, and polls are interval-spaced). */
+        if (!anim_decode_headroom(p, false)) break;
 
         if (!anim_fetch_index(p, cfg, token, i, gen)) {
             ESP_LOGW(TAG, "%s backfill stopped at frame %d", p->name, i);
@@ -737,6 +800,10 @@ static bool net_poll_once(void *arg)
      * must not persist config). Radar only; "" for the others. */
     char token[16] = "";
     if (p->src == IMG_SRC_RADAR) image_page_radar_token(cfg, token, sizeof(token));
+    /* Make room for THIS decode before taking the fetch gate (the drop takes the
+     * display lock, which must never be held under the gate). The newest frame
+     * is attempted either way; the ring gives up its oldest slots to let it. */
+    if (animated) anim_decode_headroom(p, true);
     /* Serialize the fetch+decode across the six pollers (see s_fetch_gate).
      * A page that was left/un-warmed while we waited needs no extra test here:
      * image_page_commit_frame() retains the frame either way, and the resident

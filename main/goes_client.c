@@ -218,7 +218,10 @@ static esp_err_t fetch_image_into(const char *url, const char *label, image_fram
      * asks automated clients to identify themselves and Iowa Environmental
      * Mesonet blocks anonymous ones outright. extra_header stays free for the
      * caller's optional credential line (the Custom Image page's user-supplied
-     * "Name: value" header); NULL/empty means no extra header at all. */
+     * "Name: value" header); NULL/empty means no extra header at all.
+     * shrink_to_fit: a chunked response (GIBS) has no Content-Length, so the
+     * buffer is sized at the full max_size cap; without the shrink the frame
+     * ring would retain a 1 MiB allocation per slot for a ~120 KB image. */
     const http_fetch_binary_opts_t bopts = {
         .timeout_ms = GOES_HTTP_TIMEOUT_MS,
         .use_tls_bundle = true,
@@ -227,6 +230,7 @@ static esp_err_t fetch_image_into(const char *url, const char *label, image_fram
         .tx_buffer_size = 1024,
         .max_size = GOES_JPEG_MAX_SIZE,
         .oversize = HTTP_BIN_OVERSIZE_CLAMP,
+        .shrink_to_fit = true,
         .user_agent = "NINA-Display/1.0 (ESP32-P4 dashboard)",
         .extra_header = (auth_header && auth_header[0] != '\0') ? auth_header : NULL,
         .label = "image",
@@ -274,7 +278,7 @@ static esp_err_t fetch_image_into(const char *url, const char *label, image_fram
     uint8_t *rgb565 = NULL;
     uint32_t out_w = 0, out_h = 0;
     size_t out_size = 0;
-    bool decoded = jpeg_sw_decode_rgb565(jpeg_buf, total_read, &rgb565, &out_w, &out_h, &out_size);
+    bool decoded = jpeg_decode_rgb565(jpeg_buf, total_read, &rgb565, &out_w, &out_h, &out_size);
     if (out_src && decoded && rgb565) {
         *out_src     = jpeg_buf;              /* ownership moves to the caller */
         *out_src_len = (size_t)total_read;
