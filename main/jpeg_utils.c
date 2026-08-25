@@ -10,12 +10,151 @@
 #include "esp_log.h"
 #include "stb_image.h"
 #include "esp_cache.h"
+#include "freertos/FreeRTOS.h"
 #include <string.h>
 
 static const char *TAG = "jpeg_utils";
 
-/* PPA SRM client for hardware image scaling (lazy-initialized) */
+/* One PPA SRM client shared by every scaler here. max_pending_trans_num = 4:
+ * four tasks on two cores can be inside a blocking scaler at once (thumbnail
+ * zoom on the LVGL task, Spotify art, the image-page pollers, the moon drag
+ * loop) and ppa_do_scale_rotate_mirror() returns ESP_FAIL to any caller that
+ * cannot take a free transaction element (ppa_srm.c:307-310). */
+/* Largest SRM output block per axis the engine accepts without wedging (13-bit
+ * output field); ppa_core.c waits portMAX_DELAY and never sees the error. */
+#define PPA_SRM_OUT_MAX_PX 8191u
+
 static ppa_client_handle_t s_ppa_srm_client = NULL;
+static portMUX_TYPE s_ppa_srm_mux = portMUX_INITIALIZER_UNLOCKED;
+
+/* The single registration site. Registration happens OUTSIDE the spinlock (it
+ * allocates and creates a queue); the loser of a first-call race unregisters
+ * its own handle instead of leaking it. */
+static ppa_client_handle_t ppa_srm_client_ensure(void)
+{
+    portENTER_CRITICAL(&s_ppa_srm_mux);
+    ppa_client_handle_t h = s_ppa_srm_client;
+    portEXIT_CRITICAL(&s_ppa_srm_mux);
+    if (h) return h;
+
+    ppa_client_config_t cfg = {
+        .oper_type = PPA_OPERATION_SRM,
+        .max_pending_trans_num = 4,
+    };
+    ppa_client_handle_t mine = NULL;
+    if (ppa_register_client(&cfg, &mine) != ESP_OK || !mine) {
+        ESP_LOGE(TAG, "PPA SRM client registration failed");
+        return NULL;
+    }
+
+    portENTER_CRITICAL(&s_ppa_srm_mux);
+    if (!s_ppa_srm_client) {
+        s_ppa_srm_client = mine;
+        mine = NULL;
+    }
+    h = s_ppa_srm_client;
+    portEXIT_CRITICAL(&s_ppa_srm_mux);
+
+    if (mine) ppa_unregister_client(mine);   /* lost the race */
+    return h;
+}
+
+/* One PPA Blend client, registered the same lazy way as the SRM one above.
+ * max_pending_trans_num = 2: the image pages' playback dissolve runs on the
+ * LVGL task and is the only caller today; the spare slot keeps a second caller
+ * from being refused outright (ppa_blend.c returns ESP_FAIL when the client has
+ * no free transaction element). */
+static ppa_client_handle_t s_ppa_blend_client = NULL;
+static portMUX_TYPE s_ppa_blend_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static ppa_client_handle_t ppa_blend_client_ensure(void)
+{
+    portENTER_CRITICAL(&s_ppa_blend_mux);
+    ppa_client_handle_t h = s_ppa_blend_client;
+    portEXIT_CRITICAL(&s_ppa_blend_mux);
+    if (h) return h;
+
+    ppa_client_config_t cfg = {
+        .oper_type = PPA_OPERATION_BLEND,
+        .max_pending_trans_num = 2,
+    };
+    ppa_client_handle_t mine = NULL;
+    if (ppa_register_client(&cfg, &mine) != ESP_OK || !mine) {
+        ESP_LOGE(TAG, "PPA blend client registration failed");
+        return NULL;
+    }
+
+    portENTER_CRITICAL(&s_ppa_blend_mux);
+    if (!s_ppa_blend_client) {
+        s_ppa_blend_client = mine;
+        mine = NULL;
+    }
+    h = s_ppa_blend_client;
+    portEXIT_CRITICAL(&s_ppa_blend_mux);
+
+    if (mine) ppa_unregister_client(mine);   /* lost the race */
+    return h;
+}
+
+void jpeg_utils_ppa_init(void)
+{
+    if (ppa_srm_client_ensure()) {
+        ESP_LOGI(TAG, "PPA SRM client registered (4 pending transactions)");
+    }
+    if (ppa_blend_client_ensure()) {
+        ESP_LOGI(TAG, "PPA blend client registered (2 pending transactions)");
+    }
+}
+
+esp_err_t ppa_blend_rgb565(const uint8_t *bg, const uint8_t *fg, uint8_t *out,
+                           uint32_t w, uint32_t h, uint8_t fg_alpha)
+{
+    if (!bg || !fg || !out) return ESP_ERR_INVALID_ARG;
+    /* A block of 0 or over 8191 px per axis raises an engine error the driver
+     * never services (no error IRQ; ppa_core.c waits portMAX_DELAY), so a
+     * blocking caller would hang forever. Refuse instead. */
+    if (w == 0 || h == 0 || w > PPA_SRM_OUT_MAX_PX || h > PPA_SRM_OUT_MAX_PX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    /* The driver checks the output ADDRESS and the declared buffer size against
+     * the cache line (128 B on this build); it cannot check the allocation, so
+     * the contract in the header says the caller owns that. */
+    if (((uintptr_t)out & 127u) != 0) return ESP_ERR_INVALID_ARG;
+    size_t need = (((size_t)w * h * 2) + 127) & ~(size_t)127;
+
+    ppa_client_handle_t client = ppa_blend_client_ensure();
+    if (!client) return ESP_ERR_INVALID_STATE;
+
+    /* RGB565 inputs have no alpha channel, so the hardware fills A = 255 for
+     * both. Leaving the FG at that would make the blend a plain copy of the FG
+     * (ppa.rst); PPA_ALPHA_FIX_VALUE is what turns it into
+     * out = bg*(1 - a) + fg*a with a = fg_alpha/255. */
+    ppa_blend_oper_config_t cfg = {
+        .in_bg = {
+            .buffer = bg,
+            .pic_w = w, .pic_h = h,
+            .block_w = w, .block_h = h,
+            .blend_cm = PPA_BLEND_COLOR_MODE_RGB565,
+        },
+        .in_fg = {
+            .buffer = fg,
+            .pic_w = w, .pic_h = h,
+            .block_w = w, .block_h = h,
+            .blend_cm = PPA_BLEND_COLOR_MODE_RGB565,
+        },
+        .out = {
+            .buffer = out,
+            .buffer_size = need,
+            .pic_w = w, .pic_h = h,
+            .blend_cm = PPA_BLEND_COLOR_MODE_RGB565,
+        },
+        .bg_alpha_update_mode = PPA_ALPHA_NO_CHANGE,
+        .fg_alpha_update_mode = PPA_ALPHA_FIX_VALUE,
+        .fg_alpha_fix_val = fg_alpha,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+    return ppa_do_blend(client, &cfg);
+}
 
 // =============================================================================
 // Software JPEG Decode Fallback (stb_image)
@@ -100,29 +239,31 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
         return false;
     }
 
-    /* Convert RGB888 to standard RGB565 (R high, B low) — same in-memory layout
-     * the HW decoder produces, which the panel/LVGL pipeline renders correctly. */
-    uint16_t *dst = (uint16_t *)rgb565;
+    /* Convert RGB888 to standard RGB565 (R high, B low) -- same in-memory layout
+     * the HW decoder produces, which the panel/LVGL pipeline renders correctly.
+     * The PPA does the whole picture in one DMA pass; the loop below is the
+     * fallback for when the hardware refuses it. */
+    if (!ppa_rgb888_to_rgb565(rgb, ow, oh, rgb565, buf_sz)) {
+        uint16_t *dst = (uint16_t *)rgb565;
 
-    for (int y = 0; y < h; y++) {
-        const uint8_t *src_row = rgb + y * w * 3;
-        uint16_t *dst_row = dst + y * ow;
-        for (int x = 0; x < w; x++) {
-            uint8_t r = src_row[x * 3 + 0];
-            uint8_t g = src_row[x * 3 + 1];
-            uint8_t b = src_row[x * 3 + 2];
-            /* Standard RGB565 (R high, B low). This matches the in-memory layout
-             * the panel/LVGL pipeline expects — the same result the HW decoder
-             * produces with JPEG_DEC_RGB_ELEMENT_ORDER_BGR. Packing B into the
-             * high bits here swaps red and blue (sodium lights render blue). */
-            dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+        for (int y = 0; y < h; y++) {
+            const uint8_t *src_row = rgb + y * w * 3;
+            uint16_t *dst_row = dst + y * ow;
+            for (int x = 0; x < w; x++) {
+                uint8_t r = src_row[x * 3 + 0];
+                uint8_t g = src_row[x * 3 + 1];
+                uint8_t b = src_row[x * 3 + 2];
+                /* Standard RGB565 (R high, B low). This matches the in-memory
+                 * layout the panel/LVGL pipeline expects -- the same result the
+                 * HW decoder produces with JPEG_DEC_RGB_ELEMENT_ORDER_BGR.
+                 * Packing B into the high bits here swaps red and blue (sodium
+                 * lights render blue). */
+                dst_row[x] = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+            }
         }
     }
 
     stbi_image_free(rgb);
-
-    /* Flush CPU cache to PSRAM so PPA DMA reads correct data */
-    esp_cache_msync(rgb565, buf_sz, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
     *out_buf = rgb565;
     *out_w = ow;
@@ -200,12 +341,17 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
     uint32_t w = 0, h = 0;
     uint8_t nf = 0, hi0 = 0, vi0 = 0;
     if (!jpeg_scan_sof0(jpg, len, &w, &h, &nf, &hi0, &vi0)) return ESP_ERR_NOT_SUPPORTED;
-    /* Single-component JPEG: the HW only decodes it to GRAY8, and converting
-     * that to RGB565 is work stb already does for us in one pass. The HW
-     * accepts exactly 4:4:4 (1x1), 4:2:2 (2x1) and 4:2:0 (2x2) for 3 components
-     * (jpeg_decode.c get_info switch); anything else goes to stb. */
-    if (nf != 3) return ESP_ERR_NOT_SUPPORTED;
-    if (!((hi0 == 1 && vi0 == 1) || (hi0 == 2 && vi0 == 1) || (hi0 == 2 && vi0 == 2))) {
+    /* Single-component JPEG decodes to GRAY8 and is expanded to RGB565 below --
+     * far cheaper than handing a 3-6 MP mono camera frame to stb. For 3
+     * components the HW accepts exactly 4:4:4 (1x1), 4:2:2 (2x1) and 4:2:0
+     * (2x2) (jpeg_decode.c get_info switch); anything else goes to stb. */
+    const bool is_gray = (nf == 1);
+    if (nf == 2) return ESP_ERR_NOT_SUPPORTED;
+    if (is_gray) {
+        /* Any sane sampling factor: the pad below only needs hi0/vi0 non-zero. */
+        if (hi0 < 1 || hi0 > 4 || vi0 < 1 || vi0 > 4) return ESP_ERR_NOT_SUPPORTED;
+    } else if (!((hi0 == 1 && vi0 == 1) || (hi0 == 2 && vi0 == 1) ||
+                 (hi0 == 2 && vi0 == 2))) {
         return ESP_ERR_NOT_SUPPORTED;
     }
     if ((w * h) % 8 != 0) return ESP_ERR_NOT_SUPPORTED;   /* driver's own SOF check */
@@ -227,7 +373,8 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
         .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
     };
     size_t alloc_size = 0;
-    uint8_t *buf = jpeg_alloc_decoder_mem((size_t)pad_w * pad_h * 2, &mem_cfg, &alloc_size);
+    uint8_t *buf = jpeg_alloc_decoder_mem((size_t)pad_w * pad_h * (is_gray ? 1 : 2),
+                                          &mem_cfg, &alloc_size);
     if (!buf) return ESP_ERR_NO_MEM;
 
     jpeg_decoder_handle_t decoder = NULL;
@@ -250,7 +397,8 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
     /* BGR element order gives the same in-memory RGB565 layout the SW path
      * produces (R high, B low) -- see the packing comment above. */
     jpeg_decode_cfg_t decode_cfg = {
-        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+        .output_format = is_gray ? JPEG_DECODE_OUT_FORMAT_GRAY
+                                 : JPEG_DECODE_OUT_FORMAT_RGB565,
         .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
     };
     uint32_t decoded_size = 0;
@@ -266,7 +414,7 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
      * output. Confirmed 2026-08-24 on dash4: the HW colour conversion crushes
      * dark values to 0 (7-8 % of a night GeoColor frame vs <1 % from stb),
      * which is why clouds_frame_incomplete() tests NEAR black. Debug only. */
-    {
+    if (!is_gray) {
         const uint16_t *px = (const uint16_t *)buf;
         uint32_t n = 0, z = 0;
         for (uint32_t y = 0; y < h; y += 8) {
@@ -280,6 +428,32 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
                  px[(size_t)(h / 2) * pad_w + w / 2]);
     }
 
+    /* GRAY8 -> RGB565 into a tight w*h*2 buffer (the padded GRAY8 one is freed),
+     * using the same grey expansion the thumbnail path uses. */
+    if (is_gray) {
+        size_t rgb_sz = (((size_t)w * h * 2) + 127) & ~(size_t)127;
+        uint8_t *rgb = heap_caps_aligned_calloc(128, 1, rgb_sz, MALLOC_CAP_SPIRAM);
+        if (!rgb) {
+            heap_caps_free(buf);
+            return ESP_ERR_NO_MEM;
+        }
+        uint16_t *d = (uint16_t *)rgb;
+        for (uint32_t y = 0; y < h; y++) {
+            const uint8_t *srow = buf + (size_t)y * pad_w;
+            uint16_t *drow = d + (size_t)y * w;
+            for (uint32_t x = 0; x < w; x++) {
+                uint8_t g = srow[x];
+                drow[x] = (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3));
+            }
+        }
+        heap_caps_free(buf);
+        *out_buf = rgb;
+        *out_w = w;
+        *out_h = h;
+        *out_size = rgb_sz;
+        return ESP_OK;
+    }
+
     /* Callers expect tightly packed w*h*2 rows, so drop the MCU pad in place.
      * Destination row y starts at or before source row y, and we walk top-down,
      * so no row is overwritten before it is copied. */
@@ -291,11 +465,9 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
         }
     }
 
-    /* The driver invalidated after the transfer, so the CPU (blank-frame check,
-     * the repack above, LVGL's software renderer) reads PSRAM, not stale lines.
-     * If we repacked, write those CPU rows back so the PPA scaler's DMA sees
-     * them; a no-op when nothing was repacked. */
-    if (pad_w != w) esp_cache_msync(buf, alloc_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    /* No write-back here: the CPU readers (blank-frame check, LVGL's software
+     * renderer) go through the cache, and the PPA scalers' driver C2Ms its own
+     * input window before every transfer (ppa_srm.c:250). */
 
     *out_buf = buf;
     *out_w = w;
@@ -335,18 +507,8 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
     if (!src || src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0) return NULL;
     if (src_stride == 0) src_stride = src_w;
 
-    /* Lazy-init PPA SRM client */
-    if (!s_ppa_srm_client) {
-        ppa_client_config_t cfg = {
-            .oper_type = PPA_OPERATION_SRM,
-            .max_pending_trans_num = 1,
-        };
-        if (ppa_register_client(&cfg, &s_ppa_srm_client) != ESP_OK) {
-            ESP_LOGE(TAG, "PPA SRM client registration failed");
-            return NULL;
-        }
-        ESP_LOGI(TAG, "PPA SRM client registered for image scaling");
-    }
+    ppa_client_handle_t client = ppa_srm_client_ensure();
+    if (!client) return NULL;
 
     /* Output buffer: 128-byte aligned address and size (L2 cache line requirement) */
     size_t buf_size = dst_w * dst_h * 2;  /* RGB565 = 2 bytes/pixel */
@@ -357,6 +519,10 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
         ESP_LOGE(TAG, "Failed to allocate %zu bytes for PPA output", buf_size);
         return NULL;
     }
+    /* Write the CPU's zero lines back before the driver's M2C invalidate of the
+     * output window (ppa_srm.c:256) discards them and they later evict onto the
+     * DMA'd pixels -- the hazard the HW JPEG path proved live on dash4. */
+    esp_cache_msync(dst, buf_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
     float scale_x = (float)dst_w / (float)src_w;
     float scale_y = (float)dst_h / (float)src_h;
@@ -389,7 +555,22 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
         .mode = PPA_TRANS_MODE_BLOCKING,
     };
 
-    esp_err_t err = ppa_do_scale_rotate_mirror(s_ppa_srm_client, &srm);
+    {
+        /* Same engine-hang guard as ppa_srm_rgb565(): the driver truncates the
+         * scale to 1/16 steps, so predict the written block the way it does. */
+        float sx16 = (float)((uint32_t)(scale_x * 16.0f)) / 16.0f;
+        float sy16 = (float)((uint32_t)(scale_y * 16.0f)) / 16.0f;
+        uint32_t ow = (uint32_t)(sx16 * (float)src_w), oh = (uint32_t)(sy16 * (float)src_h);
+        if (ow == 0 || oh == 0 || ow > PPA_SRM_OUT_MAX_PX || oh > PPA_SRM_OUT_MAX_PX) {
+            ESP_LOGE(TAG, "PPA scale %lux%lu -> %lux%lu refused: output block %lux%lu",
+                     (unsigned long)src_w, (unsigned long)src_h,
+                     (unsigned long)dst_w, (unsigned long)dst_h,
+                     (unsigned long)ow, (unsigned long)oh);
+            free(dst);
+            return NULL;
+        }
+    }
+    esp_err_t err = ppa_do_scale_rotate_mirror(client, &srm);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "PPA scale %lux%lu -> %lux%lu failed: %s",
                  (unsigned long)src_w, (unsigned long)src_h,
@@ -410,6 +591,164 @@ uint8_t *ppa_scale_rgb565(const uint8_t *src, uint32_t src_w, uint32_t src_h,
                  (unsigned long)dst_w, (unsigned long)dst_h, scale_x);
     }
     return dst;
+}
+
+bool ppa_rgb888_to_rgb565(const uint8_t *rgb888, uint32_t w, uint32_t h,
+                          uint8_t *dst565, size_t dst_size)
+{
+    if (!rgb888 || !dst565 || w == 0 || h == 0) return false;
+    /* 2D-DMA descriptor fields are 14-bit; a wider picture would silently
+     * truncate, so hand those to the software loop instead. */
+    if (w > PPA_SRM_OUT_MAX_PX || h > PPA_SRM_OUT_MAX_PX) return false;  /* see ppa_srm_rgb565 */
+    /* The driver rejects an unaligned output address or size outright
+     * (ppa_srm.c:178-181); check here so the fallback runs without an ERROR. */
+    if (((uintptr_t)dst565 & 127u) != 0 || (dst_size & 127u) != 0) return false;
+    if ((size_t)w * h * 2 > dst_size) return false;
+
+    ppa_client_handle_t client = ppa_srm_client_ensure();
+    if (!client) return false;
+
+    /* Same dirty-zero-line write-back as the scalers above: the caller's buffer
+     * came from a calloc and the driver only invalidates the output window. */
+    esp_cache_msync(dst565, dst_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
+    ppa_srm_oper_config_t srm = {
+        .in = {
+            .buffer = rgb888,
+            .pic_w = w,
+            .pic_h = h,
+            .block_w = w,
+            .block_h = h,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB888,
+        },
+        .out = {
+            .buffer = dst565,
+            .buffer_size = dst_size,
+            .pic_w = w,
+            .pic_h = h,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
+        .scale_x = 1.0f,
+        .scale_y = 1.0f,
+        /* Byte order. hal/color_types.h:187-194 lays out the PPA's RGB888 pixel
+         * as b,g,r -- byte 0 is BLUE -- while stb writes r,g,b, so the input
+         * triplet needs the swap (ppa.h:174 "RGB becomes BGR"). The RGB565
+         * output word is (r<<11)|(g<<5)|b (color_types.h:199-206), which is
+         * exactly what the software pack and the HW JPEG BGR path produce, so
+         * no byte_swap and no change for LVGL. */
+        .rgb_swap = true,
+        .byte_swap = false,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+
+    return ppa_do_scale_rotate_mirror(client, &srm) == ESP_OK;
+}
+
+esp_err_t ppa_srm_rgb565(ppa_srm_job_t *job)
+{
+    if (!job || !job->src || !job->dst) return ESP_ERR_INVALID_ARG;
+    if (job->scale_n16 == 0 || job->src_stride_px == 0 || job->src_h == 0 ||
+        job->block_w == 0 || job->block_h == 0 ||
+        job->dst_w == 0 || job->dst_h == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (job->src_stride_px > 16383u || job->src_h > 16383u ||
+        job->dst_w > 16383u || job->dst_h > 16383u) {
+        return ESP_ERR_INVALID_ARG;   /* 2D-DMA descriptor fields are 14-bit */
+    }
+    /* Source block inside the source picture. */
+    if (job->block_x + job->block_w > job->src_stride_px ||
+        job->block_y + job->block_h > job->src_h) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t need = (((size_t)job->dst_w * job->dst_h * 2) + 127) & ~(size_t)127;
+    if (job->dst_buf_size < need) return ESP_ERR_INVALID_SIZE;
+
+    /* The driver enum counts COUNTER-clockwise (hal/ppa_types.h:29-32), the page
+     * convention is clockwise: 90 CW == 270 CCW, 270 CW == 90 CCW. */
+    static const ppa_srm_rotation_angle_t k_cw_to_ccw[4] = {
+        PPA_SRM_ROTATION_ANGLE_0,
+        PPA_SRM_ROTATION_ANGLE_270,
+        PPA_SRM_ROTATION_ANGLE_180,
+        PPA_SRM_ROTATION_ANGLE_90,
+    };
+    ppa_srm_rotation_angle_t angle = k_cw_to_ccw[job->rotate_cw & 3];
+
+    /* Exact 1/16 step, so scale_x_frag reproduces scale_n16 & 15 verbatim
+     * (ppa_srm.c:276-279) and out_w/out_h below are what the hardware writes. */
+    float scale = (float)job->scale_n16 / 16.0f;
+
+    uint32_t ow, oh;
+    if (angle == PPA_SRM_ROTATION_ANGLE_0 || angle == PPA_SRM_ROTATION_ANGLE_180) {
+        ow = (uint32_t)(scale * (float)job->block_w);
+        oh = (uint32_t)(scale * (float)job->block_h);
+    } else {
+        /* 90/270 swap the block axes (ppa_srm.c:215-222). */
+        ow = (uint32_t)(scale * (float)job->block_h);
+        oh = (uint32_t)(scale * (float)job->block_w);
+    }
+    if (job->dst_x + ow > job->dst_w || job->dst_y + oh > job->dst_h) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+    /* An output block of 0 or above 8191 px per axis makes the SRM engine raise
+     * an error the IDF driver never services (no error IRQ, portMAX_DELAY in
+     * ppa_core.c), so a blocking caller would hang forever. Refuse it here. */
+    if (ow == 0 || oh == 0 || ow > PPA_SRM_OUT_MAX_PX || oh > PPA_SRM_OUT_MAX_PX) {
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    ppa_client_handle_t client = ppa_srm_client_ensure();
+    if (!client) return ESP_ERR_INVALID_STATE;
+
+    if (job->clear_dst) {
+        memset(job->dst, 0, need);
+        /* Write those zero lines back before the driver's M2C invalidate of the
+         * output window discards them (see ppa_scale_rgb565). */
+        esp_cache_msync(job->dst, need, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+    }
+
+    /* mirror_x/mirror_y are the hardware's own bits (ppa_ll.h:176-190); the
+     * pages flip the upright image and THEN rotate. If the engine turns out to
+     * mirror AFTER rotating, swap hflip/vflip for rotate_cw 1 and 3 here -- a
+     * mirror before a 90-degree rotation is the opposite-axis mirror after it. */
+    ppa_srm_oper_config_t srm = {
+        .in = {
+            .buffer = job->src,
+            .pic_w = job->src_stride_px,
+            .pic_h = job->src_h,
+            .block_w = job->block_w,
+            .block_h = job->block_h,
+            .block_offset_x = job->block_x,
+            .block_offset_y = job->block_y,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .out = {
+            .buffer = job->dst,
+            .buffer_size = job->dst_buf_size,
+            .pic_w = job->dst_w,
+            .pic_h = job->dst_h,
+            .block_offset_x = job->dst_x,
+            .block_offset_y = job->dst_y,
+            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
+        },
+        .rotation_angle = angle,
+        .scale_x = scale,
+        .scale_y = scale,
+        .mirror_x = job->hflip,
+        .mirror_y = job->vflip,
+        .rgb_swap = false,
+        .byte_swap = false,
+        .mode = PPA_TRANS_MODE_BLOCKING,
+    };
+
+    esp_err_t err = ppa_do_scale_rotate_mirror(client, &srm);
+    if (err == ESP_OK) {
+        job->out_w = ow;
+        job->out_h = oh;
+    }
+    return err;
 }
 
 // =============================================================================
@@ -487,63 +826,41 @@ static uint8_t *ppa_scale_rgb565_into_core(const uint8_t *src, uint32_t src_w, u
     if (!src || !dst_buf || src_w == 0 || src_h == 0 || dst_w == 0 || dst_h == 0) return NULL;
     if (src_stride == 0) src_stride = src_w;
 
-    size_t needed = dst_w * dst_h * 2;
-    needed = (needed + 127) & ~(size_t)127;
+    size_t needed = ((size_t)dst_w * dst_h * 2 + 127) & ~(size_t)127;
     if (needed > dst_buf_size) {
         ESP_LOGE(TAG, "Pre-allocated buffer too small: need %zu, have %zu", needed, dst_buf_size);
         return NULL;
     }
 
-    /* Lazy-init PPA SRM client */
-    if (!s_ppa_srm_client) {
-        ppa_client_config_t cfg = {
-            .oper_type = PPA_OPERATION_SRM,
-            .max_pending_trans_num = 1,
-        };
-        if (ppa_register_client(&cfg, &s_ppa_srm_client) != ESP_OK) {
-            ESP_LOGE(TAG, "PPA SRM client registration failed");
-            return NULL;
-        }
-        ESP_LOGI(TAG, "PPA SRM client registered for image scaling");
+    /* One 1/16-step factor drives both axes. Every caller here scales
+     * isotropically (thumbnail zoom 2.0x = 32, moon drag 3.0x = 48); an
+     * anisotropic request is refused rather than silently squashed on one axis,
+     * and the callers already treat NULL as "no hardware scale". */
+    uint32_t n16_x = (uint32_t)(((float)dst_w / (float)src_w) * 16.0f);
+    uint32_t n16_y = (uint32_t)(((float)dst_h / (float)src_h) * 16.0f);
+    if (n16_x != n16_y || n16_x == 0 || n16_x > 255) {
+        ESP_LOGE(TAG, "PPA scale %lux%lu -> %lux%lu not a single n/16 factor (x=%lu y=%lu)",
+                 (unsigned long)src_w, (unsigned long)src_h,
+                 (unsigned long)dst_w, (unsigned long)dst_h,
+                 (unsigned long)n16_x, (unsigned long)n16_y);
+        return NULL;
     }
 
-    /* Zero the destination to clear any stale data. Skippable when the caller
-     * guarantees the transfer overwrites every output pixel (exact integer
-     * ratio), avoiding a ~1MB/frame memset in the moon drag path. */
-    if (clear_dst) memset(dst_buf, 0, needed);
-
-    float scale_x = (float)dst_w / (float)src_w;
-    float scale_y = (float)dst_h / (float)src_h;
-
-    ppa_srm_oper_config_t srm = {
-        .in = {
-            .buffer = src,
-            .pic_w = src_stride,
-            .pic_h = src_h,
-            .block_w = src_w,
-            .block_h = src_h,
-            .block_offset_x = 0,
-            .block_offset_y = 0,
-            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
-        },
-        .out = {
-            .buffer = dst_buf,
-            .buffer_size = needed,
-            .pic_w = dst_w,
-            .pic_h = dst_h,
-            .block_offset_x = 0,
-            .block_offset_y = 0,
-            .srm_cm = PPA_SRM_COLOR_MODE_RGB565,
-        },
-        .rotation_angle = PPA_SRM_ROTATION_ANGLE_0,
-        .scale_x = scale_x,
-        .scale_y = scale_y,
-        .rgb_swap = false,
-        .byte_swap = false,
-        .mode = PPA_TRANS_MODE_BLOCKING,
+    ppa_srm_job_t job = {
+        .src = src,
+        .src_stride_px = src_stride,
+        .src_h = src_h,
+        .block_w = src_w,
+        .block_h = src_h,
+        .dst = dst_buf,
+        .dst_buf_size = dst_buf_size,
+        .dst_w = dst_w,
+        .dst_h = dst_h,
+        .scale_n16 = (uint8_t)n16_x,
+        .clear_dst = clear_dst,
     };
 
-    esp_err_t err = ppa_do_scale_rotate_mirror(s_ppa_srm_client, &srm);
+    esp_err_t err = ppa_srm_rgb565(&job);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "PPA scale %lux%lu -> %lux%lu failed: %s",
                  (unsigned long)src_w, (unsigned long)src_h,

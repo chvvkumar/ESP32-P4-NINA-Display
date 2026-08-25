@@ -380,6 +380,24 @@ static void radar_frame_url(char *url, size_t sz, const char token[16], int fram
     snprintf(url, sz, "https://radar.weather.gov/ridge/standard/%s_%d.gif", token, frame);
 }
 
+/* Per-stamp HOLES-rejection tally. One entry per frame time the gate has
+ * rejected without that time having since been accepted; ANIM_HOLES_TRACK is 4
+ * because the poller has at most three stamps in flight (indices 0..2 are
+ * re-fetched every poll) plus one aging out, and the table is overwritten
+ * oldest-stamp-first when it fills.
+ *
+ * IT HAS TO BE PER STAMP. A single "last rejected stamp + count" cannot break a
+ * dusk latch at the default 900 s Clouds poll: three DIFFERENT stamps are
+ * rejected each poll (0, 1, 2), the sequence is S, S+1, S, S+2, S+1, S, ... so
+ * two consecutive rejections are never the same stamp, the count restarts every
+ * time and never reaches the bar. With its own entry each stamp reaches the bar
+ * on its own second rejection, which for index 1 or 2 is the very next poll. */
+typedef struct {
+    uint32_t stamp;
+    uint8_t  n;
+} anim_holes_t;
+#define ANIM_HOLES_TRACK 4
+
 /* Per-instance poller state for the ANIMATED sources (image_src_is_animated),
  * indexed by src; the single-frame sources' entries are never touched.
  *   last_push_ms  time of the last successful newest-frame push, so the
@@ -389,8 +407,12 @@ static void radar_frame_url(char *url, size_t sz, const char token[16], int fram
  *   stamps[]      the same list as UTC seconds for a source whose stamps are
  *                 parsed (Clouds; 0 for radar = unknown, hash-only dedupe);
  *   retry_backfill Clouds: a history slot was fetched but rejected as
- *                 incomplete (clouds_drop_incomplete), so run the backfill
+ *                 incomplete (anim_drop_incomplete), so run the backfill
  *                 again on the next poll even without an activation request.
+ *   holes[]       small per-stamp rejection table (see ANIM_HOLES_TRACK), so a
+ *                 rejection cannot latch;
+ *   judged_stamp  the head stamp anim_rejudge_head() has already acted on, so
+ *                 the re-judge drops a given frame at most once.
  * Touched only by that page's poll task (net_poll_once and anim_backfill run on
  * it sequentially). File-scope on purpose: the string table is 320 B per source
  * and does not belong on the 12288 B poller stack. */
@@ -400,6 +422,8 @@ typedef struct {
     char     times[RADAR_WMS_TIMES_MAX][RADAR_WMS_TIME_MAX];
     uint32_t stamps[RADAR_WMS_TIMES_MAX];
     bool     retry_backfill;
+    anim_holes_t holes[ANIM_HOLES_TRACK];
+    uint32_t judged_stamp;
 } anim_state_t;
 static anim_state_t s_anim[IMG_SRC_COUNT];
 /* The ring indexes stamps[]/times[] up to its capacity, so the two times lists
@@ -439,6 +463,30 @@ static bool anim_fetch_small(const char *url, size_t cap, char **body, size_t *l
     return http_fetch_text(url, &opts, body, len) == ESP_OK;
 }
 
+/* One advertised WMS TIME -> UTC seconds, 0 when it is not a time we trust.
+ * NCEP writes milliseconds ("2026-08-17T20:50:22.000Z"), which the strict
+ * clouds_time_parse() rejects on the trailing junk after the seconds; drop the
+ * fraction and re-terminate rather than grow a second ISO parser. Everything
+ * else — the calendar, the range checks, the bare-date rejection — stays in the
+ * one host-tested helper (clouds_wms.h). */
+static uint32_t radar_wms_time_stamp(const char *t)
+{
+    char buf[RADAR_WMS_TIME_MAX];
+    size_t n = strlen(t);
+    const char *dot = memchr(t, '.', n);
+    if (dot != NULL) {
+        size_t keep = (size_t)(dot - t);
+        if (keep + 2 > sizeof(buf)) return 0;
+        memcpy(buf, t, keep);
+        buf[keep]     = 'Z';
+        buf[keep + 1] = '\0';
+        t = buf;
+        n = keep + 1;
+    }
+    uint32_t s = 0;
+    return clouds_time_parse(t, n, &s) ? s : 0;
+}
+
 /* Refresh the radar times list from the namespace-scoped GetCapabilities
  * document (styles 1/2). Blind time stepping does not work (the newest frame
  * lags wall clock by a variable amount and out-of-range TIME returns a valid
@@ -463,7 +511,23 @@ static void radar_wms_refresh_times(anim_state_t *a, const char *token)
     }
     a->ntimes = radar_wms_parse_times(body, len, layer, a->times, RADAR_WMS_TIMES_MAX);
     heap_caps_free(body);
-    memset(a->stamps, 0, sizeof(a->stamps));   /* radar stamps stay unknown */
+    /* Real stamps for styles 1/2: they are what puts a radar frame on the ring's
+     * stamped path (insert by time, same-stamp replace when a partly rendered
+     * mosaic heals), what makes the partial-frame gates able to find a
+     * neighbour, and what puts the frame's OWN time in the caption instead of
+     * the wall clock. ALL OR NOTHING: one unparsable entry zeroes the list, so a
+     * ring is never half stamped (an unstamped slot sorts to the oldest end and
+     * would reorder the loop). A site whose caps advertise no list (KHDC) keeps
+     * ntimes 0 and shows its single newest frame unstamped, exactly as before. */
+    memset(a->stamps, 0, sizeof(a->stamps));
+    for (int i = 0; i < a->ntimes; i++) {
+        a->stamps[i] = radar_wms_time_stamp(a->times[i]);
+        if (a->stamps[i] == 0) {
+            ESP_LOGW(TAG, "unparsable radar time \"%s\"; stamps off for %s", a->times[i], token);
+            memset(a->stamps, 0, sizeof(a->stamps));
+            break;
+        }
+    }
     if (a->ntimes == 0) ESP_LOGW(TAG, "no advertised radar times for %s; newest only", token);
 }
 
@@ -539,40 +603,124 @@ static bool anim_frame_url(image_page_t *p, const app_config_t *cfg, const char 
     return radar_wms_url_for(url, sz, cfg, token, a->ntimes > 0 ? a->times[i] : NULL);
 }
 
-/* Clouds only: GIBS answers 200 for a slot it has not finished ingesting (the
- * borders overlay over black, or black tile blocks), and such a frame must never
- * reach the ring. Tests the raw decoded pixels (clouds_frame_incomplete); on a
- * hit frees the frame and its retained source exactly as a failed decode is
- * freed, logs once, and returns true so the caller skips the insert. The stamp
- * is not held, so the existing paths re-fetch it on the next poll (times[0]/[1]
- * every poll; older slots via retry_backfill). Not a failure: no caption, no
- * toast, no spine backoff. Radar (and a NULL frame) always returns false. */
+/* A WMS origin answers 200 for a TIME it advertises but has not finished
+ * rendering (the vector overlay over black, or black tile rectangles), and such
+ * a frame must never reach the ring. Tests the raw decoded pixels; on a hit
+ * frees the frame and its retained source exactly as a failed decode is freed,
+ * logs once, and returns true so the caller skips the insert. The stamp is not
+ * held, so the existing paths re-fetch it on the next poll (times[0]/[1] every
+ * poll; older slots via retry_backfill). Not a failure: no caption, no toast,
+ * no spine backoff.
+ *
+ * Applies to Clouds (GIBS) and to radar styles 1/2 (NCEP GeoServer), which can
+ * serve a partly rendered mosaic for the same structural reason. Two gates:
+ *   - BLANK (clouds_frame_incomplete, > blank_pct near black): Clouds only. A
+ *     styles-1/2 radar frame is state lines on black BY DESIGN and sits at
+ *     94-98 % near black with no precipitation on it, so this gate would reject
+ *     every good radar frame. Radar is gated on holes only.
+ *   - HOLES (clouds_frame_holes, per cell vs the neighbouring frame): both. Its
+ *     per-cell lit floor means it can only speak about cells the neighbour
+ *     actually lit, so on a line-only radar map it stays quiet unless real
+ *     reflectivity vanished -- quiet is the correct answer there.
+ * Radar style 0 (one RIDGE _i.gif still, not a tile mosaic) and a NULL frame
+ * always return false. */
 static uint32_t anim_stamp(image_page_t *p, int i);
-/* image_page_ring_with_neighbour adapter: @p arg is the fresh image_frame_t. */
-static bool clouds_holes_cb(const uint16_t *ref, int w, int h, void *arg)
+/* image_page_ring_with_neighbour / _judge_head adapter: @p arg is the frame
+ * UNDER TEST (the fresh one at insert, a view of the head slot at re-judge). */
+static bool anim_holes_cb(const uint16_t *ref, int w, int h, void *arg)
 {
     const image_frame_t *f = arg;
     if (w != f->w || h != f->h) return false;
     return clouds_frame_holes((const uint16_t *)f->buf, ref, w, h, w);
 }
 
-static bool clouds_drop_incomplete(image_page_t *p, const app_config_t *cfg,
-                                   image_frame_t *f, uint8_t **src, int i)
+/* The sources whose frames the partial-frame gates judge. */
+static inline bool anim_partial_gated(const image_page_t *p, const app_config_t *cfg)
 {
-    if (p->src != IMG_SRC_CLOUDS || f->buf == NULL) return false;
+    return p->src == IMG_SRC_CLOUDS ||
+           (p->src == IMG_SRC_RADAR && cfg->radar_map_style != 0);
+}
+
+/* Consecutive HOLES rejections of one stamp after which it is accepted anyway.
+ *
+ * WITHOUT THIS BOUND A DUSK FALSE POSITIVE LATCHES THE PAGE. The holes rule
+ * fires when a cell's ref-lit samples go near black, and a rural or ocean cell
+ * crossing the terminator does exactly that legitimately (at zoom 7 the
+ * crossing band is ~1.5 cells per 10-minute step). A rejected frame never
+ * enters the ring, so the reference stays the pre-dusk frame and every later
+ * stamp is judged against it and rejected too — the loop would freeze one frame
+ * behind until the page is left or dawn re-lights the cell.
+ *
+ * 2 is the right bar because the two failure modes have different lifetimes: a
+ * genuinely partial origin slot completes within 10-20 minutes, so a SECOND
+ * fetch of the same stamp still showing holes is far more likely a real scene
+ * change than a still-missing tile. If it was partial after all, the head
+ * re-judge (anim_rejudge_head) and the newest-three re-fetch still repair it.
+ * The blank gate has no such bound: a blank slot is unambiguous. */
+#define ANIM_HOLES_MAX_REJECTS 2
+
+/* Count one HOLES rejection of @p stamp and return its running total. A stamp
+ * with no entry takes a free slot, or evicts the entry with the OLDEST stamp:
+ * that is the one the poller can no longer re-fetch (only indices 0..2 are
+ * retried), so its tally can never grow again. */
+static uint8_t anim_holes_bump(anim_state_t *a, uint32_t stamp)
+{
+    int free_i = -1, oldest = 0;
+    for (int k = 0; k < ANIM_HOLES_TRACK; k++) {
+        if (a->holes[k].stamp == stamp) {
+            if (a->holes[k].n < 255) a->holes[k].n++;
+            return a->holes[k].n;
+        }
+        if (a->holes[k].stamp == 0 && free_i < 0) free_i = k;
+        if (a->holes[k].stamp < a->holes[oldest].stamp) oldest = k;
+    }
+    int k = (free_i >= 0) ? free_i : oldest;
+    a->holes[k].stamp = stamp;
+    a->holes[k].n = 1;
+    return 1;
+}
+
+/* Forget @p stamp's rejection streak: it just passed the gate, so the streak is
+ * over and a later rejection starts from one again. */
+static void anim_holes_clear(anim_state_t *a, uint32_t stamp)
+{
+    if (stamp == 0) return;
+    for (int k = 0; k < ANIM_HOLES_TRACK; k++) {
+        if (a->holes[k].stamp == stamp) {
+            a->holes[k].stamp = 0;
+            a->holes[k].n = 0;
+            return;
+        }
+    }
+}
+
+static bool anim_drop_incomplete(image_page_t *p, const app_config_t *cfg,
+                                 image_frame_t *f, uint8_t **src, int i)
+{
+    if (!anim_partial_gated(p, cfg) || f->buf == NULL) return false;
+    bool clouds = (p->src == IMG_SRC_CLOUDS);
     anim_state_t *a = &s_anim[p->src];
     const char *why = NULL;
-    if (clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w,
-                                cfg->clouds_channel)) {
+    if (clouds && clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w,
+                                          cfg->clouds_channel)) {
         why = "blank";
-    } else if (image_page_ring_with_neighbour(p, anim_stamp(p, i), clouds_holes_cb, f)) {
-        /* Missing tiles: exactly black here, lit in the neighbouring frame.
-         * Seen after a channel change, when the whole ring is fetched fresh and
-         * the newest slots are still being ingested. */
+    } else if (image_page_ring_with_neighbour(p, anim_stamp(p, i), anim_holes_cb, f)) {
+        /* Missing tiles: a cell that is near black here and lit in the
+         * neighbouring frame. Seen after a channel change, and on the newest
+         * slot or two while the origin is still ingesting them. */
+        uint8_t n = anim_holes_bump(a, anim_stamp(p, i));
+        if (n >= ANIM_HOLES_MAX_REJECTS) {
+            ESP_LOGI(TAG, "%s: %s accepted after %u holes rejections (terminator?)",
+                     p->name, (i >= 0 && i < a->ntimes) ? a->times[i] : "?", (unsigned)n);
+            return false;                       /* entry kept: a later re-fetch of it stays accepted */
+        }
         why = "has missing tiles";
     }
-    if (why == NULL) return false;
-    ESP_LOGI(TAG, "clouds: slot %s %s, will retry",
+    if (why == NULL) {
+        anim_holes_clear(a, anim_stamp(p, i));  /* it passed: the streak is over */
+        return false;
+    }
+    ESP_LOGI(TAG, "%s: slot %s %s, will retry", p->name,
              (i >= 0 && i < a->ntimes) ? a->times[i] : "?", why);
     heap_caps_free(f->buf);
     f->buf = NULL;
@@ -605,12 +753,48 @@ static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const cha
         /* src is NULL on every error return (see image_fetch_custom_retain). */
         return false;
     }
-    if (clouds_drop_incomplete(p, cfg, &old, &src, i)) {
+    if (anim_drop_incomplete(p, cfg, &old, &src, i)) {
         s_anim[p->src].retry_backfill = true;
         return true;
     }
     image_page_ring_add(p, &old, false, gen, src, src_len, anim_stamp(p, i));
     return true;
+}
+
+/* Re-judge the ring's head (newest) slot once the ring has a settled neighbour
+ * to judge it against, and drop it if it is partial.
+ *
+ * WHY THE HEAD NEEDS ITS OWN PASS: every page entry frees the ring, so the
+ * newest frame — the one slot the origin is most likely to be still ingesting —
+ * goes into an EMPTY ring, where anim_drop_incomplete() can find no neighbour
+ * and waves it through. Nothing else ever looks at a frame again after it is
+ * inserted, so that unverified frame stays for its whole ~1 h life in the loop.
+ * Dropping it is enough to repair it: the stamp is no longer held, so the next
+ * poll's unconditional newest fetch re-downloads it and the ring's
+ * same-stamp/different-hash path installs the completed frame.
+ *
+ * AT MOST ONE DROP PER STAMP (judged_stamp). A check that keeps disagreeing
+ * with a genuine frame then costs one re-fetch rather than a drop-and-refetch
+ * loop for as long as that frame is newest; the counter is cleared on the next
+ * activation, where the ring is rebuilt from empty and the head is unjudged
+ * again. Runs on the page's poll task, where no insert is in flight, exactly
+ * like image_page_ring_retransform_if_requested(). Costs no network. */
+static void anim_rejudge_head(image_page_t *p, const app_config_t *cfg, uint32_t gen)
+{
+    anim_state_t *a = &s_anim[p->src];
+    if (!anim_partial_gated(p, cfg)) return;
+    if (image_page_ring_count(p) < 2) return;                    /* nothing to judge against */
+    if (radar_frame_is_stale(gen, image_page_ring_gen(p))) return;
+    uint32_t bad = image_page_ring_judge_head(p, anim_holes_cb);
+    if (bad == 0 || bad == a->judged_stamp) return;
+    a->judged_stamp = bad;                                       /* one attempt per stamp, hit or miss */
+    if (!image_page_ring_drop_stamp(p, bad)) return;
+    char ts[32];
+    if (!clouds_time_format(ts, sizeof(ts), bad)) strlcpy(ts, "?", sizeof(ts));
+    ESP_LOGI(TAG, "%s: head %s re-judged partial, dropped; refetch next poll", p->name, ts);
+    /* The freshness early-return in net_poll_once() keys off this: zeroing it
+     * removes any dependence on the ring also having become not-full. */
+    a->last_push_ms = 0;
 }
 
 /* Rebuild the history behind the newest frame after a page activation: fetch
@@ -630,6 +814,13 @@ static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const cha
  * (~1.04 MB) at the same time. The hardware JPEG path needs only the latter;
  * the conservative figure is the one that has to hold. */
 #define ANIM_DECODE_TRANSIENT_BYTES ((size_t)2600 * 1024)
+/* Cloud Cover frames are baseline JPEG and decode on the hardware engine: the
+ * decoder writes straight into the frame-sized buffer, so the only extra is the
+ * compressed download (~150-300 KB). 2.6 MB here was the stb figure, and with
+ * the three 1 MB playback scratch buffers resident it left the largest free
+ * block (~3.3 MB on dash4) permanently under the bar: every optional fetch was
+ * refused, the newest slot was a GIBS blank, and the page froze on one frame. */
+#define ANIM_DECODE_TRANSIENT_HW_BYTES ((size_t)512 * 1024)
 
 /* PSRAM headroom for one more animated frame, and the ONE place the ring is
  * allowed to shrink. Without it the ring grows until the largest free block no
@@ -646,9 +837,15 @@ static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const cha
  * per source if a shorter loop is ever noticed on a healthy heap. */
 static bool anim_decode_headroom(image_page_t *p, bool newest)
 {
-    /* A panel-sized frame (clouds 720x720); radar frames are smaller, so this
-     * only ever errs toward more headroom. */
-    const size_t need = (size_t)SCREEN_SIZE * SCREEN_SIZE * 2 + ANIM_DECODE_TRANSIENT_BYTES;
+    /* A panel-sized frame is the SAFE UPPER BOUND, not the typical slot: a
+     * clouds frame is exactly 720x720x2, a radar slot is stored at its native
+     * size (~660 KB for a cropped RIDGE tile) and the panel-width scale happens
+     * per playback step in the page, not per fetched frame. Erring high here is
+     * deliberate — it makes the headroom check reject slightly early rather than
+     * let a decode fail. */
+    const size_t transient = (p->src == IMG_SRC_CLOUDS) ? ANIM_DECODE_TRANSIENT_HW_BYTES
+                                                        : ANIM_DECODE_TRANSIENT_BYTES;
+    const size_t need = (size_t)SCREEN_SIZE * SCREEN_SIZE * 2 + transient;
     if (!newest) {
         if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= need) return true;
         ESP_LOGW(TAG, "%s backfill stopped: PSRAM headroom", p->name);
@@ -680,11 +877,22 @@ static void anim_backfill(image_page_t *p, const app_config_t *cfg, int first)
 
     for (int i = first; i < cap; i++) {
         if (!atomic_load(&p->poll_gate)) break;             /* page left / un-warmed */
-        if (image_page_ring_count(p) >= cap) break;         /* ring full */
-        /* A stamped frame the ring already holds (Clouds re-entry after a
-         * partial teardown, or the times[1] repair fetch below) costs no
-         * download. */
-        if (image_page_ring_has_stamp(p, anim_stamp(p, i))) continue;
+        /* A stamped frame the ring already holds costs no download -- EXCEPT
+         * for the newest three, which the origin may still have been ingesting
+         * when they were accepted. Re-fetching lets the ring's
+         * same-stamp/different-hash path replace such a slot in place; an
+         * unchanged slot hashes equal and is dropped as a duplicate. The
+         * ring-full break is what ENDS this loop, so it is asked second: a
+         * replacement does not grow the ring and must not be blocked by it.
+         *
+         * This exemption only ever runs when a backfill runs (activation, or a
+         * rejected slot), so it is NOT what covers a steady-state poll —
+         * net_poll_once() re-fetches indices 1..2 itself for the same reason,
+         * and anim_rejudge_head() covers the head. Here it just keeps a
+         * rebuild from re-using a slot the last visit left unverified. */
+        bool held = image_page_ring_has_stamp(p, anim_stamp(p, i));
+        if (held && i > 2) continue;
+        if (!held && image_page_ring_count(p) >= cap) break;   /* ring full */
         /* Times list exhausted (short clouds list, KHDC on styles 1/2): the
          * history simply ends here. Checked BEFORE the delay, no warning.
          * Radar style 0 (RIDGE _i.gif) has no list and is never exhausted. */
@@ -870,7 +1078,7 @@ static bool net_poll_once(void *arg)
              * and the poll still counts as a success (no backoff); last_push_ms
              * is left alone so the next poll re-fetches it. */
             anim_state_t *a = &s_anim[p->src];
-            if (clouds_drop_incomplete(p, cfg, &fresh, &ring_src, 0)) {
+            if (anim_drop_incomplete(p, cfg, &fresh, &ring_src, 0)) {
                 if (show_wait && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                     nina_wait_overlay_hide();
                     bsp_display_unlock();
@@ -890,17 +1098,56 @@ static bool net_poll_once(void *arg)
              * slot rejected below is retried on the NEXT poll, never twice now. */
             bool retry = a->retry_backfill;
             a->retry_backfill = false;
-            /* Clouds: GIBS serves the newest one or two slots partially at
-             * first (black quadrants until every tile is ingested), so the
-             * second-newest is re-fetched on every poll too; the ring replaces
-             * a held stamp whose bytes changed and drops it when identical. */
-            if (p->src == IMG_SRC_CLOUDS && atomic_load(&p->poll_gate)) {
-                vTaskDelay(pdMS_TO_TICKS(RADAR_BACKFILL_GAP_MS));   /* same radio stagger as the backfill */
-                anim_fetch_index(p, cfg, token, 1, ring_gen);
+            /* THE NEWEST THREE, ON EVERY POLL — CLOUDS ONLY. GIBS serves the
+             * newest one or two slots partially at first (black rectangles
+             * until every tile is ingested), and index 0 above is the only one
+             * re-fetched unconditionally; the backfill's matching exemption
+             * runs only after an activation or a rejection, so on a
+             * steady-state poll with a full ring nothing used to re-examine
+             * indices 1 and 2 and a partial that aged past index 0 stayed for
+             * its whole life in the loop. The ring replaces a held stamp whose
+             * bytes changed and drops it when identical.
+             *
+             * NOT extended to radar styles 1/2, deliberately. A re-fetch is NOT
+             * cheap — image_fetch_custom_retain() downloads AND decodes, and
+             * image_page_ring_add() bakes, before the hash comparison that
+             * drops the duplicate — so each one costs a full 2.6 MB decode
+             * transient. At the Clouds interval floor (300 s) three of those
+             * per poll is affordable; at the radar floor (120 s) it is not, and
+             * NCEP partials are cosmetic on a map that is black by design.
+             * Radar keeps index 0 plus the backfill exemption and the head
+             * re-judge. See the report's ESCALATION on making this hash-first.
+             *
+             * Headroom-gated exactly like the backfill: an optional re-fetch
+             * must never be the decode that fails on a fragmented heap.
+             * Staggered the same way too — sustained radio transmission is what
+             * glitches this panel. */
+            if (p->src == IMG_SRC_CLOUDS) {
+                for (int i = 1; i <= 2 && atomic_load(&p->poll_gate); i++) {
+                    if (i >= a->ntimes) break;             /* short times list */
+                    /* Index 1 is the frame that actually shows while GIBS still
+                     * serves index 0 blank, so it may evict like the newest
+                     * fetch; index 2 stays optional (check only). */
+                    if (!anim_decode_headroom(p, i == 1)) break;
+                    vTaskDelay(pdMS_TO_TICKS(RADAR_BACKFILL_GAP_MS));
+                    anim_fetch_index(p, cfg, token, i, ring_gen);
+                }
             }
-            if (image_page_ring_backfill_take(p) || retry) {
-                anim_backfill(p, cfg, p->src == IMG_SRC_CLOUDS ? 2 : 1);
+            bool take = image_page_ring_backfill_take(p);
+            /* An activation means the ring was rebuilt from empty: the last
+             * visit's head verdict and every rejection streak are spent. */
+            if (take) {
+                a->judged_stamp = 0;
+                memset(a->holes, 0, sizeof(a->holes));
             }
+            if (take || retry) {
+                /* Clouds fetched 1 and 2 just above (one attempt per stamp per
+                 * poll), so its history starts at 3; radar still starts at 1. */
+                anim_backfill(p, cfg, p->src == IMG_SRC_CLOUDS ? 3 : 1);
+            }
+            /* Last, with the ring at its most complete this pass: give the head
+             * the neighbour it never had at insert. */
+            anim_rejudge_head(p, cfg, ring_gen);
         } else {
             image_page_commit_frame(p, &fresh, false);
         }

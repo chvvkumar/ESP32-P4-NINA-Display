@@ -438,10 +438,13 @@ static bool fetch_image_bytes(const char *url, const char *hdr,
 /**
  * Validate and decode an encoded image into an RGB565 PSRAM buffer.
  *
- * jpeg_sw_decode_rgb565() is named for its first caller but is a plain
- * stb_image decode: PNG (gcode thumbnail) and JPEG (webcam snapshot) both go
- * through it, and it already delivers a 128-byte-aligned, cache-flushed PSRAM
- * buffer at the image's exact dimensions.
+ * jpeg_decode_rgb565() tries the ESP32-P4 hardware JPEG engine first and falls
+ * back to the same stb_image decode for whatever it refuses (progressive,
+ * CMYK, grayscale) and for PNG, which never goes near the engine. So the gcode
+ * thumbnail (PNG) decodes exactly as before, while the webcam snapshot (JPEG)
+ * skips stb's RGB888 intermediate (~1.5 MB at 960x720). Both paths deliver the
+ * same contract: 128-byte-aligned, cache-flushed PSRAM holding tightly packed
+ * RGB565 rows top-down at the image's exact dimensions, owned by the caller.
  */
 static bool decode_image(const uint8_t *buf, size_t len, const char *what,
                          uint8_t **out_rgb, uint16_t *out_w, uint16_t *out_h) {
@@ -469,7 +472,7 @@ static bool decode_image(const uint8_t *buf, size_t len, const char *what,
     uint8_t *rgb = NULL;
     uint32_t w = 0, h = 0;
     size_t out_size = 0;
-    if (!jpeg_sw_decode_rgb565(buf, len, &rgb, &w, &h, &out_size) || !rgb) {
+    if (!jpeg_decode_rgb565(buf, len, &rgb, &w, &h, &out_size) || !rgb) {
         ESP_LOGW(TAG, "%s: decode failed", what);
         if (rgb) {
             heap_caps_free(rgb);

@@ -31,8 +31,8 @@
 #include "tasks.h"
 #include "esp_ota_ops.h"
 #include "ota_github.h"
-#include "driver/jpeg_decode.h"
 #include "driver/ppa.h"
+#include "jpeg_utils.h"      /* jpeg_utils_ppa_init(), jpeg_decode_rgb565() */
 #include "esp_lcd_mipi_dsi.h"   /* esp_lcd_dpi_panel_get_frame_buffer() */
 #include "display/lv_display_private.h"
 #include "display_defs.h"
@@ -887,9 +887,10 @@ void app_main(void)
 
     /* ── PPA hardware rotation setup ──
      * Grab all three DPI framebuffers and a dedicated SRM client.  A dedicated
-     * client (not the shared one in jpeg_utils.c) is required: that one has
-     * max_pending_trans_num = 1 and is driven from Core 0, so a decode
-     * overlapping a flush would fail the transaction. */
+     * client (not the shared one in jpeg_utils.c) keeps the flush path off the
+     * shared client's pending queue (4 slots, used by the pollers, the LVGL
+     * task and the fetch worker), so a burst of image fits can never fail the
+     * rotation transaction. */
     {
         lv_display_t *disp = lv_display_get_default();
         if (disp) {
@@ -929,6 +930,8 @@ void app_main(void)
         }
     }
 
+    jpeg_utils_ppa_init();  /* shared PPA SRM client for the image scalers */
+
     /* Initialize session stats (PSRAM allocation, no LVGL) */
     nina_session_stats_init();
 
@@ -938,59 +941,31 @@ void app_main(void)
         const uint8_t *jpg_data = logo_jpg_start;
         size_t jpg_size = (size_t)(logo_jpg_end - logo_jpg_start);
 
-        jpeg_decode_picture_info_t pic_info = {0};
-        esp_err_t err = jpeg_decoder_get_info(jpg_data, jpg_size, &pic_info);
-
-        if (err == ESP_OK && pic_info.width > 0) {
-            uint32_t out_w = ((pic_info.width + 15) / 16) * 16;
-            uint32_t out_h = ((pic_info.height + 15) / 16) * 16;
-
-            jpeg_decode_memory_alloc_cfg_t mem_cfg = {
-                .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
-            };
-            size_t allocated = 0;
-            uint8_t *rgb_buf = (uint8_t *)jpeg_alloc_decoder_mem(out_w * out_h * 2, &mem_cfg, &allocated);
-
-            if (rgb_buf) {
-                memset(rgb_buf, 0, allocated); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
-                jpeg_decoder_handle_t decoder = NULL;
-                jpeg_decode_engine_cfg_t engine_cfg = { .intr_priority = 0, .timeout_ms = 5000 };
-                err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
-                if (err == ESP_OK && decoder) {
-                    jpeg_decode_cfg_t dec_cfg = {
-                        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
-                        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
-                    };
-                    uint32_t out_size = 0;
-                    err = jpeg_decoder_process(decoder, &dec_cfg,
-                              jpg_data, jpg_size, rgb_buf, allocated, &out_size);
-                    jpeg_del_decoder_engine(decoder);
-
-                    if (err == ESP_OK && out_size > 0) {
-                        /* Red Night gate: live theme pointer is not set yet at splash,
-                         * so resolve the SAVED theme directly from config (loaded before
-                         * the display in app_main) and remap the logo to red/black if so. */
-                        const theme_t *saved_theme = themes_get(app_config_get()->theme_index);
-                        if (theme_is_red_night(saved_theme)) {
-                            image_red_remap_rgb565_force((uint16_t *)rgb_buf,
-                                                         (size_t)out_w * (size_t)out_h);
-                        }
-                        splash_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
-                        splash_dsc.header.w      = (int32_t)out_w;
-                        splash_dsc.header.h      = (int32_t)out_h;
-                        splash_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
-                        splash_dsc.header.stride = out_w * 2;
-                        splash_dsc.data          = rgb_buf;
-                        splash_dsc.data_size     = out_size;
-                        splash_ready = true;
-                        ESP_LOGI(TAG, "Splash decoded: %lux%lu", (unsigned long)out_w, (unsigned long)out_h);
-                    } else {
-                        free(rgb_buf);
-                    }
-                } else {
-                    free(rgb_buf);
-                }
+        /* HW-first decode via the shared spine: tight w x h RGB565 in 128 B
+         * aligned PSRAM (no MCU padding), stb fallback for anything the engine
+         * refuses. */
+        uint8_t *rgb_buf = NULL;
+        uint32_t out_w = 0, out_h = 0;
+        size_t out_size = 0;
+        if (jpeg_decode_rgb565(jpg_data, jpg_size, &rgb_buf, &out_w, &out_h, &out_size)
+            && rgb_buf) {
+            /* Red Night gate: live theme pointer is not set yet at splash,
+             * so resolve the SAVED theme directly from config (loaded before
+             * the display in app_main) and remap the logo to red/black if so. */
+            const theme_t *saved_theme = themes_get(app_config_get()->theme_index);
+            if (theme_is_red_night(saved_theme)) {
+                image_red_remap_rgb565_force((uint16_t *)rgb_buf,
+                                             (size_t)out_w * (size_t)out_h);
             }
+            splash_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+            splash_dsc.header.w      = (int32_t)out_w;
+            splash_dsc.header.h      = (int32_t)out_h;
+            splash_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+            splash_dsc.header.stride = out_w * 2;
+            splash_dsc.data          = rgb_buf;
+            splash_dsc.data_size     = (uint32_t)out_size;
+            splash_ready = true;
+            ESP_LOGI(TAG, "Splash decoded: %lux%lu", (unsigned long)out_w, (unsigned long)out_h);
         }
     }
 
