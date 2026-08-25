@@ -271,3 +271,16 @@ add_nina_host_test(test_adsb_geom
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_adsb_geom.c
 )
+
+# ---------------------------------------------------------------------------
+# test_image_fit -- the PPA SRM fit geometry for the image pages
+# (main/image_fit.h): the n/16 scale pick (round up and centre-crop while the
+# crop is under 4 %, otherwise round down and band), the symmetric block trim,
+# and the logical->source window mapping for each 0/90/180/270 rotation.
+# Header-only, integer-only, no ESP-IDF dependency; the PPA job it feeds lives
+# in ui/nina_image_page.c and cannot be host-compiled.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_image_fit
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_image_fit.c
+)

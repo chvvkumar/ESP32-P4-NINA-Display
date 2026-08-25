@@ -33,10 +33,12 @@
  *    origin has not filled, and a partial frame whose missing tiles are black
  *    blocks, are caught by clouds_frame_incomplete() (black-sample fraction)
  *    before the frame reaches the ring; the poller re-fetches the stamp on the
- *    next poll. ponytail: a partial frame that leaves less than the channel's
- *    blank_pct of the samples black still slips through and is only healed by the
- *    same-stamp replace on the next poll. Upgrade path: also compare the
- *    tile grid against the previous frame for the same stamp.
+ *    next poll. A PARTIALLY ingested frame (black tile rectangles under the
+ *    vector basemap) is too light to trip that gate and is caught instead by
+ *    clouds_frame_holes(), per cell against the neighbouring frame of the loop.
+ *    ponytail: that needs a neighbour, so the very first frame into an empty
+ *    ring is still accepted unjudged. Upgrade path: re-judge the head once the
+ *    backfill has given it one (image_page_poll.c).
  *
  * All maths is float-only (the P4 FPU is single precision); the calendar
  * helpers are integer days-from-civil / civil-from-days, no localtime.
@@ -416,13 +418,12 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
  * them are near black (all channels below 24). Raw decoded pixels, before any
  * bake or Red Night remap.
  *
- * The test catches BLANK slots only. It does not try to catch partially
- * ingested frames (one black quadrant): blackness cannot separate those from
- * a real night frame (2026-08-24: a GeoColor night frame over Missouri is 8 %
- * near black on stb and the HW decoder crushes the dark night side to exact
- * zero, so an exact-0x0000 gate at 3 % rejected every real frame and the page
- * went black). Partials self-heal instead: the poller re-fetches the newest
- * two slots every poll and a same-stamp slot is replaced when its hash changes.
+ * The test catches BLANK slots only: blackness ALONE cannot separate a partially
+ * ingested frame from a real night frame (2026-08-24: a GeoColor night frame over
+ * Missouri is 8 % near black on stb and the HW decoder crushes the dark night
+ * side to exact zero, so an exact-0x0000 gate at 3 % rejected every real frame
+ * and the page went black). Partial frames are caught by clouds_frame_holes()
+ * instead, which needs a neighbouring frame to compare against.
  *
  * Measured on real 720x720 GetMaps (near-black share of the sample grid):
  *   GeoColor  day 1.5 %, night 8 %      Clean IR  0 %      Air Mass  20 %
@@ -433,42 +434,80 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
  * can still be tuned individually. */
 #define CLOUDS_BLANK_STEP 8      /* sample stride, pixels and rows */
 
-/* Missing-tile (partial ingest) detection. A tile GIBS has not ingested yet is
- * rendered EXACTLY black (0x0000 from either decoder), while the same area in
- * the neighbouring frame of the loop (10 min apart) is lit. Night sky is dark
- * in both, so it never trips this. Count, on the CLOUDS_BLANK_STEP grid, the
- * samples that are lit in @p ref (any channel >= 24) and exactly zero in @p f;
- * call @p f partial when they exceed CLOUDS_HOLE_PCT of the lit samples.
+/* Shared near-black predicate: every channel below 24 (R5 < 3, G6 < 6, B5 < 3).
+ * NOT an exact-0x0000 test: the P4 hardware JPEG decoder crushes dark values to
+ * 0 where stb keeps 1-3, so an exact-zero gate flips its verdict with the
+ * decoder. Both gates below are built on this one predicate, so "lit" and
+ * "black" mean the same thing on both sides of a comparison. */
+static inline bool clouds_px_near_black(uint16_t v)
+{
+    return (v >> 11) < 3 && ((v >> 5) & 0x3Fu) < 6 && (v & 0x1Fu) < 3;
+}
+
+/* Missing-tile (partial ingest) detection, per CELL against the neighbouring
+ * frame of the loop (10 min apart). A tile GIBS has not ingested is rendered
+ * black, but the vector basemap is composited over the WHOLE canvas regardless,
+ * so a hole keeps its border/road/graticule lines drawn over black -- which is
+ * exactly what the reported partial frames look like.
  *
- * Threshold math (zoom 6, 720 px): the day/night terminator moves ~90 px in
- * the 10 min between frames, so at dusk up to ~12 % of samples go lit -> dark
- * (and the HW decoder crushes dark to exact zero). ONE missing 256 px tile is
- * also ~12 %. Those two cannot be told apart, so the bar sits at 30: catches
- * the multi-tile holes seen after a channel change (45-55 % of the frame),
- * never a terminator; a single-tile hole is left to the re-fetch to heal.
- * Needs at least 1/20 of the grid lit in @p ref to say anything (a blank
- * reference is no reference). Both buffers w x h, same stride. */
-#define CLOUDS_HOLE_PCT 30
+ * Split the frame into a CLOUDS_HOLE_CELLS x CLOUDS_HOLE_CELLS grid (6x6 = 120 px
+ * cells on a 720 px frame; a GIBS hole is a large rectangle covering at least one
+ * whole cell -- the pitch of the origin's internal tiles cannot be derived from
+ * the GetMap bbox, since the server reprojects them into one flat render). Sample
+ * on the CLOUDS_BLANK_STEP grid, and for each cell count the samples LIT in @p ref
+ * that went NEAR BLACK in @p f. Flag the frame when ONE cell crosses the bar.
+ *
+ * Calibration (device pixels, ninadash4 2026-08-25, a complete GeoColor night
+ * frame at zoom 6 over Missouri, basemap 2, on this same sample grid):
+ *   - 57.6 % of samples near black, 42.4 % lit. The old global gate used an
+ *     exact-zero numerator and measured only 15.0 % -- a ~4x undercount -- and
+ *     then divided a localised hole by the WHOLE frame's lit count, so a
+ *     35-45 % hole scored in the single digits. It never fired once on device.
+ *   - Terminator, the one thing that can look like a hole: a cell that flips
+ *     day -> night in 10 min keeps that same 42 % lit, so at most ~58 % of its
+ *     ref-lit samples go dark.
+ *   - A real hole keeps only the 1-2 px vector line cores lit (a few percent of
+ *     the cell), so ~80-90 % of its ref-lit samples go dark.
+ * CLOUDS_HOLE_CELL_PCT 75 sits between the two, with ~17 points of margin over
+ * the terminator worst case. (The task brief suggested starting at 85; 85 sits
+ * ON the hole floor and would keep missing the exact frames this fixes, so the
+ * bar is set on the terminator side instead. A false positive costs one
+ * re-fetch; a false negative is the bug.)
+ *
+ * A cell is judged only when at least 1/CLOUDS_HOLE_MIN_LIT_Q of its samples are
+ * lit in @p ref: an ocean-at-night or blank-reference cell says nothing, and a
+ * reference that is itself holed in the same place (consecutive partial slots)
+ * falls under the floor rather than voting "clean". Both buffers w x h, same
+ * stride. Pure: no allocation, sampling grid only, never reads every pixel. */
+#define CLOUDS_HOLE_CELLS      6    /* grid side: 6x6 cells = 120 px on a 720 px frame */
+#define CLOUDS_HOLE_CELL_PCT   75   /* >= this % of a cell's ref-lit samples gone black = hole */
+#define CLOUDS_HOLE_MIN_LIT_Q  4    /* ref cell needs >= samples/4 lit to be judged at all */
+#define CLOUDS_HOLE_MIN_CELL_N 8    /* and at least this many samples (tiny frames say nothing) */
 static inline bool clouds_frame_holes(const uint16_t *f, const uint16_t *ref,
                                       int w, int h, int stride_px)
 {
     if (f == NULL || ref == NULL || w <= 0 || h <= 0) return false;
     if (stride_px < w) stride_px = w;
-    uint32_t n = 0, lit = 0, hole = 0;
+    enum { NCELL = CLOUDS_HOLE_CELLS * CLOUDS_HOLE_CELLS };
+    uint32_t n[NCELL] = {0}, lit[NCELL] = {0}, hole[NCELL] = {0};
     for (int y = 0; y < h; y += CLOUDS_BLANK_STEP) {
         const uint16_t *fr = f   + (size_t)y * (size_t)stride_px;
         const uint16_t *rr = ref + (size_t)y * (size_t)stride_px;
+        int row = (y * CLOUDS_HOLE_CELLS / h) * CLOUDS_HOLE_CELLS;
         for (int x = 0; x < w; x += CLOUDS_BLANK_STEP) {
-            n++;
-            uint16_t v = rr[x];
-            bool is_lit = (v >> 11) >= 3 || ((v >> 5) & 0x3F) >= 6 || (v & 0x1F) >= 3;
-            if (!is_lit) continue;
-            lit++;
-            if (fr[x] == 0x0000u) hole++;
+            int c = row + x * CLOUDS_HOLE_CELLS / w;
+            n[c]++;
+            if (clouds_px_near_black(rr[x])) continue;
+            lit[c]++;
+            if (clouds_px_near_black(fr[x])) hole[c]++;
         }
     }
-    if (lit * 20u < n) return false;
-    return hole * 100u > lit * (uint32_t)CLOUDS_HOLE_PCT;
+    for (int c = 0; c < NCELL; c++) {
+        if (n[c] < CLOUDS_HOLE_MIN_CELL_N) continue;
+        if (lit[c] * (uint32_t)CLOUDS_HOLE_MIN_LIT_Q < n[c]) continue;
+        if (hole[c] * 100u >= lit[c] * (uint32_t)CLOUDS_HOLE_CELL_PCT) return true;
+    }
+    return false;
 }
 
 static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h,
@@ -481,14 +520,7 @@ static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h,
         const uint16_t *row = rgb565 + (size_t)y * (size_t)stride_px;
         for (int x = 0; x < w; x += CLOUDS_BLANK_STEP) {
             n++;
-            /* NEAR black (every channel < 24, i.e. R5 < 3, G6 < 6, B5 < 3),
-             * not exactly 0x0000: the P4 hardware JPEG path crushes dark
-             * values to 0 where stb keeps 1-3, so an exact-zero test read a
-             * real night frame as 7-8 % black on HW vs <1 % on stb and the
-             * thresholds flipped with the decoder. Both decoders agree on
-             * "below 24". */
-            uint16_t v = row[x];
-            if ((v >> 11) < 3 && ((v >> 5) & 0x3F) < 6 && (v & 0x1F) < 3) black++;
+            if (clouds_px_near_black(row[x])) black++;   /* see clouds_px_near_black */
         }
     }
     return black * 100u > n * (uint32_t)clouds_channel(ch)->blank_pct;

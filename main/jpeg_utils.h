@@ -3,10 +3,19 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include "esp_err.h"
 
 /* img_fmt_t + the pure magic/PNG/GIF header logic image_probe_format_dims()
  * delegates to (host-testable; see test/host/test_image_probe.c). */
 #include "image_probe.h"
+
+/**
+ * @brief Register the shared PPA SRM client used by every scaler in this file.
+ * Call once from app_main after the display is up. The scalers register it
+ * lazily if this was never called, so it is an optimisation, not a hard
+ * prerequisite.
+ */
+void jpeg_utils_ppa_init(void);
 
 /**
  * @brief Software JPEG decode fallback (stb_image).
@@ -16,8 +25,8 @@
  * @param jpg_data  JPEG compressed data
  * @param jpg_size  Size in bytes
  * @param out_buf   Receives allocated RGB565 buffer
- * @param out_w     Receives image width (rounded up to 16)
- * @param out_h     Receives image height (rounded up to 16)
+ * @param out_w     Receives image width in pixels (exact)
+ * @param out_h     Receives image height in pixels (exact)
  * @param out_size  Receives buffer size in bytes
  * @return true on success
  */
@@ -37,6 +46,9 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
  * Output contract is identical to jpeg_sw_decode_rgb565(): tightly packed
  * RGB565 rows top-down, out_w/out_h are the image's real pixel dimensions (the
  * HW MCU padding is removed), 128-byte aligned PSRAM, caller frees with free().
+ * *out_size is the ALLOCATION size, which on the HW path is the MCU-padded
+ * decoder buffer (larger than w*h*2); never derive a stride or a pixel count
+ * from it, use out_w/out_h. Needs about 10 KB of caller stack.
  *
  * @return true on success (from either path)
  */
@@ -154,3 +166,68 @@ uint8_t *ppa_scale_rgb565_into_noclear(const uint8_t *src, uint32_t src_w, uint3
  */
 void sw_scale_rgb565_bilinear(const uint16_t *src, int sw, int sh,
                               uint16_t *dst, int dw, int dh);
+
+/**
+ * @brief One PPA SRM pass: crop + mirror + rotate + scale, RGB565 in/out.
+ *
+ * Everything the six software passes on the image pages do today, in one DMA
+ * transaction. Scale is a 1/16-step factor on BOTH axes (the hardware truncates
+ * to 1/16 regardless), so pick an exact ratio or over-provision the source block
+ * and show a window of the result.
+ */
+typedef struct {
+    const uint8_t *src;        /* RGB565 */
+    uint32_t src_stride_px;    /* pixels per source row (pic_w) */
+    uint32_t src_h;            /* pic_h */
+    uint32_t block_x, block_y, block_w, block_h;   /* source crop window */
+    uint8_t  rotate_cw;        /* 0..3 = 0/90/180/270 degrees CLOCKWISE (page convention) */
+    bool     hflip, vflip;     /* applied to the source before rotation, same as the page's SW passes */
+    uint8_t  *dst;             /* 128 B aligned PSRAM */
+    size_t   dst_buf_size;     /* 128 B multiple */
+    uint32_t dst_w, dst_h;     /* destination picture size */
+    uint32_t dst_x, dst_y;     /* where the scaled block lands in dst */
+    uint8_t  scale_n16;        /* scale = n/16, 1..255 (both axes) */
+    bool     clear_dst;        /* memset+C2M the whole dst first */
+    uint32_t out_w, out_h;     /* filled: size of the written block as the driver computes it */
+} ppa_srm_job_t;
+
+/**
+ * @brief Run one ppa_srm_job_t (BLOCKING). Fills job->out_w / job->out_h.
+ * @return ESP_OK, or the driver's error / ESP_ERR_INVALID_ARG on a bad job.
+ */
+esp_err_t ppa_srm_rgb565(ppa_srm_job_t *job);
+
+/**
+ * @brief One PPA Blend pass: out = bg*(1 - a) + fg*a, RGB565 throughout.
+ *
+ * All three pictures are @p w x @p h with no offsets (the Blend engine cannot
+ * scale, rotate or mirror). @p fg_alpha is the mix, 0 = @p bg, 255 = @p fg,
+ * applied as the hardware's PPA_ALPHA_FIX_VALUE — an RGB565 foreground carries
+ * no alpha of its own, so without it the blend would be a plain copy.
+ *
+ * @p out must be 128-byte aligned PSRAM (or internal RAM) of at least
+ * align128(w*h*2) bytes; the driver checks the pointer and the size it is
+ * given, not the allocation. @p bg and @p fg need no alignment and may live
+ * anywhere, including flash. The driver does its own cache maintenance (writes
+ * the inputs back, invalidates the output), so no esp_cache_msync() is needed
+ * around this — but the CPU must not be holding unflushed writes to @p out, and
+ * must not write @p out while the call is running (it BLOCKS until the DMA
+ * finishes). @p out may alias @p bg or @p fg; the ring playback does not.
+ *
+ * @return ESP_OK, ESP_ERR_INVALID_SIZE for a zero or over-8191 px axis,
+ *         ESP_ERR_INVALID_ARG / ESP_ERR_INVALID_STATE, or the driver's error.
+ */
+esp_err_t ppa_blend_rgb565(const uint8_t *bg, const uint8_t *fg, uint8_t *out,
+                           uint32_t w, uint32_t h, uint8_t fg_alpha);
+
+/**
+ * @brief Pack an RGB888 buffer (stb byte order: R,G,B) into RGB565 on the PPA.
+ *
+ * 1:1, no rotation. @p dst565 must be 128-byte aligned PSRAM and @p dst_size a
+ * 128-byte multiple of at least w*h*2 (the driver rejects anything else).
+ *
+ * @return true if the hardware did it; false means the caller must run its own
+ *         software pack.
+ */
+bool ppa_rgb888_to_rgb565(const uint8_t *rgb888, uint32_t w, uint32_t h,
+                          uint8_t *dst565, size_t dst_size);

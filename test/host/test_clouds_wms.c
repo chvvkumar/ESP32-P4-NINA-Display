@@ -47,6 +47,38 @@ static void check_near(const char *label, float got, float expect, float tol) {
     if (!ok) fails++;
 }
 
+/* ---- synthetic frames for clouds_frame_holes() ----
+ * LIT_PX is imagery, DARK_PX is night sky just under the near-black gate, and
+ * LINE_PX (~40 grey) is a basemap vector line: GIBS draws those over the whole
+ * canvas, holes included, so they survive inside a missing tile. */
+#define LIT_PX  0x5aacu
+#define DARK_PX 0x0841u
+#define LINE_PX 0x2945u
+
+/* Night GeoColor stand-in: ~45 % of samples lit (city glow, cloud, basemap)
+ * over near-black sky, matching the 42.4 % lit measured on the device's own
+ * complete night frame. Patterned on the 8 px JPEG block so the stride-8
+ * sample grid sees the same mix a whole cell does. */
+static void fill_night(uint16_t *p, int w, int h) {
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++)
+            p[y * w + x] = ((((x >> 3) * 37 + (y >> 3) * 17) & 0xFF) < 115) ? LIT_PX : DARK_PX;
+}
+
+/* Darken @p k of every 5 blocks inside cell (@p cx, @p cy): k/5 of that cell's
+ * samples, independent of the fill_night pattern. */
+static void darken_cell(uint16_t *p, int w, int cx, int cy, int cell, int k) {
+    for (int y = cy * cell; y < (cy + 1) * cell; y++)
+        for (int x = cx * cell; x < (cx + 1) * cell; x++)
+            if (((x >> 3) + (y >> 3)) % 5 < k) p[y * w + x] = DARK_PX;
+}
+
+/* A missing tile: the whole cell rendered flat black. */
+static void black_cell(uint16_t *p, int w, int cx, int cy, int cell) {
+    for (int y = cy * cell; y < (cy + 1) * cell; y++)
+        for (int x = cx * cell; x < (cx + 1) * cell; x++) p[y * w + x] = 0x0000u;
+}
+
 /* Parse "&BBOX=a,b,c,d" out of a URL. */
 static bool url_bbox(const char *url, long *a, long *b, long *c, long *d) {
     const char *p = strstr(url, "&BBOX=");
@@ -327,21 +359,69 @@ int main(void) {
         px[0] = 0;
         check_bool("incomplete: 1% black", clouds_frame_incomplete(px, W, H, W, 0), false);
         check_bool("incomplete: NULL is not incomplete", clouds_frame_incomplete(NULL, W, H, W, 0), false);
-        /* missing tiles vs the neighbouring frame */
-        static uint16_t ref[W * H];
-        for (int i = 0; i < W * H; i++) { ref[i] = 0x5aac; px[i] = 0x5aac; }   /* both lit */
-        check_bool("holes: identical lit frames", clouds_frame_holes(px, ref, W, H, W), false);
-        for (int y = 0; y < H / 2; y++)
-            for (int x = 0; x < W / 2; x++) px[y * W + x] = 0;            /* one tile: 25% < 30% bar */
-        check_bool("holes: single quadrant is under the bar", clouds_frame_holes(px, ref, W, H, W), false);
-        for (int y = 0; y < H / 2; y++)
-            for (int x = 0; x < W; x++) px[y * W + x] = 0;                /* top half: 50% */
-        check_bool("holes: black half where ref is lit", clouds_frame_holes(px, ref, W, H, W), true);
-        for (int y = 0; y < H / 2; y++)
-            for (int x = 0; x < W; x++) ref[y * W + x] = 0x0841;          /* same area dark in ref too (night) */
-        check_bool("holes: dark in both is not a hole", clouds_frame_holes(px, ref, W, H, W), false);
-        for (int i = 0; i < W * H; i++) ref[i] = 0;
-        check_bool("holes: blank reference says nothing", clouds_frame_holes(px, ref, W, H, W), false);
+    }
+
+    /* ---- missing-tile (partial ingest) detection, per cell ---- */
+    {
+        /* Full 720x720, so a cell is the real 120 px and one missing tile fills
+         * one, as on the device. Static, not stack: 1 MB each. */
+        enum { FW = 720, FH = 720, CELL = FW / CLOUDS_HOLE_CELLS };
+        static uint16_t cand[FW * FH], base[FW * FH];
+
+        fill_night(base, FW, FH);
+        memcpy(cand, base, sizeof(base));
+        check_bool("holes: identical night frames", clouds_frame_holes(cand, base, FW, FH, FW), false);
+
+        /* 10 min of weather motion: 1 sample in 8 goes dark, scattered. */
+        for (int y = 0; y < FH; y++)
+            for (int x = 0; x < FW; x++)
+                if ((((x >> 3) + (y >> 3)) & 7) == 0) cand[y * FW + x] = DARK_PX;
+        check_bool("holes: night frame, 12% scattered dimming", clouds_frame_holes(cand, base, FW, FH, FW), false);
+
+        /* Terminator crossing one whole cell. It takes the imagery with it, but
+         * the night side keeps the ~42 % lit measured on the device, so about
+         * 60 % of that cell's ref-lit samples go dark: under the bar. */
+        memcpy(cand, base, sizeof(base));
+        darken_cell(cand, FW, 4, 1, CELL, 3);            /* 3 blocks in 5 = 60 % */
+        check_bool("holes: terminator, 60% of a cell dimmed", clouds_frame_holes(cand, base, FW, FH, FW), false);
+        memcpy(cand, base, sizeof(base));
+        darken_cell(cand, FW, 4, 1, CELL, 4);            /* 80 % */
+        check_bool("holes: 80% of a cell dark is a hole", clouds_frame_holes(cand, base, FW, FH, FW), true);
+
+        /* One missing 120 px tile, rendered flat black. */
+        memcpy(cand, base, sizeof(base));
+        black_cell(cand, FW, 4, 1, CELL);
+        check_bool("holes: one 120px cell zeroed", clouds_frame_holes(cand, base, FW, FH, FW), true);
+
+        /* Same cell, dark in the REFERENCE too (ocean at night, or a reference
+         * that is itself holed there): the per-cell lit floor says nothing. */
+        black_cell(base, FW, 4, 1, CELL);
+        check_bool("holes: cell dark in the reference too", clouds_frame_holes(cand, base, FW, FH, FW), false);
+
+        /* The real device case: GIBS composites the vector basemap over the
+         * whole canvas, so a hole keeps its border/road/graticule lines (~40
+         * grey) drawn over black. Those survivors must not dilute the cell
+         * below the bar. One sample column in 13 here, the density of 1-2 px
+         * vectors on a 720 px frame. */
+        fill_night(base, FW, FH);
+        memcpy(cand, base, sizeof(base));
+        black_cell(cand, FW, 4, 1, CELL);
+        for (int y = CELL; y < 2 * CELL; y++)
+            for (int x = 4 * CELL; x < 5 * CELL; x++)
+                if (((x >> 3) % 13) == 0) cand[y * FW + x] = LINE_PX;
+        check_bool("holes: hole keeps its overlay lines", clouds_frame_holes(cand, base, FW, FH, FW), true);
+
+        /* Day frame (fully lit) missing a whole quadrant. */
+        for (int i = 0; i < FW * FH; i++) { base[i] = LIT_PX; cand[i] = LIT_PX; }
+        for (int y = 0; y < FH / 2; y++)
+            for (int x = 0; x < FW / 2; x++) cand[y * FW + x] = 0x0000;
+        check_bool("holes: day frame missing a quadrant", clouds_frame_holes(cand, base, FW, FH, FW), true);
+
+        /* Degenerate inputs. */
+        memset(base, 0, sizeof(base));
+        check_bool("holes: blank reference says nothing", clouds_frame_holes(cand, base, FW, FH, FW), false);
+        check_bool("holes: NULL frame", clouds_frame_holes(NULL, base, FW, FH, FW), false);
+        check_bool("holes: NULL reference", clouds_frame_holes(cand, NULL, FW, FH, FW), false);
     }
 
     printf("\n%s (%d failures)\n", fails == 0 ? "ALL PASSED" : "FAILED", fails);

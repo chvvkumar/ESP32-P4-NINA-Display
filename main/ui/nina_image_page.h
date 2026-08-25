@@ -210,6 +210,21 @@ bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp);   /* lock-free;
 bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
                                     bool (*fn)(const uint16_t *ref, int w, int h, void *arg),
                                     void *arg);
+/* Re-judge the HEAD slot (index 0, the newest) with @p fn — the one frame the
+ * insert gate cannot judge, because every page entry frees the ring and the head
+ * lands in it with no neighbour. @p fn is handed the NEIGHBOUR's pixels and, as
+ * its `arg`, an image_frame_t view of the head slot, so the caller reuses its
+ * insert-time adapter unchanged; the display lock is held for the duration.
+ * Returns the head's stamp when fn says the head is bad (feed it to
+ * image_page_ring_drop_stamp()), 0 otherwise. */
+uint32_t image_page_ring_judge_head(image_page_t *p,
+                                    bool (*fn)(const uint16_t *ref, int w, int h, void *arg));
+/* Free the slot carrying @p stamp so the next newest fetch re-downloads it and
+ * the same-stamp path in _add installs the completed frame. Takes the display
+ * lock itself; the page's poll task only. Compacts the slots above it down and
+ * moves the playback cursor with them. false when @p stamp is 0, no slot carries
+ * it, or the ring holds one frame or none. Does NOT re-arm the backfill. */
+bool image_page_ring_drop_stamp(image_page_t *p, uint32_t stamp);
 /* Free the OLDEST resident frame (pixels + retained source) to give the next
  * decode room. Takes the display lock itself; the page's poll task only, same as
  * image_page_ring_add(). Returns false — freeing nothing — when the ring holds

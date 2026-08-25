@@ -58,7 +58,6 @@
 #include "crash_log.h"
 #include "demo_data.h"
 #include "weather_client.h"
-#include "driver/jpeg_decode.h"
 #include "freertos/queue.h"
 #include "ui/nina_thumbnail.h"
 #include "poll_task.h"
@@ -975,133 +974,48 @@ void spotify_poll_task(void *arg)
                         /* Strip COM markers that the HW JPEG decoder can't handle */
                         jpg_size = strip_jpeg_com_markers(jpg_buf, jpg_size);
 
-                        /* Hardware JPEG decode to RGB565.
-                         * Buffer always rounded to 16px — the ESP32-P4 HW decoder
-                         * outputs with 16-pixel MCU alignment regardless of subsampling.
-                         * PPA uses actual pic_info dimensions to crop MCU padding. */
+                        /* HW-first decode through the shared spine (its own stb
+                         * fallback covers progressive/CMYK), then one PPA pass to
+                         * 720x720 so LVGL blits 1:1 instead of scaling per redraw.
+                         * nina_spotify_set_album_art() TAKES OWNERSHIP, frees the
+                         * previous buffer and red-remaps this one in place, so each
+                         * handoff has to be its own allocation -- no shared static. */
+                        uint8_t *art = NULL;
+                        uint32_t art_w = 0, art_h = 0;
+                        size_t art_size = 0;
                         perf_timer_start(&g_perf.spotify_art_decode);
-                        jpeg_decode_picture_info_t pic_info = {0};
-                        esp_err_t info_err = jpeg_decoder_get_info(jpg_buf, jpg_size, &pic_info);
-                        if (info_err == ESP_OK && pic_info.width > 0) {
-                            uint32_t out_w = ((pic_info.width + 15) / 16) * 16;
-                            uint32_t out_h = ((pic_info.height + 15) / 16) * 16;
+                        bool art_dec = jpeg_decode_rgb565(jpg_buf, jpg_size,
+                                                          &art, &art_w, &art_h, &art_size);
+                        if (art_dec && art && (art_w != 720 || art_h != 720)) {
+                            size_t scaled_size = 0;
+                            uint8_t *scaled = ppa_scale_rgb565(art, art_w, art_h, 0,
+                                                               720, 720, &scaled_size);
+                            if (scaled) {
+                                free(art);
+                                art = scaled;
+                                art_w = 720;
+                                art_h = 720;
+                                art_size = scaled_size;
+                            }
+                            /* PPA refused: hand over the unscaled frame and let LVGL
+                             * software-scale it, exactly as before. */
+                        }
+                        perf_timer_stop(&g_perf.spotify_art_decode);
 
-                            jpeg_decode_memory_alloc_cfg_t mem_cfg = {
-                                .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
-                            };
-                            size_t allocated = 0;
-                            uint8_t *rgb_buf = (uint8_t *)jpeg_alloc_decoder_mem(
-                                out_w * out_h * 2, &mem_cfg, &allocated);
-
-                            if (rgb_buf) {
-                                memset(rgb_buf, 0, allocated); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
-                                jpeg_decoder_handle_t decoder = NULL;
-                                jpeg_decode_engine_cfg_t engine_cfg = {
-                                    .intr_priority = 0, .timeout_ms = 5000
-                                };
-                                esp_err_t dec_err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
-                                if (dec_err == ESP_OK && decoder) {
-                                    jpeg_decode_cfg_t dec_cfg = {
-                                        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
-                                        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
-                                    };
-                                    uint32_t out_size = 0;
-                                    dec_err = jpeg_decoder_process(decoder, &dec_cfg,
-                                        jpg_buf, jpg_size, rgb_buf, allocated, &out_size);
-                                    jpeg_del_decoder_engine(decoder);
-
-                                    if (dec_err == ESP_OK && out_size > 0) {
-                                        /* Pre-scale to 720x720 using PPA hardware to
-                                         * eliminate per-frame LVGL software scaling */
-                                        uint8_t *final_buf = rgb_buf;
-                                        uint32_t final_w = out_w, final_h = out_h;
-                                        size_t final_size = out_size;
-
-                                        if (pic_info.width != 720 || pic_info.height != 720) {
-                                            size_t scaled_size = 0;
-                                            uint8_t *scaled = ppa_scale_rgb565(
-                                                rgb_buf, pic_info.width, pic_info.height,
-                                                out_w, 720, 720, &scaled_size);
-                                            if (scaled) {
-                                                free(rgb_buf);
-                                                final_buf = scaled;
-                                                final_w = 720;
-                                                final_h = 720;
-                                                final_size = scaled_size;
-                                            }
-                                            /* If PPA fails, fall through with original —
-                                             * LVGL will SW-scale as before */
-                                        }
-
-                                        perf_timer_stop(&g_perf.spotify_art_decode);
-
-                                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                            nina_spotify_set_album_art(final_buf, final_w, final_h, final_size);
-                                            bsp_display_unlock();
-                                            art_ok = true;
-                                            /* Ownership transferred to UI — don't free final_buf */
-                                        } else {
-                                            /* Lock timed out — free the buffer and leave
-                                             * art_ok false so the art is retried next poll. */
-                                            free(final_buf);
-                                        }
-                                    } else {
-                                        perf_timer_stop(&g_perf.spotify_art_decode);
-                                        ESP_LOGW(TAG, "HW JPEG decode failed, trying SW fallback");
-                                        free(rgb_buf);
-                                        rgb_buf = NULL;
-                                        /* SW fallback (stb_image) — handles CMYK and other unsupported formats */
-                                        goto sw_fallback;
-                                    }
-                                } else {
-                                    perf_timer_stop(&g_perf.spotify_art_decode);
-                                    ESP_LOGW(TAG, "HW decoder engine creation failed, trying SW");
-                                    free(rgb_buf);
-                                    goto sw_fallback;
-                                }
+                        if (art_dec && art) {
+                            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                                nina_spotify_set_album_art(art, art_w, art_h,
+                                                           (uint32_t)art_size);
+                                bsp_display_unlock();
+                                art_ok = true;
+                                /* Ownership transferred to UI -- don't free art */
                             } else {
-                                perf_timer_stop(&g_perf.spotify_art_decode);
-                                ESP_LOGW(TAG, "HW decoder mem alloc failed, trying SW");
-                                goto sw_fallback;
+                                /* Lock timed out -- free the buffer and leave
+                                 * art_ok false so the art is retried next poll. */
+                                free(art);
                             }
                         } else {
-                            perf_timer_stop(&g_perf.spotify_art_decode);
-                        sw_fallback: ;
-                            uint8_t *sw_buf = NULL;
-                            uint32_t sw_w = 0, sw_h = 0;
-                            size_t sw_size = 0;
-                            perf_timer_start(&g_perf.spotify_art_decode);
-                            bool sw_ok = jpeg_sw_decode_rgb565(jpg_buf, jpg_size,
-                                &sw_buf, &sw_w, &sw_h, &sw_size);
-                            perf_timer_stop(&g_perf.spotify_art_decode);
-                            if (sw_ok && sw_buf) {
-                                uint8_t *final_buf = sw_buf;
-                                uint32_t final_w = sw_w, final_h = sw_h;
-                                size_t final_size = sw_size;
-                                if (sw_w != 720 || sw_h != 720) {
-                                    size_t scaled_size = 0;
-                                    uint8_t *scaled = ppa_scale_rgb565(
-                                        sw_buf, sw_w, sw_h, 0, 720, 720, &scaled_size);
-                                    if (scaled) {
-                                        free(sw_buf);
-                                        final_buf = scaled;
-                                        final_w = 720;
-                                        final_h = 720;
-                                        final_size = scaled_size;
-                                    }
-                                }
-                                if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                                    nina_spotify_set_album_art(final_buf, final_w, final_h, final_size);
-                                    bsp_display_unlock();
-                                    art_ok = true;
-                                } else {
-                                    /* Lock timed out — free the buffer and leave
-                                     * art_ok false so the art is retried next poll. */
-                                    free(final_buf);
-                                }
-                            } else {
-                                ESP_LOGW(TAG, "SW JPEG decode also failed for album art");
-                            }
+                            ESP_LOGW(TAG, "Album art JPEG decode failed");
                         }
                         free(jpg_buf);
                     } else {
@@ -1209,78 +1123,25 @@ void fetch_worker_task(void *arg) {
             perf_timer_stop(&g_perf.jpeg_fetch);
             if (!jpeg_buf || jpeg_size == 0) break;
 
-            jpeg_decode_picture_info_t pic_info = {0};
-            esp_err_t err = jpeg_decoder_get_info(jpeg_buf, jpeg_size, &pic_info);
-            if (err != ESP_OK || pic_info.width == 0 || pic_info.height == 0) {
-                free(jpeg_buf);
-                break;
-            }
-
-            bool is_gray = (pic_info.sample_method == JPEG_DOWN_SAMPLING_GRAY);
-            uint32_t out_w = ((pic_info.width + 15) / 16) * 16;
-            uint32_t out_h = ((pic_info.height + 15) / 16) * 16;
-            uint32_t decode_buf_size = out_w * out_h * (is_gray ? 1 : 2);
-
-            jpeg_decode_memory_alloc_cfg_t mem_cfg = {
-                .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
-            };
-            size_t allocated_size = 0;
-            uint8_t *decode_buf = (uint8_t *)jpeg_alloc_decoder_mem(decode_buf_size, &mem_cfg, &allocated_size);
-            if (!decode_buf) { free(jpeg_buf); break; }
-            memset(decode_buf, 0, allocated_size); /* Zero buffer so PPA edge interpolation reads black, not heap garbage */
-
-            size_t free_dma = heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
-            if (free_dma < 20 * 1024) {
-                ESP_LOGW(TAG, "Fetch worker: low DMA heap (%d bytes), skipping HW decode", (int)free_dma);
-                free(decode_buf);
-                free(jpeg_buf);
-                break;
-            }
-
-            jpeg_decoder_handle_t decoder = NULL;
-            jpeg_decode_engine_cfg_t engine_cfg = { .intr_priority = 0, .timeout_ms = 5000 };
-            err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
-            if (err != ESP_OK || !decoder) { free(decode_buf); free(jpeg_buf); break; }
-
-            jpeg_decode_cfg_t decode_cfg = {
-                .output_format = is_gray ? JPEG_DECODE_OUT_FORMAT_GRAY : JPEG_DECODE_OUT_FORMAT_RGB565,
-                .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
-            };
-            uint32_t out_size = 0;
+            /* HW-first decode: tight w x h RGB565 in 128 B aligned PSRAM, MCU
+             * padding removed, single-component JPEG expanded from GRAY8, stb
+             * fallback for progressive/CMYK. Carries its own low-DMA-heap
+             * guard, so the one that used to sit here is gone. */
+            uint8_t *rgb_buf = NULL;
+            uint32_t rgb_w = 0, rgb_h = 0;
+            size_t rgb_size = 0;
             perf_timer_start(&g_perf.jpeg_decode);
-            err = jpeg_decoder_process(decoder, &decode_cfg, jpeg_buf, jpeg_size,
-                                       decode_buf, allocated_size, &out_size);
+            bool decoded = jpeg_decode_rgb565(jpeg_buf, jpeg_size,
+                                              &rgb_buf, &rgb_w, &rgb_h, &rgb_size);
             perf_timer_stop(&g_perf.jpeg_decode);
-            jpeg_del_decoder_engine(decoder);
-
-            if (err != ESP_OK || out_size == 0) {
-                free(decode_buf);
-                free(jpeg_buf);
-                break;
-            }
-
-            uint8_t *rgb_buf = decode_buf;
-            uint32_t rgb_size = out_size;
-
-            if (is_gray) {
-                uint32_t pixel_count = out_w * out_h;
-                rgb_size = pixel_count * 2;
-                rgb_buf = heap_caps_malloc(rgb_size, MALLOC_CAP_SPIRAM);
-                if (!rgb_buf) { free(decode_buf); free(jpeg_buf); break; }
-                uint16_t *dst = (uint16_t *)rgb_buf;
-                for (uint32_t i = 0; i < pixel_count; i++) {
-                    uint8_t g = decode_buf[i];
-                    dst[i] = ((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3);
-                }
-                free(decode_buf);
-            }
+            free(jpeg_buf);
+            if (!decoded || !rgb_buf) break;
 
             result.success = true;
             result.thumbnail.rgb565_data = rgb_buf;
-            result.thumbnail.w = out_w;
-            result.thumbnail.h = out_h;
-            result.thumbnail.data_size = rgb_size;
-            free(jpeg_buf);
+            result.thumbnail.w = rgb_w;
+            result.thumbnail.h = rgb_h;
+            result.thumbnail.data_size = (uint32_t)rgb_size;
             break;
         }
 
@@ -1458,7 +1319,7 @@ static void ensure_network_stack(void) {
 
     /* Spawn async fetch worker (pinned to Core 0, networking) */
     if (s_fetch_queue && s_fetch_result_queue) {
-        psram_task_spawn(fetch_worker_task, "fetch_wk", 8192, NULL, 4, 0);
+        psram_task_spawn(fetch_worker_task, "fetch_wk", 12288, NULL, 4, 0);  /* jpeg_decode_rgb565 wants ~10 KB headroom */
     }
 }
 
@@ -1698,24 +1559,29 @@ main_loop:
                     if (fres.success && fres.thumbnail.rgb565_data) {
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
                             /* Image-forward (layout 1) shows the last capture as its
-                             * page background. nina_dashboard_set_thumbnail() below
-                             * takes ownership of the original (and frees it when the
-                             * overlay is hidden), so the retained copy gets its own
-                             * PSRAM buffer — exactly one owner each. */
-                            /* The page must still be the visible one: hide_page_at()
-                             * has already released the capture, so attaching a copy
-                             * to a hidden page would leak it until that page is
-                             * entered and left again. */
-                            if (fres.instance_idx >= 0 && fres.instance_idx < MAX_NINA_INSTANCES
+                             * page background. The page must still be the visible
+                             * one: hide_page_at() has already released the capture,
+                             * so attaching a frame to a hidden page would leak it
+                             * until that page is entered and left again. */
+                            bool want_cap = (fres.instance_idx >= 0
+                                && fres.instance_idx < MAX_NINA_INSTANCES
                                 && nina_slot_available[fres.instance_idx]
                                 && pages[fres.instance_idx].layout == 1
                                 && nina_dashboard_get_active_page()
-                                       == NINA_PAGE_OFFSET + fres.instance_idx) {
+                                       == NINA_PAGE_OFFSET + fres.instance_idx);
+                            /* Both consumers TAKE OWNERSHIP, so the frame is copied
+                             * only when both want it. The overlay is normally hidden
+                             * (the capture is asked for by the layout, not by a tap)
+                             * and that case now hands the original straight to the
+                             * layout: no 1 MB alloc + memcpy + free per sub. */
+                            bool want_thumb = nina_dashboard_thumbnail_wants_data();
+                            uint8_t *buf = fres.thumbnail.rgb565_data;
+
+                            if (want_cap && want_thumb) {
                                 uint8_t *cap = heap_caps_malloc(fres.thumbnail.data_size,
                                                                 MALLOC_CAP_SPIRAM);
                                 if (cap) {
-                                    memcpy(cap, fres.thumbnail.rgb565_data,
-                                           fres.thumbnail.data_size);
+                                    memcpy(cap, buf, fres.thumbnail.data_size);
                                     nina_layout_image_set_capture(fres.instance_idx, cap,
                                         fres.thumbnail.w, fres.thumbnail.h,
                                         fres.thumbnail.data_size);
@@ -1725,11 +1591,19 @@ main_loop:
                                     nina_layout_image_note_capture_request(fres.instance_idx,
                                                                           false);
                                 }
+                                nina_dashboard_set_thumbnail(buf, fres.thumbnail.w,
+                                    fres.thumbnail.h, fres.thumbnail.data_size);
+                            } else if (want_cap) {
+                                nina_layout_image_set_capture(fres.instance_idx, buf,
+                                    fres.thumbnail.w, fres.thumbnail.h,
+                                    fres.thumbnail.data_size);
+                            } else if (want_thumb) {
+                                nina_dashboard_set_thumbnail(buf, fres.thumbnail.w,
+                                    fres.thumbnail.h, fres.thumbnail.data_size);
+                            } else {
+                                free(buf);
                             }
-                            nina_dashboard_set_thumbnail(fres.thumbnail.rgb565_data,
-                                fres.thumbnail.w, fres.thumbnail.h, fres.thumbnail.data_size);
                             bsp_display_unlock();
-                            /* Ownership transferred to UI */
                         } else {
                             free(fres.thumbnail.rgb565_data);
                         }

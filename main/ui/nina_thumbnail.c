@@ -295,6 +295,14 @@ void nina_dashboard_clear_thumbnail_request(void) {
     thumbnail_requested = false;
 }
 
+bool nina_dashboard_thumbnail_wants_data(void) {
+    /* Exactly the condition under which nina_dashboard_set_thumbnail() KEEPS the
+     * buffer it is handed. False means it would free it on arrival, so the
+     * caller can give that buffer to another owner instead of copying. */
+    return thumbnail_overlay && thumbnail_img
+           && !lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
+}
+
 void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32_t h, uint32_t data_size) {
     if (!thumbnail_overlay || !thumbnail_img) return;
 
