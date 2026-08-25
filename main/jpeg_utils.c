@@ -4,6 +4,7 @@
  */
 
 #include "jpeg_utils.h"
+#include "driver/jpeg_decode.h"
 #include "driver/ppa.h"
 #include "esp_heap_caps.h"
 #include "esp_log.h"
@@ -128,6 +129,199 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
     *out_h = oh;
     *out_size = buf_sz;
     return true;
+}
+
+// =============================================================================
+// Hardware JPEG Decode (esp_driver_jpeg) with software fallback
+// =============================================================================
+
+/* One HW decode attempt. Returns ESP_OK (caller owns *out_buf) or the esp_err
+ * that says why HW cannot do this picture, so the caller falls back to stb.
+ *
+ * Peak PSRAM is the whole point: the HW path needs only the padded RGB565
+ * output (~1.04 MB at 720x720), where stb needs an RGB888 intermediate
+ * (~1.55 MB) live at the same time as that RGB565 buffer.
+ *
+ * Driver contract (esp-idf 5.5.2 components/esp_driver_jpeg/jpeg_decode.c):
+ *  - input buffer: no alignment requirement (comment at jpeg_decode.c:326-328),
+ *    a plain PSRAM heap buffer is fine;
+ *  - output buffer: address AND size must be cache-aligned, checked at
+ *    jpeg_decode.c:211 -- hence jpeg_alloc_decoder_mem(), which aligns to the
+ *    L2 line (128 B here) and reports the rounded-up size;
+ *  - jpeg_decoder_process() serializes on a shared codec mutex
+ *    (jpeg_decode.c:219, portMAX_DELAY), so a concurrent decode elsewhere
+ *    (the thumbnail fetch worker) waits rather than failing;
+ *  - progressive/CMYK/odd sampling are refused by the header parse or by
+ *    jpeg_decoder_process() with ESP_ERR_NOT_SUPPORTED. */
+/* Minimal baseline-JPEG header scan: walks the marker chain up to SOF0 and
+ * reads the frame size, component count and the Y sampling factors. Every read
+ * is bounds-checked. Returns false for anything that is not a plain SOF0
+ * baseline picture (progressive SOF2, arithmetic, 12-bit, truncated header).
+ *
+ * WHY not jpeg_decoder_get_info(): IDF 5.5.2's copy leaks its ~3.3 KB
+ * header_info allocation (internal RAM) on the "sampling factor cannot be
+ * recognized" path, and it hardcodes nothing about the MCU size we need for
+ * the repack below. This scan gives us both without the driver allocating. */
+static bool jpeg_scan_sof0(const uint8_t *d, size_t n, uint32_t *w, uint32_t *h,
+                           uint8_t *nf, uint8_t *hi0, uint8_t *vi0)
+{
+    if (n < 4 || d[0] != 0xFF || d[1] != 0xD8) return false;
+    size_t i = 2;
+    while (i + 4 <= n) {
+        if (d[i] != 0xFF) return false;
+        uint8_t m = d[i + 1];
+        if (m == 0xFF) { i++; continue; }              /* fill byte */
+        if (m == 0xD8 || (m >= 0xD0 && m <= 0xD7) || m == 0x01) { i += 2; continue; }
+        size_t seg = ((size_t)d[i + 2] << 8) | d[i + 3];
+        if (seg < 2 || i + 2 + seg > n) return false;
+        if (m == 0xC0) {                                /* SOF0: baseline */
+            const uint8_t *f = d + i + 4;               /* after length */
+            if (seg < 8 || f[0] != 8) return false;     /* 8-bit precision only */
+            *h  = ((uint32_t)f[1] << 8) | f[2];
+            *w  = ((uint32_t)f[3] << 8) | f[4];
+            *nf = f[5];
+            if (*nf < 1 || *nf > 3 || seg < 8u + 3u * *nf) return false;
+            *hi0 = f[7] >> 4;
+            *vi0 = f[7] & 0x0F;
+            return *w > 0 && *h > 0;
+        }
+        if (m == 0xDA || (m >= 0xC1 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC)) {
+            return false;                               /* SOS before SOF0, or a non-baseline SOFn */
+        }
+        i += 2 + seg;
+    }
+    return false;
+}
+
+static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
+                                       uint8_t **out_buf, uint32_t *out_w,
+                                       uint32_t *out_h, size_t *out_size)
+{
+    uint32_t w = 0, h = 0;
+    uint8_t nf = 0, hi0 = 0, vi0 = 0;
+    if (!jpeg_scan_sof0(jpg, len, &w, &h, &nf, &hi0, &vi0)) return ESP_ERR_NOT_SUPPORTED;
+    /* Single-component JPEG: the HW only decodes it to GRAY8, and converting
+     * that to RGB565 is work stb already does for us in one pass. The HW
+     * accepts exactly 4:4:4 (1x1), 4:2:2 (2x1) and 4:2:0 (2x2) for 3 components
+     * (jpeg_decode.c get_info switch); anything else goes to stb. */
+    if (nf != 3) return ESP_ERR_NOT_SUPPORTED;
+    if (!((hi0 == 1 && vi0 == 1) || (hi0 == 2 && vi0 == 1) || (hi0 == 2 && vi0 == 2))) {
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+    if ((w * h) % 8 != 0) return ESP_ERR_NOT_SUPPORTED;   /* driver's own SOF check */
+
+    /* The decode engine's DMA descriptors come from the internal DMA heap. */
+    if (heap_caps_get_free_size(MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL) < 20 * 1024) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    /* HW writes whole MCUs: the row stride is the width padded to the Y MCU
+     * width (hi0*8: 8 for 4:4:4, 16 for 4:2:2/4:2:0) and the height to the Y
+     * MCU height (vi0*8) -- jpeg_parse_marker.c jpeg_parse_sof_marker(). A
+     * fixed 16 would shear every 4:4:4 picture whose width is 8 mod 16. */
+    uint32_t mcu_w = (uint32_t)hi0 * 8, mcu_h = (uint32_t)vi0 * 8;
+    uint32_t pad_w = ((w + mcu_w - 1) / mcu_w) * mcu_w;
+    uint32_t pad_h = ((h + mcu_h - 1) / mcu_h) * mcu_h;
+
+    jpeg_decode_memory_alloc_cfg_t mem_cfg = {
+        .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
+    };
+    size_t alloc_size = 0;
+    uint8_t *buf = jpeg_alloc_decoder_mem((size_t)pad_w * pad_h * 2, &mem_cfg, &alloc_size);
+    if (!buf) return ESP_ERR_NO_MEM;
+
+    jpeg_decoder_handle_t decoder = NULL;
+    jpeg_decode_engine_cfg_t engine_cfg = { .intr_priority = 0, .timeout_ms = 5000 };
+    esp_err_t err = jpeg_new_decoder_engine(&engine_cfg, &decoder);
+    if (err != ESP_OK || !decoder) {
+        heap_caps_free(buf);
+        return (err != ESP_OK) ? err : ESP_FAIL;
+    }
+
+    /* DMA discipline: jpeg_alloc_decoder_mem() callocs the buffer through the
+     * CPU, which leaves up to L1+L2 (~320 KB) of DIRTY zero lines behind. The
+     * driver only invalidates (M2C) before and after the transfer; a dirty zero
+     * line that survives and is evicted after the DMA overwrites decoded pixels
+     * in PSRAM with black. Seen live on dash4: every HW-decoded Cloud Cover
+     * frame read back as >3% pure black and was rejected. Write the zeros back
+     * NOW so no dirty line outlives the transfer. */
+    esp_cache_msync(buf, alloc_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
+    /* BGR element order gives the same in-memory RGB565 layout the SW path
+     * produces (R high, B low) -- see the packing comment above. */
+    jpeg_decode_cfg_t decode_cfg = {
+        .output_format = JPEG_DECODE_OUT_FORMAT_RGB565,
+        .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
+    };
+    uint32_t decoded_size = 0;
+    err = jpeg_decoder_process(decoder, &decode_cfg, jpg, (uint32_t)len,
+                               buf, (uint32_t)alloc_size, &decoded_size);
+    jpeg_del_decoder_engine(decoder);
+    if (err != ESP_OK || decoded_size == 0) {
+        heap_caps_free(buf);
+        return (err != ESP_OK) ? err : ESP_FAIL;
+    }
+
+    /* Diagnostic: fraction of sampled pixels exactly 0x0000 in the raw DMA
+     * output. Confirmed 2026-08-24 on dash4: the HW colour conversion crushes
+     * dark values to 0 (7-8 % of a night GeoColor frame vs <1 % from stb),
+     * which is why clouds_frame_incomplete() tests NEAR black. Debug only. */
+    {
+        const uint16_t *px = (const uint16_t *)buf;
+        uint32_t n = 0, z = 0;
+        for (uint32_t y = 0; y < h; y += 8) {
+            for (uint32_t x = 0; x < w; x += 8) {
+                n++;
+                if (px[(size_t)y * pad_w + x] == 0) z++;
+            }
+        }
+        ESP_LOGD(TAG, "HW JPEG raw: %lu/%lu samples zero, px[0]=%04x mid=%04x",
+                 (unsigned long)z, (unsigned long)n, px[0],
+                 px[(size_t)(h / 2) * pad_w + w / 2]);
+    }
+
+    /* Callers expect tightly packed w*h*2 rows, so drop the MCU pad in place.
+     * Destination row y starts at or before source row y, and we walk top-down,
+     * so no row is overwritten before it is copied. */
+    if (pad_w != w) {
+        for (uint32_t y = 1; y < h; y++) {
+            memmove(buf + (size_t)y * w * 2,
+                    buf + (size_t)y * pad_w * 2,
+                    (size_t)w * 2);
+        }
+    }
+
+    /* The driver invalidated after the transfer, so the CPU (blank-frame check,
+     * the repack above, LVGL's software renderer) reads PSRAM, not stale lines.
+     * If we repacked, write those CPU rows back so the PPA scaler's DMA sees
+     * them; a no-op when nothing was repacked. */
+    if (pad_w != w) esp_cache_msync(buf, alloc_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
+
+    *out_buf = buf;
+    *out_w = w;
+    *out_h = h;
+    *out_size = alloc_size;
+    return ESP_OK;
+}
+
+bool jpeg_decode_rgb565(const uint8_t *jpg, size_t len, uint8_t **out_buf,
+                        uint32_t *out_w, uint32_t *out_h, size_t *out_size)
+{
+    if (!jpg || !out_buf || !out_w || !out_h || !out_size || len == 0) return false;
+
+    /* Only JPEG goes near the HW engine: PNG/GIF payloads (radar tiles) are
+     * stb's job and must not log a HW failure every frame. */
+    if (len >= 3 && jpg[0] == 0xFF && jpg[1] == 0xD8 && jpg[2] == 0xFF) {
+        esp_err_t err = jpeg_hw_decode_rgb565(jpg, len, out_buf, out_w, out_h, out_size);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "HW JPEG decoded %lux%lu",
+                     (unsigned long)*out_w, (unsigned long)*out_h);
+            return true;
+        }
+        ESP_LOGI(TAG, "HW JPEG decode skipped (%s), using software decode",
+                 esp_err_to_name(err));
+    }
+    return jpeg_sw_decode_rgb565(jpg, len, out_buf, out_w, out_h, out_size);
 }
 
 // =============================================================================

@@ -78,6 +78,7 @@ static inline bool radar_frame_is_stale(uint32_t frame_gen, uint32_t ring_gen)
 
 #define RADAR_PLAY_FRAME_MS  400   /* dwell on a history frame */
 #define RADAR_PLAY_NEWEST_MS 1200  /* longer hold on the newest frame */
+#define RADAR_PLAY_FADE_MS   250   /* dissolve between frames; must stay under RADAR_PLAY_FRAME_MS */
 
 /** FNV-1a over a byte range. Dedupe key for one radar frame. */
 static inline uint32_t radar_fnv1a(const void *data, size_t len)

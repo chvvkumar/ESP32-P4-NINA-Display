@@ -12,12 +12,13 @@
 
 #include "nina_image_page.h"
 #include "nina_wait_overlay.h"
+#include "nina_empty_state.h"
 #include "nina_nav_arbiter.h"          /* nav_arbiter_notify_content_ready */
 #include "nina_dashboard.h"            /* nina_dashboard_set_image_page_enabled (config apply, B5) */
 #include "nina_dashboard_internal.h"   /* SCREEN_SIZE, OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
 #include "image_red_remap.h"
 #include "image_night_invert.h"        /* radar: invert the greyscale basemap only */
-#include "jpeg_utils.h"                /* jpeg_sw_decode_rgb565 (radar local re-transform) */
+#include "jpeg_utils.h"                /* jpeg_decode_rgb565 (ring local re-transform) */
 #include "moon_interaction.h"
 #include "radar_sites.h"               /* radar_site_nearest (token resolution) */
 #include "radar_play.h"                /* ring size, dedupe hash, playback cursor */
@@ -44,7 +45,8 @@ static image_page_t s_pages[IMG_SRC_COUNT];
 /* Animation ring (Radar, Clouds) — implementation further down, forward-declared
  * here because the render/lifecycle functions above it dispatch into the ring
  * for the animated sources. All require the display lock held by the caller. */
-static void ring_show_idx(image_page_t *p, int idx);
+static void ring_show_idx(image_page_t *p, int idx, bool fade);
+static void ring_loading_sync(image_page_t *p);
 static void ring_timer_sync(image_page_t *p);
 static void ring_request_backfill(image_page_t *p);
 static bool ring_red_mismatch(image_page_t *p);
@@ -506,6 +508,19 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
         lv_obj_add_flag(p->lbl_moon_set, LV_OBJ_FLAG_HIDDEN);
     }
 
+    /* Animated pages: a pulsing placeholder shown from page entry until the
+     * loop holds ring_show_gate() frames. Without it the first seconds after
+     * boot or entry are a black page (the ring is empty until the first
+     * download lands, and one or two frames loop badly). Hidden until
+     * ring_loading_sync() decides otherwise. */
+    if (image_src_is_animated(p->src)) {
+        p->loading = nina_empty_state_create(page_container, ICON_CLOUD_OFF,
+                                             p->src == IMG_SRC_CLOUDS ? "Loading Cloud Cover"
+                                                                      : "Loading Weather Radar",
+                                             NULL, 0);
+        if (p->loading) nina_empty_state_hide(p->loading);
+    }
+
     /* Cloud Cover location marker: created LAST so it stacks above both
      * crossfade images and the overlay bar. Clouds instance only; the other
      * five sources never build it and so can never show it. Independent of the
@@ -566,7 +581,7 @@ void image_page_render_frame(image_page_t *p)
      * and make sure the playback timer matches the current ring state. */
     if (image_src_is_animated(p->src)) {
         frame_unlock(p);
-        ring_show_idx(p, -1);           /* -1 = whatever the cursor is on */
+        ring_show_idx(p, -1, false);           /* -1 = whatever the cursor is on */
         ring_timer_sync(p);
         nina_wait_overlay_hide();
         return;
@@ -1000,7 +1015,7 @@ void image_page_show_scaled(image_page_t *p, const uint16_t *buf, int w, int h)
  * and the radar ring (owner = the ring slot). Each adds its own caption after
  * the swap. Caller holds the display lock and has already checked p->active,
  * p->root and the dimensions. */
-static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h)
+static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h, bool fade)
 {
     /* A settle->resting crossfade may still be in flight when a new drag frame
      * arrives (rapid re-swipe right at the grace boundary). Rather than DROP this
@@ -1045,10 +1060,38 @@ static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h
     lv_obj_set_style_opa(p->img_back, LV_OPA_COVER, 0);
     lv_obj_clear_flag(p->img_back, LV_OBJ_FLAG_HIDDEN);
 
+    lv_image_dsc_t *old_dsc = p->front_is_a ? &p->dsc_a : &p->dsc_b;
+
+    /* Ring playback: dissolve into the next frame instead of cutting. Only ONE
+     * image animates, whichever is on top (child 1 draws over child 0): the
+     * incoming back fades in over a fully opaque front, or the outgoing front
+     * fades out over a fully opaque back. Animating both at once (the
+     * single-frame path) dips to ~75 % brightness at the midpoint, two half
+     * copies over black, which on near-identical satellite frames reads as a
+     * flicker. crossfade_done_cb retires the front when the fade lands; a tick
+     * arriving mid-fade goes through cancel_moon_crossfade above first. */
+    if (fade && old_dsc->data) {
+        lv_obj_t *top = p->front_is_a ? p->img_back : p->img_front;
+        int32_t from = p->front_is_a ? 0 : 255, to = p->front_is_a ? 255 : 0;
+        lv_obj_set_style_opa(top, (lv_opa_t)from, 0);
+        p->crossfade_active = true;
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, top);
+        lv_anim_set_values(&a, from, to);
+        lv_anim_set_duration(&a, RADAR_PLAY_FADE_MS);
+        lv_anim_set_path_cb(&a, lv_anim_path_linear);
+        lv_anim_set_exec_cb(&a, anim_opa_cb);
+        lv_anim_set_user_data(&a, p);
+        lv_anim_set_completed_cb(&a, crossfade_done_cb);
+        lv_anim_start(&a);
+        p->displayed_stamp_ms = esp_timer_get_time() / 1000;
+        return;
+    }
+
     /* Instant swap: retire the old front and flip designations, mirroring the
      * instant branch of image_page_render_frame(). release_dsc() frees the old
      * front only if this page owned it (skips a prior borrowed buffer). */
-    lv_image_dsc_t *old_dsc = p->front_is_a ? &p->dsc_a : &p->dsc_b;
     lv_obj_add_flag(p->img_front, LV_OBJ_FLAG_HIDDEN);
     lv_image_set_src(p->img_front, NULL);
     release_dsc(p, old_dsc, p->front_is_a);
@@ -1068,7 +1111,7 @@ void image_page_show_borrowed(image_page_t *p, const uint16_t *buf, int w, int h
     if (!atomic_load(&p->active)) return;
     if (!buf || !p->root || w <= 0 || h <= 0) return;
 
-    swap_borrowed_buf(p, buf, w, h);
+    swap_borrowed_buf(p, buf, w, h, false);
 
     /* Keep the moon caption live during the drag. */
     char name[24], pct[16];
@@ -1172,6 +1215,7 @@ void image_page_apply_theme(image_page_t *p)
     /* Cloud Cover location marker follows the theme accent / Red Night rule.
      * No-op on the other five instances (s_clouds_marker is NULL there). */
     if (p->src == IMG_SRC_CLOUDS) marker_apply_theme();
+    if (p->loading) nina_empty_state_apply_theme(p->loading, current_theme, app_config_get()->color_brightness);
 
     /* Ring pixels (Radar, Clouds) are recoloured once, at insert, so restyling
      * labels is not enough here: crossing the Red Night boundary changes both
@@ -1297,6 +1341,7 @@ void image_page_set_active(image_page_t *p, bool active)
         ring_request_backfill(p);
         image_page_ensure_task_running(p);
         image_page_render_frame(p);   /* a retained or warm frame shows instantly; no-op when empty */
+        ring_loading_sync(p);         /* animated pages: placeholder until the loop has frames */
         image_page_wake(p);
         return;
     }
@@ -1312,6 +1357,7 @@ void image_page_set_active(image_page_t *p, bool active)
      * here rather than let a parked page sit on it; the next activation
      * backfills. No-op for the single-frame sources. */
     image_page_ring_reset(p);
+    ring_loading_sync(p);             /* page hidden: placeholder down */
     nina_wait_overlay_hide();
     image_page_wake(p);
 }
@@ -1722,6 +1768,39 @@ bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp)
     return false;
 }
 
+bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
+                                    bool (*fn)(const uint16_t *ref, int w, int h, void *arg),
+                                    void *arg)
+{
+    image_ring_t *r = ring_of(p);
+    if (!r || !fn || stamp == 0) return false;
+    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return false;
+    int n = atomic_load(&r->count);
+    if (n > RADAR_RING_MAX) n = RADAR_RING_MAX;
+    uint32_t cur = atomic_load(&r->bake_gen);
+    int best = -1;
+    uint32_t best_d = 0;
+    bool best_same = true;
+    for (int i = 0; i < n; i++) {
+        ring_slot_t *s = &r->slots[i];
+        if (!s->buf || s->stamp == 0 || s->bake_gen != cur) continue;
+        uint32_t d = (s->stamp > stamp) ? s->stamp - stamp : stamp - s->stamp;
+        bool same = (d == 0);
+        /* A different stamp always beats the same stamp (a re-fetch must not be
+         * judged against its own earlier, possibly partial, version). */
+        if (best < 0 || (best_same && !same) || (same == best_same && d < best_d)) {
+            best = i; best_d = d; best_same = same;
+        }
+    }
+    bool ret = false;
+    if (best >= 0) {
+        ring_slot_t *s = &r->slots[best];
+        ret = fn((const uint16_t *)s->buf, (int)s->w, (int)s->h, arg);
+    }
+    bsp_display_unlock();
+    return ret;
+}
+
 /* Free one slot — BOTH its allocations, the decoded pixels and the retained
  * compressed source. Display lock held. Detaches the LVGL descriptors first if
  * they borrow this slot's buffer, so the free can never leave LVGL on freed
@@ -1731,9 +1810,19 @@ bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp)
 static void ring_free_slot(image_page_t *p, image_ring_t *r, int i)
 {
     ring_slot_t *s = &r->slots[i];
-    if (s->buf && (const uint8_t *)s->buf == r->shown) {
-        image_page_release_lvgl(p);      /* drops both descriptors + borrowed flags */
-        r->shown = NULL;
+    if (s->buf) {
+        const uint8_t *b = (const uint8_t *)s->buf;
+        /* During the playback dissolve the OUTGOING frame is still drawn for
+         * RADAR_PLAY_FADE_MS after r->shown moved on. Finalize the fade first:
+         * that retires and detaches the outgoing descriptor, so freeing its
+         * slot below is safe and the incoming frame stays on screen. */
+        if (p->crossfade_active && (b == p->dsc_a.data || b == p->dsc_b.data)) {
+            cancel_moon_crossfade(p);
+        }
+        if (b == r->shown || b == p->dsc_a.data || b == p->dsc_b.data) {
+            image_page_release_lvgl(p);  /* drops both descriptors + borrowed flags */
+            r->shown = NULL;
+        }
     }
     if (s->buf) heap_caps_free(s->buf);
     if (s->src) heap_caps_free(s->src);
@@ -1742,7 +1831,7 @@ static void ring_free_slot(image_page_t *p, image_ring_t *r, int i)
 
 /* Put ring slot @p idx on screen (idx < 0 = the current cursor). Display lock
  * held. No-op when the page has no LVGL objects or the slot is empty. */
-static void ring_show_idx(image_page_t *p, int idx)
+static void ring_show_idx(image_page_t *p, int idx, bool fade)
 {
     image_ring_t *r = ring_of(p);
     if (!r) return;
@@ -1753,7 +1842,7 @@ static void ring_show_idx(image_page_t *p, int idx)
     ring_slot_t *s = &r->slots[idx];
     if (!s->buf || !p->root || s->w == 0 || s->h == 0) return;
 
-    swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h);
+    swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h, fade);
     r->shown    = s->buf;
     r->play_idx = idx;
 
@@ -1816,26 +1905,112 @@ static void ring_tick_cb(lv_timer_t *t)
 
     int next = radar_play_next_baked(r->play_idx, count, gens, cur_gen);
     if (next == r->play_idx) return;
-    ring_show_idx(p, next);
+    ring_show_idx(p, next, true);
     lv_timer_set_period(t, radar_play_period_ms(next));
 }
 
 /* Create or delete the playback timer to match the current state. Display lock
  * held. A single still (frames == 1, or a ring that has not filled past one
  * frame) never animates, matching the other image pages. */
+/* Frames the loop must hold before anything is put on screen: 3, or the whole
+ * capacity when it is smaller. One frame is a still, two flicker. */
+static int ring_show_gate(image_page_t *p)
+{
+    int c = image_page_ring_capacity(p);
+    return c < 3 ? c : 3;
+}
+
+/* Show or hide the loading placeholder to match the ring state. Display lock
+ * held. "Loading" = the page is visible, nothing has been shown yet and the
+ * ring is still under the gate; once a frame is up the placeholder never
+ * returns for that visit (a ring shrunk by memory pressure keeps playing). The
+ * Cloud Cover marker hides with it so the page is not a lone dot on black. */
+static void ring_loading_sync(image_page_t *p)
+{
+    image_ring_t *r = ring_of(p);
+    if (!r || !p->loading) return;
+    int count = atomic_load(&r->count);
+    int gate  = ring_show_gate(p);
+    bool loading = atomic_load(&p->active) && r->shown == NULL && count < gate;
+    if (loading) {
+        /* Progress in the title so the wait reads as work, not a hang: each
+         * frame is a ~3 s download + decode, so "1 of 3" is the honest ETA. */
+        char title[48];
+        snprintf(title, sizeof(title), "Loading %s  %d of %d",
+                 p->src == IMG_SRC_CLOUDS ? "Cloud Cover" : "Weather Radar", count, gate);
+        nina_empty_state_set_title(p->loading, title);
+        nina_empty_state_show(p->loading);
+        nina_empty_state_set_busy(p->loading, true);
+        if (p->src == IMG_SRC_CLOUDS) marker_set_visible(false);
+    } else {
+        nina_empty_state_set_busy(p->loading, false);
+        nina_empty_state_hide(p->loading);
+        if (p->src == IMG_SRC_CLOUDS) marker_set_visible(app_config_get()->clouds_show_location);
+    }
+}
+
 static void ring_timer_sync(image_page_t *p)
 {
     image_ring_t *r = ring_of(p);
     if (!r) return;
     bool want = atomic_load(&p->active) &&
                 image_page_ring_capacity(p) > 1 &&
-                atomic_load(&r->count) > 1;
+                atomic_load(&r->count) > 1 &&
+                r->shown != NULL;              /* nothing plays before the gate */
     if (want && !r->timer) {
         r->timer = lv_timer_create(ring_tick_cb, RADAR_PLAY_FRAME_MS, p);
     } else if (!want && r->timer) {
         lv_timer_delete(r->timer);
         r->timer = NULL;
     }
+}
+
+/* Free the OLDEST resident frame so the next decode has somewhere to go.
+ *
+ * WHY: a full ring is 6-10 MB and nothing ever shrank it. Once PSRAM is
+ * fragmented past the point where a decode can get its blocks, the fetch fails,
+ * the poll spine backs off, and the poller retries the same doomed decode
+ * forever — the NEWEST frame stops updating while the old ones keep animating.
+ * This is the release valve; the caller (anim_decode_headroom in
+ * image_page_poll.c) decides when to pull it.
+ *
+ * LOCKING / CURSOR: identical to the oldest-end eviction inside
+ * image_page_ring_add() — display lock taken here (this runs on the page's poll
+ * task, outside the lock, exactly like _add), ring_free_slot() for the pairing
+ * of pixels + retained source and for detaching the LVGL descriptor if that
+ * buffer is the one on screen. The only case _add does not have to handle is the
+ * cursor sitting ON the freed tail (it always inserts afterwards and re-shows),
+ * so clamp play_idx and put the newest frame up instead; ring_timer_sync() then
+ * stops the timer if a single frame is left.
+ *
+ * Never drops the last frame: the newest must survive or the page goes blank. */
+bool image_page_ring_drop_oldest(image_page_t *p)
+{
+    image_ring_t *r = ring_of(p);
+    if (!r || atomic_load(&r->count) <= 1) return false;
+    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return false;
+
+    int count = atomic_load(&r->count);
+    if (count <= 1) {                      /* re-tested under the lock */
+        bsp_display_unlock();
+        return false;
+    }
+    ring_free_slot(p, r, count - 1);
+    count--;
+    atomic_store(&r->count, count);
+    if (r->play_idx >= count) {            /* the cursor was on the slot just freed */
+        r->play_idx = 0;
+        if (atomic_load(&p->active)) ring_show_idx(p, 0, false);   /* same gate as _add */
+    }
+    ring_timer_sync(p);
+    bsp_display_unlock();
+
+    /* Deliberately NO backfill re-arm. The backfill assumes an empty ring (its
+     * URL index i lands in slot i); on a partial ring it would fetch the wrong
+     * history slot (Radar) or re-download the stamp just evicted (Clouds), once
+     * per poll, forever. A ring shrunk under memory pressure stays shorter until
+     * the next page activation rebuilds it. */
+    return true;
 }
 
 void image_page_ring_reset(image_page_t *p)
@@ -1867,6 +2042,7 @@ void image_page_ring_reset(image_page_t *p)
      * the display lock held, the same lock image_page_ring_add() tests it
      * under, so there is no window between the bump and the free. */
     atomic_fetch_add(&r->gen, 1);
+    ring_loading_sync(p);
 }
 
 void image_page_ring_invalidate(image_page_t *p)
@@ -2108,8 +2284,13 @@ void image_page_ring_add(image_page_t *p, image_frame_t *fresh, bool at_head, ui
             if (atomic_load(&p->active)) {
                 /* Re-show only if the healed slot was on screen (its buffer is
                  * gone) or nothing is up yet; otherwise playback carries on. */
-                if (was_shown || !r->shown) ring_show_idx(p, was_shown ? same : -1);
-                ring_timer_sync(p);
+                if (!r->shown && atomic_load(&r->count) < ring_show_gate(p)) {
+                    ring_loading_sync(p);
+                } else {
+                    if (was_shown || !r->shown) ring_show_idx(p, was_shown ? same : 0, false);
+                    ring_loading_sync(p);
+                    ring_timer_sync(p);
+                }
                 notify = true;
             }
             bsp_display_unlock();
@@ -2175,8 +2356,16 @@ void image_page_ring_add(image_page_t *p, image_frame_t *fresh, bool at_head, ui
          * frame just inserted was baked live, so it is the one slot guaranteed
          * current: jumping to it is what ends that hold at the first opportunity
          * instead of waiting for the pass. */
-        ring_show_idx(p, (r->shown && ring_slot_current(r, r->play_idx)) ? -1 : pos);
-        ring_timer_sync(p);
+        if (!r->shown && count < ring_show_gate(p)) {
+            ring_loading_sync(p);             /* keep the placeholder up */
+        } else {
+            /* First show of the visit goes to the NEWEST frame (index 0), not
+             * to the slot just inserted, which past the gate is history. */
+            ring_show_idx(p, !r->shown ? 0
+                             : (ring_slot_current(r, r->play_idx) ? -1 : pos), false);
+            ring_loading_sync(p);
+            ring_timer_sync(p);
+        }
         notify = true;
     }
     bsp_display_unlock();
@@ -2303,7 +2492,7 @@ static bool ring_retransform_pass(image_page_t *p, image_ring_t *r)
         uint8_t *px = NULL;
         uint32_t w = 0, h = 0;
         size_t   sz = 0;
-        if (jpeg_sw_decode_rgb565(src, len, &px, &w, &h, &sz) && px) {
+        if (jpeg_decode_rgb565(src, len, &px, &w, &h, &sz) && px) {
             f.buf = px;
             f.w   = (uint16_t)w;
             f.h   = (uint16_t)h;
@@ -2346,7 +2535,7 @@ static bool ring_retransform_pass(image_page_t *p, image_ring_t *r)
          * playback by the time it is on screen. */
         r->slots[i].bake_gen = bake_gen;
         /* .hash is over the compressed bytes, so it survives the re-bake. */
-        if (was_shown) ring_show_idx(p, i);
+        if (was_shown) ring_show_idx(p, i, false);
         bsp_display_unlock();
         if (old) heap_caps_free(old);
         done++;

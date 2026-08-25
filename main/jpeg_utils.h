@@ -26,6 +26,24 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
                            size_t *out_size);
 
 /**
+ * @brief Decode an image to RGB565, ESP32-P4 hardware JPEG engine first.
+ *
+ * Tries the HW decoder for baseline JPEG and falls back to
+ * jpeg_sw_decode_rgb565() for anything it refuses (progressive, CMYK, grayscale,
+ * odd sampling, engine busy/out of memory) and for the non-JPEG formats stb
+ * handles (PNG, GIF). The HW path avoids stb's RGB888 intermediate (~1.55 MB at
+ * 720x720), which is what makes the image pages fit in a fragmented PSRAM heap.
+ *
+ * Output contract is identical to jpeg_sw_decode_rgb565(): tightly packed
+ * RGB565 rows top-down, out_w/out_h are the image's real pixel dimensions (the
+ * HW MCU padding is removed), 128-byte aligned PSRAM, caller frees with free().
+ *
+ * @return true on success (from either path)
+ */
+bool jpeg_decode_rgb565(const uint8_t *jpg, size_t len, uint8_t **out_buf,
+                        uint32_t *out_w, uint32_t *out_h, size_t *out_size);
+
+/**
  * @brief Probe a JPEG's pixel dimensions from its header WITHOUT decoding it.
  * Wraps stbi_info_from_memory(); reads only the header, allocates nothing for
  * pixel data. Use to reject oversized images before the full decode allocation.
