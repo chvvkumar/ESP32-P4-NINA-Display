@@ -305,20 +305,43 @@ int main(void) {
         memset(px, 0, sizeof(px));
         check_bool("incomplete: all black", clouds_frame_incomplete(px, W, H, W, 0), true);
         check_bool("incomplete: all black (Air Mass too)", clouds_frame_incomplete(px, W, H, W, 2), true);
-        for (int i = 0; i < W * H; i++) px[i] = 0x0841;          /* night navy */
+        for (int i = 0; i < W * H; i++) px[i] = 0x0004;          /* night navy, RGB(0,0,32): above the near-black gate */
         check_bool("incomplete: all dark navy", clouds_frame_incomplete(px, W, H, W, 0), false);
-        /* 25% black block: top-left quadrant */
+        for (int i = 0; i < W * H; i++) px[i] = 0x0841;          /* RGB(8,8,8): HW crushes this to 0, stb keeps it; both count as near black */
+        check_bool("incomplete: all crushed-dark counts as black", clouds_frame_incomplete(px, W, H, W, 0), true);
+        for (int i = 0; i < W * H; i++) px[i] = 0x0004;
+        /* 25% black block (one missing quadrant) is NOT rejected any more: the
+         * gate only catches blank slots; partials self-heal on the next poll. */
         for (int y = 0; y < H / 2; y++)
             for (int x = 0; x < W / 2; x++) px[y * W + x] = 0;
-        check_bool("incomplete: 25% black block (GeoColor, 3%)", clouds_frame_incomplete(px, W, H, W, 0), true);
-        check_bool("incomplete: 25% black block (Clean IR, 10%)", clouds_frame_incomplete(px, W, H, W, 1), true);
-        /* Air Mass renders large legitimately black areas: 25% black is a GOOD frame */
-        check_bool("incomplete: 25% black block (Air Mass, 80%)", clouds_frame_incomplete(px, W, H, W, 2), false);
+        check_bool("incomplete: 25% black block passes (GeoColor)", clouds_frame_incomplete(px, W, H, W, 0), false);
+        check_bool("incomplete: 25% black block passes (Air Mass)", clouds_frame_incomplete(px, W, H, W, 2), false);
+        /* 95% black = blank slot with a few basemap lines */
+        for (int i = 0; i < W * H; i++) px[i] = 0;
+        for (int x = 0; x < W; x += 8) px[x] = 0x0004;               /* 12 of 96 samples lit = 87.5% black */
+        check_bool("incomplete: 87% black passes", clouds_frame_incomplete(px, W, H, W, 0), false);
+        for (int x = 8; x < W; x += 8) px[x] = 0;                     /* 1 of 96 lit = 99% black */
+        check_bool("incomplete: 99% black is blank", clouds_frame_incomplete(px, W, H, W, 1), true);
         /* ~1% black: 1 of the 96 sampled pixels */
-        for (int i = 0; i < W * H; i++) px[i] = 0x0841;
+        for (int i = 0; i < W * H; i++) px[i] = 0x0004;
         px[0] = 0;
         check_bool("incomplete: 1% black", clouds_frame_incomplete(px, W, H, W, 0), false);
         check_bool("incomplete: NULL is not incomplete", clouds_frame_incomplete(NULL, W, H, W, 0), false);
+        /* missing tiles vs the neighbouring frame */
+        static uint16_t ref[W * H];
+        for (int i = 0; i < W * H; i++) { ref[i] = 0x5aac; px[i] = 0x5aac; }   /* both lit */
+        check_bool("holes: identical lit frames", clouds_frame_holes(px, ref, W, H, W), false);
+        for (int y = 0; y < H / 2; y++)
+            for (int x = 0; x < W / 2; x++) px[y * W + x] = 0;            /* one tile: 25% < 30% bar */
+        check_bool("holes: single quadrant is under the bar", clouds_frame_holes(px, ref, W, H, W), false);
+        for (int y = 0; y < H / 2; y++)
+            for (int x = 0; x < W; x++) px[y * W + x] = 0;                /* top half: 50% */
+        check_bool("holes: black half where ref is lit", clouds_frame_holes(px, ref, W, H, W), true);
+        for (int y = 0; y < H / 2; y++)
+            for (int x = 0; x < W; x++) ref[y * W + x] = 0x0841;          /* same area dark in ref too (night) */
+        check_bool("holes: dark in both is not a hole", clouds_frame_holes(px, ref, W, H, W), false);
+        for (int i = 0; i < W * H; i++) ref[i] = 0;
+        check_bool("holes: blank reference says nothing", clouds_frame_holes(px, ref, W, H, W), false);
     }
 
     printf("\n%s (%d failures)\n", fails == 0 ? "ALL PASSED" : "FAILED", fails);

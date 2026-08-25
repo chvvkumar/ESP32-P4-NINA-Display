@@ -89,6 +89,7 @@ typedef struct image_page {
 
     /* LVGL state (display lock held by the caller for every access) */
     lv_obj_t *root, *img_front, *img_back, *overlay_bar, *lbl_region, *lbl_timestamp;
+    lv_obj_t *loading;                 /* animated pages: pulsing placeholder until the loop has a few frames; else NULL */
     lv_obj_t *lbl_moon_age, *lbl_moon_next, *lbl_moon_rise, *lbl_moon_set;   /* Moon instance only, else NULL */
     lv_image_dsc_t dsc_a, dsc_b;
     bool      dsc_a_borrowed, dsc_b_borrowed, front_is_a, crossfade_active, force_redraw;
@@ -202,6 +203,20 @@ int  image_page_ring_count(image_page_t *p);        /* resident frames (lock-fre
 int  image_page_ring_capacity(image_page_t *p);     /* radar_frames / clouds_frames, clamped 1..RADAR_RING_MAX */
 bool image_page_ring_backfill_take(image_page_t *p);   /* consume the pending-backfill request */
 bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp);   /* lock-free; a held stamp needs no re-download */
+/* Run @p fn on the pixels of the resident frame nearest in time to @p stamp
+ * (a different stamp preferred over the same one; current bake only) with the
+ * display lock held for the duration, so the slot cannot be freed under it.
+ * Returns fn's result, or false when the ring has no usable neighbour. */
+bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
+                                    bool (*fn)(const uint16_t *ref, int w, int h, void *arg),
+                                    void *arg);
+/* Free the OLDEST resident frame (pixels + retained source) to give the next
+ * decode room. Takes the display lock itself; the page's poll task only, same as
+ * image_page_ring_add(). Returns false — freeing nothing — when the ring holds
+ * one frame or none: the newest must survive so the page never goes blank.
+ * Does NOT re-arm the backfill (it assumes an empty ring); a shrunk ring stays
+ * shorter until the next page activation rebuilds it. */
+bool image_page_ring_drop_oldest(image_page_t *p);
 /* Enforce IMAGE_PAGE_MAX_RESIDENT: while more than the cap are resident, free the
  * frame of the least-recently-shown instance that is neither active nor warm.
  * Called by image_page_commit_frame after every commit; no display lock. */
