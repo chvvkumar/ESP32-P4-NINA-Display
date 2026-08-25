@@ -1032,13 +1032,17 @@ typedef struct {
  * what showed as repeating horizontal seams -- PPA only accelerates 1.0x, so a
  * zoomed lv_image is always the software path).
  *
- * Software, not ppa_scale_rgb565_into(): on device the SRM path both mirrors
- * the frame vertically and resamples by pixel drop/duplicate, which banded the
- * hero worse than LVGL's own zoom. The GOES/moon callers are calibrated around
- * that behaviour, so it is left alone.
+ * Software, not ppa_scale_rgb565_into(): the PPA SRM engine truncates its
+ * scale factor to 1/16 steps, so an arbitrary fit into the hero box lands
+ * short (a 1024-wide webcam, the largest decode_image() accepts, into a
+ * 676-wide box quantises 0.660 down to 10/16 = 0.625 and leaves a 36 px strip
+ * uncovered), and it resamples by pixel drop/duplicate, which banded the hero
+ * worse than LVGL's own zoom at the ~1.5:1 downscale a webcam frame needs.
+ * Bilinear in software hits the box exactly and filters. SRM does NOT mirror: mirror_x/mirror_y are zero on that call, and
+ * every mirror sighting of that era was the stb bug described below.
  *
- * Row order: jpeg_sw_decode_rgb565 converts stb output TOP-DOWN, so a straight
- * copy renders upright. NO row reversal belongs on this path. Every past
+ * Row order: the client's decode (jpeg_decode_rgb565, HW engine or stb) emits
+ * rows TOP-DOWN, so a straight copy renders upright. NO row reversal belongs on this path. Every past
  * "mirrored with a straight copy" sighting was stb's flip-on-load flag reading
  * uninitialized TLS garbage on this task (proven on-device 2026-08-14; see
  * STBI_NO_THREAD_LOCALS in stb_image.c), which vertically mirrored decodes per

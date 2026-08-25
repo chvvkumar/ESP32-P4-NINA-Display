@@ -17,6 +17,7 @@
 #include "nina_dashboard.h"            /* nina_dashboard_set_image_page_enabled (config apply, B5) */
 #include "nina_dashboard_internal.h"   /* SCREEN_SIZE, OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
 #include "image_red_remap.h"
+#include "image_fit.h"                 /* PPA fit: n/16 scale + symmetric trim */
 #include "image_night_invert.h"        /* radar: invert the greyscale basemap only */
 #include "jpeg_utils.h"                /* jpeg_decode_rgb565 (ring local re-transform) */
 #include "moon_interaction.h"
@@ -592,9 +593,9 @@ void image_page_render_frame(image_page_t *p)
         return;
     }
 
-    /* Copy the RGB565 source into a freshly allocated PSRAM buffer so we can
-     * release frame_mux before running the (asynchronous) crossfade and so the
-     * LVGL side owns its display buffers independently of the poller. */
+    /* Transform the RGB565 source into a freshly allocated PSRAM buffer (ONE PPA
+     * pass, below) so frame_mux is released before the (asynchronous) crossfade
+     * and the LVGL side owns its display buffers independently of the poller. */
     uint16_t sw = p->frame.w, sh = p->frame.h;
     if (sw == 0 || sh == 0) {
         frame_unlock(p);
@@ -623,91 +624,59 @@ void image_page_render_frame(image_page_t *p)
         oy = (uint16_t)((sh - h) / 2);
     }
 
-    size_t   buf_size = (size_t)w * h * 2;
-    uint8_t *copy = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
-    if (!copy) {
-        ESP_LOGE(TAG, "PSRAM alloc failed for crossfade buffer (%u bytes)",
-                 (unsigned)buf_size);
-        frame_unlock(p);
-        /* New-image gate passed but the display copy failed — release any
-         * manual-fetch wait overlay so it can't get stuck. */
-        nina_wait_overlay_hide();
-        return;
-    }
-    /* Copy the (optionally cropped) source row-by-row. Decode is top-down end to
-     * end (the historical "SW decode is flipped" belief was stb's flip-on-load
-     * flag reading uninitialized TLS garbage; see STBI_NO_THREAD_LOCALS in
-     * stb_image.c), so src_y is simply oy + y. ox/oy apply the center-crop. */
-    size_t src_stride = (size_t)sw * 2;
-    size_t dst_stride = (size_t)w * 2;
+    /* Everything the LVGL side needs out of the frame, captured under the same
+     * lock as the pixels: the label so the on-screen text cannot desync from the
+     * picture if a config change lands between fetches (issue #166). */
+    int64_t stamp_ms = p->frame.stamp_ms;
+    char label_copy[48];
+    strlcpy(label_copy, p->frame.label, sizeof(label_copy));
 
     /* Optional caption mask (Solar bands only). The mask rect is in upright-full
      * image fractional coords; convert to a pixel rect [mx0..mx1, my0..my1]. For
-     * masked pixels we composite a color-sampled blend: per row, sample one
-     * source pixel just to the RIGHT of the mask (col mx1+PAD) at the same
-     * upright row and stretch it across the masked span. This extends the
-     * neighbouring background (black margin for HMI -> seamless; corona for
-     * LASCO -> blends) horizontally over the burned-in timestamp. */
-    bool  mask_on = false;
-    int   mx0 = 0, mx1 = 0, my0 = 0, my1 = 0, sample_col = 0;
-    /* Gate the caption mask on the same crop/clean toggle as the crop, so turning
-     * the toggle off shows the raw frame (incl. burned-in timestamp). */
-    if (image_page_config_crop(cfg, p->src) && p->src == IMG_SRC_SOLAR) {
-        float fx0, fy0, fx1, fy1;
-        if (solar_band_text_mask(cfg->solar_band, &fx0, &fy0, &fx1, &fy1)) {
-            mask_on = true;
-            mx0 = (int)(fx0 * sw);
-            mx1 = (int)(fx1 * sw);
-            my0 = (int)(fy0 * sh);
-            my1 = (int)(fy1 * sh);
-            const int PAD = 8;
-            sample_col = mx1 + PAD;
-            if (sample_col > sw - 1) sample_col = sw - 1;  /* clamp into bounds */
+     * masked pixels we composite a colour-sampled blend: per row, sample one
+     * source pixel just to the RIGHT of the mask (col mx1+PAD) and stretch it
+     * across the masked span. This extends the neighbouring background (black
+     * margin for HMI -> seamless; corona for LASCO -> blends) horizontally over
+     * the burned-in timestamp.
+     *
+     * The ONE case that still costs a full-frame CPU copy: the PPA cannot paint
+     * it, and mapping the mask rect into output space would be a second geometry
+     * to keep in step with image_fit. Every other source hands the PPA
+     * p->frame.buf directly. Gated on the same crop/clean toggle as the crop, so
+     * turning that off shows the raw frame, burned-in timestamp and all. */
+    const uint8_t *src_pix = p->frame.buf;
+    uint8_t *masked = NULL;
+    float fx0, fy0, fx1, fy1;
+    if (image_page_config_crop(cfg, p->src) && p->src == IMG_SRC_SOLAR &&
+        solar_band_text_mask(cfg->solar_band, &fx0, &fy0, &fx1, &fy1)) {
+        masked = heap_caps_malloc((size_t)sw * sh * 2, MALLOC_CAP_SPIRAM);
+        if (masked) {
+            memcpy(masked, p->frame.buf, (size_t)sw * sh * 2);
+            int mx0 = (int)(fx0 * sw), mx1 = (int)(fx1 * sw);
+            int my0 = (int)(fy0 * sh), my1 = (int)(fy1 * sh);
+            int sample_col = mx1 + 8;                  /* PAD past the mask edge */
+            if (sample_col > (int)sw - 1) sample_col = (int)sw - 1;
+            if (sample_col < 0) sample_col = 0;
+            if (mx0 < 0) mx0 = 0;
+            if (mx1 > (int)sw) mx1 = (int)sw;
+            if (my0 < 0) my0 = 0;
+            if (my1 > (int)sh) my1 = (int)sh;
+            for (int my = my0; my < my1; my++) {
+                uint16_t *row  = (uint16_t *)(masked + (size_t)my * sw * 2);
+                uint16_t  fill = row[sample_col];
+                for (int mx = mx0; mx < mx1; mx++) row[mx] = fill;
+            }
+            src_pix = masked;
+        } else {
+            ESP_LOGW(TAG, "%s: no PSRAM for the caption mask, showing it raw", p->name);
         }
     }
 
-    for (uint32_t y = 0; y < h; y++) {
-        uint32_t src_y = (uint32_t)oy + y;
-        memcpy((uint8_t *)copy + (size_t)y * dst_stride,
-               p->frame.buf + (size_t)src_y * src_stride + (size_t)ox * 2,
-               dst_stride);
-
-        if (!mask_on) continue;
-
-        /* Upright-full row for this dst row. Mask rect is in upright coords. */
-        int uY = (int)oy + (int)y;
-        if (uY < my0 || uY >= my1) continue;  /* row outside the mask band */
-
-        /* Sample the per-row replacement color ONCE (right of the mask, same
-         * upright row). */
-        const uint8_t *src_px = p->frame.buf
-                                + (size_t)src_y * src_stride
-                                + (size_t)sample_col * 2;
-        uint8_t lo = src_px[0], hi = src_px[1];
-
-        /* Overwrite the masked columns in this dst row. dst col x maps to
-         * upright col (ox + x); paint where ox+x is within [mx0, mx1). */
-        for (uint32_t x = 0; x < w; x++) {
-            int uX = (int)ox + (int)x;
-            if (uX < mx0 || uX >= mx1) continue;
-            uint8_t *dst_px = (uint8_t *)copy + (size_t)y * dst_stride + (size_t)x * 2;
-            dst_px[0] = lo;
-            dst_px[1] = hi;
-        }
-    }
-    int64_t stamp_ms = p->frame.stamp_ms;
-    /* Capture the label this buffer was fetched for UNDER the same lock so the
-     * on-screen text is coupled to frame.buf and cannot desync if a config
-     * change lands between fetches (issue #166). */
-    char label_copy[48];
-    strlcpy(label_copy, p->frame.label, sizeof(label_copy));
-    frame_unlock(p);
-
-    /* Per-source logical mirror pass. Runs on the upright `copy` (after the
-     * caption mask) and BEFORE the rotation block, so flips compose naturally
-     * with rotation. vflip reverses row order (top<->bottom); hflip reverses the
-     * pixel order within each row (left<->right). Moon is excluded — it has its
-     * own moon_flip_u/v handling elsewhere. Dimensions are unchanged. */
+    /* Per-source mirror and rotation flags. The PPA applies the mirrors to the
+     * source and then the rotation, the same order the old software passes ran
+     * in, so the on-screen result is unchanged. orient 0/1/2/3 = 0/90/180/270
+     * degrees CLOCKWISE. The Moon has neither (its own moon_flip_u/v handling
+     * lives elsewhere) and no crop, so its job below is an identity 1.0x copy. */
     uint8_t do_vflip = (p->src == IMG_SRC_GOES)   ? cfg->goes_vflip
                        : (p->src == IMG_SRC_SOLAR) ? cfg->solar_vflip
                        : (p->src == IMG_SRC_CUSTOM) ? cfg->custom_vflip
@@ -716,129 +685,150 @@ void image_page_render_frame(image_page_t *p)
                        : (p->src == IMG_SRC_SOLAR) ? cfg->solar_hflip
                        : (p->src == IMG_SRC_CUSTOM) ? cfg->custom_hflip
                                                     : 0;
-    if (do_vflip) {
-        /* Swap row y with row (h-1-y) using one PSRAM temp row of dst_stride. */
-        uint8_t *tmp_row = heap_caps_malloc(dst_stride, MALLOC_CAP_SPIRAM);
-        if (!tmp_row) {
-            ESP_LOGE(TAG, "PSRAM alloc failed for vflip temp row (%u bytes)",
-                     (unsigned)dst_stride);
-            heap_caps_free(copy);
-            /* frame_mux already released above; just retire the wait overlay. */
-            nina_wait_overlay_hide();
-            return;
+    uint8_t orient   = (p->src == IMG_SRC_GOES)   ? cfg->goes_orientation
+                       : (p->src == IMG_SRC_SOLAR) ? cfg->solar_orientation
+                       : (p->src == IMG_SRC_CUSTOM) ? cfg->custom_orientation
+                                                    : 0;
+
+    /* ONE hardware pass does crop + mirror + rotate + scale straight into a
+     * panel-width destination. What this replaces: a crop memcpy, a row-swap
+     * vflip, an in-row hflip and a gather-rotate into a second buffer, all on
+     * the display lock and on up to 1024x1024 pixels, plus — every bit as
+     * expensive — an lv_image_set_scale() != 256 that made LVGL software-
+     * resample the whole 720x720 screen on EVERY redraw in full-refresh mode.
+     * The destination is exactly SCREEN_SIZE wide, so the image is a blit now.
+     *
+     * image_fit_pick() works in LOGICAL (post-rotation) space and hands back the
+     * n/16 scale plus the symmetric trim that keeps the output inside the panel;
+     * image_fit_logical_to_source() turns that trim back into the source
+     * rectangle, which is then offset by the config crop origin (ox, oy). */
+    uint32_t lw = (orient & 1) ? h : w;
+    uint32_t lh = (orient & 1) ? w : h;
+    image_fit_t fit;
+    uint32_t bx = 0, by = 0, bw = 0, bh = 0;
+    uint8_t  *dst = NULL;
+    size_t    dst_size = 0;
+    esp_err_t err = ESP_ERR_INVALID_SIZE;
+    if (image_fit_pick(lw, lh, SCREEN_SIZE, &fit) &&
+        image_fit_logical_to_source(&fit, w, h, orient, &bx, &by, &bw, &bh)) {
+        /* 128 B aligned address AND size: the PPA rejects anything else. */
+        dst_size = ((size_t)SCREEN_SIZE * fit.out_h * 2 + 127) & ~(size_t)127;
+        dst = heap_caps_aligned_alloc(128, dst_size, MALLOC_CAP_SPIRAM);
+        if (dst) {
+            ppa_srm_job_t job = {
+                .src           = src_pix,
+                .src_stride_px = sw,
+                .src_h         = sh,
+                .block_x       = (uint32_t)ox + bx,
+                .block_y       = (uint32_t)oy + by,
+                .block_w       = bw,
+                .block_h       = bh,
+                .rotate_cw     = orient,
+                .hflip         = do_hflip != 0,
+                .vflip         = do_vflip != 0,
+                .dst           = dst,
+                .dst_buf_size  = dst_size,
+                .dst_w         = SCREEN_SIZE,
+                .dst_h         = fit.out_h,
+                .dst_x         = fit.dst_x,
+                .dst_y         = 0,
+                .scale_n16     = fit.n16,
+                /* Only a source too wide to fill the panel leaves bands to clear. */
+                .clear_dst     = (fit.out_w < SCREEN_SIZE),
+            };
+            err = ppa_srm_rgb565(&job);
+        } else {
+            ESP_LOGE(TAG, "PSRAM alloc failed for the display frame (%u bytes)",
+                     (unsigned)dst_size);
+            err = ESP_ERR_NO_MEM;
         }
-        for (uint32_t y = 0; y < h / 2; y++) {
-            uint8_t *row_a = (uint8_t *)copy + (size_t)y * dst_stride;
-            uint8_t *row_b = (uint8_t *)copy + (size_t)(h - 1 - y) * dst_stride;
-            memcpy(tmp_row, row_a, dst_stride);
-            memcpy(row_a, row_b, dst_stride);
-            memcpy(row_b, tmp_row, dst_stride);
-        }
-        heap_caps_free(tmp_row);
     }
-    if (do_hflip) {
-        /* Reverse the w pixels in each row: swap col x with (w-1-x). */
-        for (uint32_t y = 0; y < h; y++) {
-            uint16_t *row = (uint16_t *)((uint8_t *)copy + (size_t)y * dst_stride);
-            for (uint32_t x = 0; x < (uint32_t)w / 2; x++) {
-                uint16_t t          = row[x];
-                row[x]              = row[w - 1 - x];
-                row[w - 1 - x]      = t;
+    /* Degraded fallback for a PPA that would not run at all (pool starvation, an
+     * alignment corner the driver rejects): copy the config-crop window straight
+     * out of the source, rows as they are — no flip, no rotate — so the page can
+     * still put a picture up instead of staying blank forever after boot. It must
+     * happen HERE, while frame_mux is still held and src_pix (p->frame.buf, or
+     * `masked`) is still valid. LVGL scales it in software from the tail below,
+     * which is exactly what this page did before the PPA pass existed. Skipped
+     * when the PPA leg already failed on a PSRAM alloc: a second one would too. */
+    uint8_t *fb = NULL;
+    if (err != ESP_OK && err != ESP_ERR_NO_MEM) {
+        fb = heap_caps_malloc((size_t)w * h * 2, MALLOC_CAP_SPIRAM);
+        if (fb) {
+            for (uint16_t r = 0; r < h; r++) {
+                memcpy(fb + (size_t)r * w * 2,
+                       src_pix + ((size_t)(oy + r) * sw + ox) * 2,
+                       (size_t)w * 2);
             }
         }
     }
 
-    /* Per-source logical rotation pass. Rotates the decoded RGB565 pixel buffer
-     * (NOT via an LVGL transform) so it is independent of display rotation and
-     * runs on the upright `copy` produced above (after the caption mask).
-     * orient: 0/1/2/3 = 0/90/180/270 degrees CLOCKWISE. Moon never rotates.
-     * 90/270 swap width<->height. */
-    uint8_t orient = (p->src == IMG_SRC_GOES)   ? cfg->goes_orientation
-                     : (p->src == IMG_SRC_SOLAR) ? cfg->solar_orientation
-                     : (p->src == IMG_SRC_CUSTOM) ? cfg->custom_orientation
-                                                  : 0;
-    if (orient != 0) {
-        uint16_t rw, rh;
-        if (orient == 2) {            /* 180deg: same dims */
-            rw = w;  rh = h;
-        } else {                       /* 90/270: dims swap */
-            rw = h;  rh = w;
+    /* The PPA read the source (blocking call), so the frame is free again. */
+    frame_unlock(p);
+    if (masked) heap_caps_free(masked);
+
+    /* What the descriptor/crossfade tail below shows, set by whichever path won:
+     * the PPA output (panel width, 1.0x blit) or the fallback crop (software
+     * scale to panel width). */
+    uint8_t  *show_buf   = NULL;
+    uint16_t  show_w     = 0;
+    uint16_t  show_h     = 0;
+    uint16_t  show_scale = 256;
+
+    if (err != ESP_OK) {
+        if (dst) heap_caps_free(dst);
+        /* Warn ONCE so a systematic failure is visible in /api/logs without a
+         * line per frame. Screen rotation (main.c) drops the frame outright on a
+         * PPA failure; here we degrade instead, because an image page with no
+         * previous frame would otherwise stay blank until a later poll. */
+        static bool ppa_warned;
+        if (!ppa_warned) {
+            ppa_warned = true;
+            ESP_LOGE(TAG, "%s: PPA fit failed (%s); image pages fall back to "
+                          "software scaling (no flip/rotate)",
+                     p->name, esp_err_to_name(err));
         }
-        size_t   rot_size = (size_t)rw * rh * 2;
-        uint8_t *rot = heap_caps_malloc(rot_size, MALLOC_CAP_SPIRAM);
-        if (!rot) {
-            ESP_LOGE(TAG, "PSRAM alloc failed for rotation buffer (%u bytes)",
-                     (unsigned)rot_size);
-            heap_caps_free(copy);
-            /* frame_mux already released above; just retire the wait overlay. */
+        if (!fb) {
             nina_wait_overlay_hide();
             return;
         }
-        const uint16_t *src = (const uint16_t *)copy;
-        uint16_t       *dst = (uint16_t *)rot;
-        if (orient == 2) {
-            /* rot[x,y] = copy[w-1-x, h-1-y] */
-            for (uint32_t Y = 0; Y < rh; Y++) {
-                for (uint32_t X = 0; X < rw; X++) {
-                    uint32_t sx = (uint32_t)w - 1 - X;
-                    uint32_t sy = (uint32_t)h - 1 - Y;
-                    dst[(size_t)Y * rw + X] = src[(size_t)sy * w + sx];
-                }
-            }
-        } else if (orient == 1) {
-            /* 90deg CW: rot[X,Y] = copy[Y, h-1-X], dims rw=h, rh=w */
-            for (uint32_t Y = 0; Y < rh; Y++) {           /* Y in [0,w) */
-                for (uint32_t X = 0; X < rw; X++) {       /* X in [0,h) */
-                    uint32_t sx = Y;
-                    uint32_t sy = (uint32_t)h - 1 - X;
-                    dst[(size_t)Y * rw + X] = src[(size_t)sy * w + sx];
-                }
-            }
-        } else {  /* orient == 3 */
-            /* 270deg CW: rot[X,Y] = copy[w-1-Y, X], dims rw=h, rh=w */
-            for (uint32_t Y = 0; Y < rh; Y++) {           /* Y in [0,w) */
-                for (uint32_t X = 0; X < rw; X++) {       /* X in [0,h) */
-                    uint32_t sx = (uint32_t)w - 1 - Y;
-                    uint32_t sy = X;
-                    dst[(size_t)Y * rw + X] = src[(size_t)sy * w + sx];
-                }
-            }
-        }
-        heap_caps_free(copy);
-        copy     = rot;
-        w        = rw;
-        h        = rh;
-        buf_size = rot_size;
+        show_buf   = fb;
+        show_w     = w;
+        show_h     = h;
+        show_scale = (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w);
+    } else {
+        show_buf = dst;
+        show_w   = SCREEN_SIZE;
+        show_h   = (uint16_t)fit.out_h;
     }
 
     /* Red Night: recolour the decoded image to red shades (luma->red, in place).
-     * Self-gates inside the helper (no-op for every non-red theme), so call it
-     * unconditionally on the final upright/cropped/rotated `copy` before it is
-     * handed to LVGL. w*h is the committed pixel count. */
-    image_red_remap_rgb565((uint16_t *)copy, (size_t)w * h);
+     * Self-gates inside the helper (no-op for every non-red theme). Runs on
+     * whichever buffer won, with that buffer's own pixel count. */
+    image_red_remap_rgb565((uint16_t *)show_buf, (size_t)show_w * show_h);
 
-    /* Point the BACK slot's descriptor at the new copy. release_dsc() frees the
+    /* Point the BACK slot's descriptor at the new buffer. release_dsc() frees the
      * previous buffer unless it was borrowed (moon-drag), and clears that flag —
-     * this owned copy is not borrowed. */
+     * this owned buffer is not borrowed. */
     bool back_is_a = !p->front_is_a;
     lv_image_dsc_t *back_dsc = p->front_is_a ? &p->dsc_b : &p->dsc_a;
     release_dsc(p, back_dsc, back_is_a);
-    back_dsc->data          = copy;
-    back_dsc->data_size     = buf_size;
+    back_dsc->data          = show_buf;
+    back_dsc->data_size     = (size_t)show_w * show_h * 2;
     back_dsc->header.magic  = LV_IMAGE_HEADER_MAGIC;
     back_dsc->header.cf     = LV_COLOR_FORMAT_RGB565;
-    back_dsc->header.w      = w;
-    back_dsc->header.h      = h;
-    back_dsc->header.stride = w * 2;
+    back_dsc->header.w      = show_w;
+    back_dsc->header.h      = show_h;
+    back_dsc->header.stride = (uint32_t)show_w * 2;
 
-    /* Scale the source to fill the panel width. 256 = 1.0x. The image keeps its
-     * create-time x = 0; only y moves, and only when the scaled height changes
-     * (center_image_y), so the per-update lv_obj_set_pos() that once flipped the
-     * image under 90/270 display rotation is still not happening here. */
-    uint16_t scale = (w > 0) ? (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w) : 256;
+    /* On the PPA path the buffer is already panel width and LVGL only blits it
+     * (show_scale 256). The image keeps its create-time x = 0; only y moves, and
+     * only when the height changes (center_image_y), so the per-update
+     * lv_obj_set_pos() that once flipped the image under 90/270 display rotation
+     * is still not happening here. */
     lv_image_set_src(p->img_back, back_dsc);
-    lv_image_set_scale(p->img_back, scale);
-    center_image_y(p->img_back, (int)h, scale);
+    lv_image_set_scale(p->img_back, show_scale);
+    center_image_y(p->img_back, (int)show_h, show_scale);
     lv_obj_set_style_opa(p->img_back, LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(p->img_back, LV_OBJ_FLAG_HIDDEN);
 
@@ -1010,12 +1000,20 @@ void image_page_show_scaled(image_page_t *p, const uint16_t *buf, int w, int h)
 }
 
 /* Instant swap of the LVGL descriptor onto a buffer the PAGE DOES NOT OWN, with
- * no copy: the slot is flagged "borrowed" so release_dsc() never frees it. Two
- * callers share this: the moon drag loop (owner = the PPA ping-pong scratch)
- * and the radar ring (owner = the ring slot). Each adds its own caption after
- * the swap. Caller holds the display lock and has already checked p->active,
- * p->root and the dimensions. */
-static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h, bool fade)
+ * no copy: the slot is flagged "borrowed" so release_dsc() never frees it.
+ * Three callers share this: the moon drag loop (owner = the PPA ping-pong
+ * scratch), the ring playback (owner = the page's dissolve scratch, or a ring
+ * slot on the no-scratch fallback) and image_page_show_borrowed(). Each adds
+ * its own caption after the swap. Caller holds the display lock and has already
+ * checked p->active, p->root and the dimensions.
+ *
+ * ALWAYS INSTANT. The ring used to pass a fade flag here and cross-dissolve
+ * with an lv_anim on the top image's opa; in FULL_REFRESH mode that is a
+ * 720x720 SOFTWARE alpha blend on every animation tick (44 % SoC load on the
+ * Cloud Cover page, both LVGL swdraw tasks near 40 %). The dissolve now runs on
+ * the PPA Blend engine — see the ring playback scratch below — and the shown
+ * image stays at LV_OPA_COVER. */
+static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h)
 {
     /* A settle->resting crossfade may still be in flight when a new drag frame
      * arrives (rapid re-swipe right at the grace boundary). Rather than DROP this
@@ -1049,9 +1047,11 @@ static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h
     back_dsc->header.stride = w * 2;
     if (back_is_a) p->dsc_a_borrowed = true; else p->dsc_b_borrowed = true;
 
-    /* Scale to fill the panel width (256 = 1.0x). A full-panel 720 buffer (moon
-     * drag) lands on exactly 1.0x and costs no software scale; a smaller radar
-     * tile is scaled up by LVGL like every other image page. */
+    /* 256 = 1.0x, which is what the two normal callers hand us: the moon drag
+     * ping-pong is a full 720 PPA output, and the ring playback hands us its
+     * 720-wide dissolve scratch. The general expression stays for the ring's
+     * no-scratch fallback, which borrows a slot at its NATIVE size (a 600 px
+     * radar tile) and needs LVGL to scale it as it always did. */
     uint16_t scale = (w > 0) ? (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w) : 256;
     lv_image_set_src(p->img_back, back_dsc);
     lv_image_set_scale(p->img_back, scale);
@@ -1062,34 +1062,7 @@ static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h
 
     lv_image_dsc_t *old_dsc = p->front_is_a ? &p->dsc_a : &p->dsc_b;
 
-    /* Ring playback: dissolve into the next frame instead of cutting. Only ONE
-     * image animates, whichever is on top (child 1 draws over child 0): the
-     * incoming back fades in over a fully opaque front, or the outgoing front
-     * fades out over a fully opaque back. Animating both at once (the
-     * single-frame path) dips to ~75 % brightness at the midpoint, two half
-     * copies over black, which on near-identical satellite frames reads as a
-     * flicker. crossfade_done_cb retires the front when the fade lands; a tick
-     * arriving mid-fade goes through cancel_moon_crossfade above first. */
-    if (fade && old_dsc->data) {
-        lv_obj_t *top = p->front_is_a ? p->img_back : p->img_front;
-        int32_t from = p->front_is_a ? 0 : 255, to = p->front_is_a ? 255 : 0;
-        lv_obj_set_style_opa(top, (lv_opa_t)from, 0);
-        p->crossfade_active = true;
-        lv_anim_t a;
-        lv_anim_init(&a);
-        lv_anim_set_var(&a, top);
-        lv_anim_set_values(&a, from, to);
-        lv_anim_set_duration(&a, RADAR_PLAY_FADE_MS);
-        lv_anim_set_path_cb(&a, lv_anim_path_linear);
-        lv_anim_set_exec_cb(&a, anim_opa_cb);
-        lv_anim_set_user_data(&a, p);
-        lv_anim_set_completed_cb(&a, crossfade_done_cb);
-        lv_anim_start(&a);
-        p->displayed_stamp_ms = esp_timer_get_time() / 1000;
-        return;
-    }
-
-    /* Instant swap: retire the old front and flip designations, mirroring the
+    /* Retire the old front and flip designations, mirroring the
      * instant branch of image_page_render_frame(). release_dsc() frees the old
      * front only if this page owned it (skips a prior borrowed buffer). */
     lv_obj_add_flag(p->img_front, LV_OBJ_FLAG_HIDDEN);
@@ -1111,7 +1084,7 @@ void image_page_show_borrowed(image_page_t *p, const uint16_t *buf, int w, int h
     if (!atomic_load(&p->active)) return;
     if (!buf || !p->root || w <= 0 || h <= 0) return;
 
-    swap_borrowed_buf(p, buf, w, h, false);
+    swap_borrowed_buf(p, buf, w, h);
 
     /* Keep the moon caption live during the drag. */
     char name[24], pct[16];
@@ -1622,7 +1595,9 @@ bool image_page_get_error(image_page_t *p, char *out, size_t sz)
  * is freed — ring_free_slot() does exactly that.
  *
  * MEMORY: a full ten-frame ring is ~6.6 MB (radar, 600x550) or ~10 MB (clouds,
- * 720x720), several times what a normal image page holds, so
+ * 720x720) — slots are kept at their NATIVE decoded size, the panel-width scale
+ * happens per playback step — plus 3 MB of playback scratch (see below), several
+ * times what a normal image page holds, so
  * IMAGE_PAGE_MAX_RESIDENT (which counts p->frame and therefore never counts a
  * ring) is not the right control. Instead the whole ring is freed when the
  * page is deactivated or disabled and rebuilt by the backfill on the next
@@ -1637,9 +1612,12 @@ bool image_page_get_error(image_page_t *p, char *out, size_t sz)
  * single place both are released.
  *
  * STAMPS: a slot may carry the frame's own time (uint32 UTC seconds, 0 =
- * unknown). Radar frames carry none (RIDGE stills have no per-frame time we
- * parse) and are ordered by insertion (head push / tail append). Clouds frames
- * carry the GIBS TIME they were fetched for: a stamped insert is placed by
+ * unknown). Radar style 0 (RIDGE _i.gif stills) has no per-frame time to parse,
+ * so those frames carry none and are ordered by insertion (head push / tail
+ * append); so does a styles-1/2 site whose capabilities advertise no time list
+ * (KHDC), which is one frame and no loop. Clouds frames carry the GIBS TIME and
+ * radar styles 1/2 the advertised WMS TIME they were fetched for: a stamped
+ * insert is placed by
  * time (newest first, whatever the caller's at_head hint), and a stamp already
  * held REPLACES that slot when the bytes differ (GIBS serves the newest one or
  * two frames partially at first) or is dropped as a duplicate when they match.
@@ -1702,6 +1680,21 @@ typedef struct {
      * that changes ring pixels from one that does not. Written and read only under
      * the display lock. */
     bool            ring_red;
+    /* Playback scratch — see "ring playback scratch" below. Three page-owned
+     * 720x720 RGB565 PSRAM buffers, allocated on the first show of a visit and
+     * freed with the ring. NULL = not allocated (or the alloc failed, which
+     * latches scratch_failed for the rest of the visit). */
+    uint8_t        *cur;            /* the picture ON SCREEN; the LVGL descriptor borrows it */
+    uint8_t        *nxt;            /* SRM staging for a slot that is not 720 wide */
+    uint8_t        *mix;            /* dissolve output, becomes the next `cur` */
+    uint16_t        cur_h;          /* rows valid in cur; 0 = nothing shown yet */
+    bool            scratch_failed; /* alloc failed this visit: cut, do not dissolve */
+    /* Running dissolve. fade_fg is `nxt` or a ring slot's buffer; both stay
+     * alive for the dissolve because ring_free_slot() lands it first. */
+    const uint8_t  *fade_fg;
+    uint16_t        fade_h;
+    int64_t         fade_t0;        /* esp_timer us at the start of the dissolve */
+    lv_timer_t     *fade_timer;     /* NULL = no dissolve running */
 } image_ring_t;
 
 static image_ring_t s_rings[IMG_SRC_COUNT];   /* only the animated sources' entries are ever touched */
@@ -1768,13 +1761,13 @@ bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp)
     return false;
 }
 
-bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
-                                    bool (*fn)(const uint16_t *ref, int w, int h, void *arg),
-                                    void *arg)
+/* Resident slot nearest in time to @p stamp and fit to judge a frame against:
+ * usable pixels, a stamp of its own, and the CURRENT bake. @p skip is a slot
+ * index to exclude (-1 = none), which is how the head re-judge keeps the head
+ * from being compared with itself. -1 when the ring has no such slot.
+ * Display lock held. */
+static int ring_neighbour_idx(image_ring_t *r, uint32_t stamp, int skip)
 {
-    image_ring_t *r = ring_of(p);
-    if (!r || !fn || stamp == 0) return false;
-    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return false;
     int n = atomic_load(&r->count);
     if (n > RADAR_RING_MAX) n = RADAR_RING_MAX;
     uint32_t cur = atomic_load(&r->bake_gen);
@@ -1783,7 +1776,7 @@ bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
     bool best_same = true;
     for (int i = 0; i < n; i++) {
         ring_slot_t *s = &r->slots[i];
-        if (!s->buf || s->stamp == 0 || s->bake_gen != cur) continue;
+        if (i == skip || !s->buf || s->stamp == 0 || s->bake_gen != cur) continue;
         uint32_t d = (s->stamp > stamp) ? s->stamp - stamp : stamp - s->stamp;
         bool same = (d == 0);
         /* A different stamp always beats the same stamp (a re-fetch must not be
@@ -1792,6 +1785,17 @@ bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
             best = i; best_d = d; best_same = same;
         }
     }
+    return best;
+}
+
+bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
+                                    bool (*fn)(const uint16_t *ref, int w, int h, void *arg),
+                                    void *arg)
+{
+    image_ring_t *r = ring_of(p);
+    if (!r || !fn || stamp == 0) return false;
+    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return false;
+    int best = ring_neighbour_idx(r, stamp, -1);
     bool ret = false;
     if (best >= 0) {
         ring_slot_t *s = &r->slots[best];
@@ -1799,6 +1803,308 @@ bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
     }
     bsp_display_unlock();
     return ret;
+}
+
+/* Re-judge the HEAD slot (index 0, the newest) with the same predicate the
+ * insert gate runs — the one frame that gate cannot see, because every page
+ * entry frees the ring and the head therefore lands in it with no neighbour to
+ * be compared against.
+ *
+ * @p fn is handed the NEIGHBOUR's pixels and, as its `arg`, an image_frame_t
+ * view of the head slot, so the caller reuses its insert-time adapter verbatim
+ * rather than growing a second callback shape. The view is stack-local and the
+ * display lock is held across the call, so neither buffer can be freed under
+ * fn; fn must not take the lock itself and must not retain either pointer.
+ *
+ * Returns the head's stamp when fn says the head is bad — feed it straight to
+ * image_page_ring_drop_stamp(). 0 when the head is fine, when the ring holds
+ * fewer than two frames, when the head is unstamped or stale-baked, when no
+ * neighbour qualifies, or when the lock times out. */
+uint32_t image_page_ring_judge_head(image_page_t *p,
+                                    bool (*fn)(const uint16_t *ref, int w, int h, void *arg))
+{
+    image_ring_t *r = ring_of(p);
+    if (!r || !fn) return 0;
+    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return 0;
+    uint32_t bad = 0;
+    ring_slot_t *hd = &r->slots[0];
+    if (atomic_load(&r->count) >= 2 && hd->buf && hd->stamp != 0 &&
+        hd->bake_gen == atomic_load(&r->bake_gen)) {
+        int ref = ring_neighbour_idx(r, hd->stamp, 0);
+        if (ref >= 0) {
+            image_frame_t view = { .buf = hd->buf, .w = hd->w, .h = hd->h };
+            ring_slot_t *s = &r->slots[ref];
+            if (fn((const uint16_t *)s->buf, (int)s->w, (int)s->h, &view)) bad = hd->stamp;
+        }
+    }
+    bsp_display_unlock();
+    return bad;
+}
+
+/* ───────────────────────── ring playback scratch ─────────────────────────────
+ *
+ * THE DISSOLVE RUNS ON THE PPA BLEND ENGINE, NOT ON THE CPU.
+ *
+ * Playback used to hand the ring slot straight to LVGL and cross-dissolve with
+ * an lv_anim on the top image's opa. In FULL_REFRESH mode every animation tick
+ * of that is a 720x720 SOFTWARE alpha blend: measured on the fleet, the Cloud
+ * Cover page sat at 44 % SoC load with the two LVGL swdraw tasks at 40 % and
+ * 38 %, against 1.8 % idle on the Clock page. Frames are already 720 wide for
+ * Clouds, so the scaling was not the cost — the blend was.
+ *
+ * Three page-owned 720x720 RGB565 PSRAM buffers per animated page carry the new
+ * scheme:
+ *
+ *   cur  the picture currently ON SCREEN. The LVGL descriptor BORROWS it, so
+ *        release_dsc() never frees it — the same contract moon_copy_buf uses.
+ *   nxt  staging for a slot that is not already 720 wide (one PPA SRM pass).
+ *   mix  the dissolve output, and the buffer that becomes the next `cur`.
+ *
+ * INVARIANT, whenever the scratch is available:
+ *   no dissolve  -> the descriptor points at `cur`, cur_h rows valid
+ *   dissolving   -> the descriptor points at `mix`; `cur` holds the OUTGOING
+ *                   picture and fade_fg the INCOMING one, both 720 x fade_h
+ *
+ * A commit is one blend at full alpha (the output is then the foreground
+ * exactly — 565 -> 888 -> 565 round trips losslessly) followed by rotating
+ * cur <-> mix, so committing and the last dissolve step are the same operation
+ * and neither costs a CPU memcpy of a megabyte on the LVGL task.
+ *
+ * Per step the CPU does: one blocking PPA blend per ~33 ms tick (a few ms of
+ * DMA each) and LVGL's 1:1 blit of `mix`. The shown image stays at
+ * LV_OPA_COVER and nothing animates.
+ *
+ * If PSRAM cannot give the three buffers, the page falls back to the pre-PPA
+ * behaviour for the rest of the visit: the descriptor borrows the ring slot and
+ * every show is an instant cut (swap_borrowed_buf still scales a native-size
+ * slot the way it always did).
+ */
+
+/* 1,036,800 B — a 128 B multiple, which is what the PPA demands of an output
+ * buffer's SIZE as well as its address. */
+#define RING_SCRATCH_BYTES ((size_t)SCREEN_SIZE * SCREEN_SIZE * 2)
+#define RING_FADE_STEP_MS  33          /* ~30 blends/s while a dissolve runs */
+
+/* Stop a running dissolve without committing it. Display lock held. */
+static void ring_fade_stop(image_ring_t *r)
+{
+    if (r->fade_timer) {
+        lv_timer_delete(r->fade_timer);
+        r->fade_timer = NULL;
+    }
+    r->fade_fg = NULL;
+    r->fade_h  = 0;
+}
+
+/* Free the three scratch buffers. Display lock held. The descriptor borrows the
+ * shown one and release_dsc() skips borrowed buffers, so this is the ONLY place
+ * they are released — and it drops the descriptor first so LVGL is never left
+ * on freed memory. Clears scratch_failed too: the next visit gets a fresh try
+ * on a heap that may have recovered. */
+static void ring_scratch_free(image_page_t *p, image_ring_t *r)
+{
+    ring_fade_stop(r);
+    uint8_t *bufs[3] = { r->cur, r->nxt, r->mix };
+    for (int i = 0; i < 3; i++) {
+        if (bufs[i] && (p->dsc_a.data == bufs[i] || p->dsc_b.data == bufs[i])) {
+            image_page_release_lvgl(p);
+            break;
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        if (bufs[i]) heap_caps_free(bufs[i]);
+    }
+    r->cur = r->nxt = r->mix = NULL;
+    r->cur_h = 0;
+    r->scratch_failed = false;
+}
+
+/* Allocate the scratch on the first show of a visit. Logs ONCE per visit on
+ * failure and latches, so a fragmented heap cannot turn every playback step
+ * into a warning. Display lock held. */
+static bool ring_scratch_ensure(image_page_t *p, image_ring_t *r)
+{
+    if (r->cur && r->nxt && r->mix) return true;
+    if (r->scratch_failed) return false;
+
+    uint8_t **slot[3] = { &r->cur, &r->nxt, &r->mix };
+    for (int i = 0; i < 3; i++) {
+        if (*slot[i]) continue;
+        *slot[i] = heap_caps_aligned_alloc(128, RING_SCRATCH_BYTES, MALLOC_CAP_SPIRAM);
+        if (!*slot[i]) {
+            ring_scratch_free(p, r);       /* give the partial allocation back */
+            r->scratch_failed = true;      /* set AFTER the free, which clears it */
+            ESP_LOGW(TAG, "%s: no PSRAM for the playback scratch (3 x %u KB); frames will cut",
+                     p->name, (unsigned)(RING_SCRATCH_BYTES / 1024));
+            return false;
+        }
+    }
+    r->cur_h = 0;                          /* nothing valid in a fresh `cur` */
+    return true;
+}
+
+/* Scale a NATIVE-size ring slot up to the panel width into `nxt` with one PPA
+ * SRM pass. Returns the rows written, 0 if the hardware refused.
+ *
+ * Ring slots are stored at their native size (WMS/RIDGE radar tiles are 600 px
+ * or less) because a 720-wide ring costs ~10 MB for a ten-frame radar loop
+ * against ~6.6 MB native. Paying one hardware scale per PLAYBACK STEP instead
+ * of one per FETCHED frame is the trade: the step already runs several blends,
+ * and the SRM engine is a different engine from the Blend one. Clouds frames
+ * are already 720 wide and never come here at all. */
+static int ring_fit_into(image_ring_t *r, const ring_slot_t *s)
+{
+    image_fit_t fit;
+    uint32_t bx = 0, by = 0, bw = 0, bh = 0;
+    if (!image_fit_pick(s->w, s->h, SCREEN_SIZE, &fit) ||
+        !image_fit_logical_to_source(&fit, s->w, s->h, 0, &bx, &by, &bw, &bh)) {
+        return 0;
+    }
+    ppa_srm_job_t job = {
+        .src           = s->buf,
+        .src_stride_px = s->w,
+        .src_h         = s->h,
+        .block_x       = bx,
+        .block_y       = by,
+        .block_w       = bw,
+        .block_h       = bh,
+        .rotate_cw     = 0,
+        .hflip         = false,
+        .vflip         = false,
+        .dst           = r->nxt,
+        .dst_buf_size  = RING_SCRATCH_BYTES,
+        .dst_w         = SCREEN_SIZE,
+        .dst_h         = fit.out_h,
+        .dst_x         = fit.dst_x,
+        .dst_y         = 0,
+        .scale_n16     = fit.n16,
+        .clear_dst     = (fit.out_w < SCREEN_SIZE),
+    };
+    return (ppa_srm_rgb565(&job) == ESP_OK) ? (int)fit.out_h : 0;
+}
+
+/* Land @p fg (720 x @p h) in `cur` and on screen. The full-alpha blend IS the
+ * copy — DMA, not a megabyte of memcpy on the LVGL task — and it writes `mix`,
+ * so the roles rotate afterwards and the displayed buffer is always `cur`.
+ * On a hardware refusal cur_h is cleared so the next show cuts instead of
+ * dissolving from a picture that is not the one on screen. Display lock held. */
+static bool ring_commit(image_page_t *p, image_ring_t *r, const uint8_t *fg, int h)
+{
+    if (ppa_blend_rgb565(r->cur, fg, r->mix, SCREEN_SIZE, (uint32_t)h, 255) != ESP_OK) {
+        r->cur_h = 0;
+        return false;
+    }
+    uint8_t *t = r->cur;
+    r->cur = r->mix;
+    r->mix = t;
+    r->cur_h = (uint16_t)h;
+    swap_borrowed_buf(p, (const uint16_t *)r->cur, SCREEN_SIZE, h);
+    return true;
+}
+
+/* One dissolve step: blend `cur` and the incoming frame into `mix` at the alpha
+ * @p el ms into the fade. Display lock held. */
+static bool ring_fade_blend(image_ring_t *r, int el)
+{
+    uint32_t a = (el <= 0) ? 0u : ((uint32_t)el * 255u) / RADAR_PLAY_FADE_MS;
+    if (a > 255u) a = 255u;
+    return ppa_blend_rgb565(r->cur, r->fade_fg, r->mix,
+                            SCREEN_SIZE, r->fade_h, (uint8_t)a) == ESP_OK;
+}
+
+/* End a running dissolve NOW, at full alpha: the incoming frame lands in `cur`
+ * and on screen exactly as the last timer step would have left it. This is the
+ * ring's cancel_moon_crossfade — every path that must not leave a half-mixed
+ * picture behind (a new frame, a slot being freed, page teardown) calls it.
+ * Display lock held. */
+static void ring_fade_finish(image_page_t *p, image_ring_t *r)
+{
+    const uint8_t *fg = r->fade_fg;
+    int h = r->fade_h;
+    ring_fade_stop(r);
+    /* No LVGL objects (page never built, or torn down): the timer is gone, which
+     * is the part that mattered; nothing is on screen to land. */
+    if (fg && h > 0 && p->root) ring_commit(p, r, fg, h);
+}
+
+/* Runs on the LVGL task, which holds the display lock. */
+static void ring_fade_cb(lv_timer_t *t)
+{
+    image_page_t *p = lv_timer_get_user_data(t);
+    image_ring_t *r = ring_of(p);
+    if (!r) return;
+    if (!r->fade_fg || !r->cur || !r->mix) {
+        ring_fade_stop(r);
+        return;
+    }
+    int el = (int)((esp_timer_get_time() - r->fade_t0) / 1000);
+    /* Past the duration, or the page went away mid-dissolve: land it. A failed
+     * blend lands it too — one cut beats a frozen half-mix. */
+    if (el >= RADAR_PLAY_FADE_MS || !atomic_load(&p->active) || !ring_fade_blend(r, el)) {
+        ring_fade_finish(p, r);
+        return;
+    }
+    /* The descriptor already points at `mix`; only its pixels changed, so a
+     * plain invalidate is the whole update. */
+    lv_obj_invalidate(p->img_front);
+}
+
+/* Start a dissolve from `cur` to @p fg. Returns false if the first blend failed,
+ * leaving the caller to commit instantly instead. Display lock held; no
+ * dissolve may be running. */
+static bool ring_fade_start(image_page_t *p, image_ring_t *r, const uint8_t *fg, int h)
+{
+    r->fade_fg = fg;
+    r->fade_h  = (uint16_t)h;
+    /* Backdated one step so the FIRST painted frame has already moved: starting
+     * at alpha 0 would paint a copy of what is already on screen and spend a
+     * blend doing it. */
+    r->fade_t0 = esp_timer_get_time() - (int64_t)RING_FADE_STEP_MS * 1000;
+    if (!ring_fade_blend(r, RING_FADE_STEP_MS)) {
+        ring_fade_stop(r);
+        return false;
+    }
+    swap_borrowed_buf(p, (const uint16_t *)r->mix, SCREEN_SIZE, h);
+    r->fade_timer = lv_timer_create(ring_fade_cb, RING_FADE_STEP_MS, p);
+    if (!r->fade_timer) {
+        ring_fade_finish(p, r);            /* no timer: land the frame now */
+    }
+    return true;
+}
+
+/* Put a ring slot on screen, dissolving from the frame already there when asked
+ * and the two are the same shape. Display lock held; the slot is non-empty. */
+static void ring_play(image_page_t *p, image_ring_t *r, const ring_slot_t *s, bool fade)
+{
+    /* A dissolve still running belongs to the PREVIOUS frame: land it before
+     * this one takes over, so `cur` describes what is actually on screen. */
+    if (r->fade_timer) ring_fade_finish(p, r);
+
+    if (!ring_scratch_ensure(p, r)) {
+        swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h);
+        return;
+    }
+
+    /* A 720-wide slot IS the foreground — no copy, no scale. Anything else gets
+     * one SRM pass into `nxt`. */
+    const uint8_t *fg = s->buf;
+    int fg_h = (int)s->h;
+    if (s->w != SCREEN_SIZE || s->h > SCREEN_SIZE) {
+        fg_h = ring_fit_into(r, s);
+        if (fg_h <= 0) {
+            swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h);
+            r->cur_h = 0;
+            return;
+        }
+        fg = r->nxt;
+    }
+
+    if (fade && r->cur_h == fg_h && ring_fade_start(p, r, fg, fg_h)) return;
+    /* Instant, and the fallback for a hardware refusal: borrow the slot the way
+     * playback did before the scratch existed. */
+    if (!ring_commit(p, r, fg, fg_h)) {
+        swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h);
+    }
 }
 
 /* Free one slot — BOTH its allocations, the decoded pixels and the retained
@@ -1810,15 +2116,13 @@ bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
 static void ring_free_slot(image_page_t *p, image_ring_t *r, int i)
 {
     ring_slot_t *s = &r->slots[i];
+    /* A dissolve in flight may be reading THIS slot as its foreground, and in
+     * any case leaves the screen showing `mix` rather than `cur`. Land it first:
+     * afterwards the displayed picture lives entirely in the page-owned scratch,
+     * so freeing the slot below cannot pull it out from under LVGL. */
+    if (r->fade_timer) ring_fade_finish(p, r);
     if (s->buf) {
         const uint8_t *b = (const uint8_t *)s->buf;
-        /* During the playback dissolve the OUTGOING frame is still drawn for
-         * RADAR_PLAY_FADE_MS after r->shown moved on. Finalize the fade first:
-         * that retires and detaches the outgoing descriptor, so freeing its
-         * slot below is safe and the incoming frame stays on screen. */
-        if (p->crossfade_active && (b == p->dsc_a.data || b == p->dsc_b.data)) {
-            cancel_moon_crossfade(p);
-        }
         if (b == r->shown || b == p->dsc_a.data || b == p->dsc_b.data) {
             image_page_release_lvgl(p);  /* drops both descriptors + borrowed flags */
             r->shown = NULL;
@@ -1842,7 +2146,7 @@ static void ring_show_idx(image_page_t *p, int idx, bool fade)
     ring_slot_t *s = &r->slots[idx];
     if (!s->buf || !p->root || s->w == 0 || s->h == 0) return;
 
-    swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h, fade);
+    ring_play(p, r, s, fade);
     r->shown    = s->buf;
     r->play_idx = idx;
 
@@ -1851,9 +2155,10 @@ static void ring_show_idx(image_page_t *p, int idx, bool fade)
     set_label_if_changed(p->lbl_region, label);
 
     /* A stamped frame shows its own time (local clock); the newest carries the
-     * "Latest" prefix. Unstamped rings (radar): the newest frame is stamped with
-     * the wall clock and the history frames show their position in the loop
-     * instead of a time we would be inventing. */
+     * "Latest" prefix. Unstamped rings (radar style 0, and a styles-1/2 site
+     * with no advertised time list): the newest frame is stamped with the wall
+     * clock and the history frames show their position in the loop instead of a
+     * time we would be inventing. */
     char ts[32];
     struct tm ti;
     if (s->stamp != 0) {
@@ -1934,10 +2239,12 @@ static void ring_loading_sync(image_page_t *p)
     bool loading = atomic_load(&p->active) && r->shown == NULL && count < gate;
     if (loading) {
         /* Progress in the title so the wait reads as work, not a hang: each
-         * frame is a ~3 s download + decode, so "1 of 3" is the honest ETA. */
+         * frame is a ~3 s download + decode. Shown as a countdown of frames
+         * still to come (3, 2, 1) on its own line, so it reads as a counter
+         * rather than a stray number next to the words. */
         char title[48];
-        snprintf(title, sizeof(title), "Loading %s  %d of %d",
-                 p->src == IMG_SRC_CLOUDS ? "Cloud Cover" : "Weather Radar", count, gate);
+        snprintf(title, sizeof(title), "Loading %s\n%d",
+                 p->src == IMG_SRC_CLOUDS ? "Cloud Cover" : "Weather Radar", gate - count);
         nina_empty_state_set_title(p->loading, title);
         nina_empty_state_show(p->loading);
         nina_empty_state_set_busy(p->loading, true);
@@ -2013,6 +2320,56 @@ bool image_page_ring_drop_oldest(image_page_t *p)
     return true;
 }
 
+/* Free the slot carrying @p stamp (the head, in practice: the re-judge in
+ * image_page_poll.c is the only caller) so the poller's next newest fetch
+ * re-downloads it and the same-stamp path in _add installs the completed frame.
+ *
+ * LOCKING / CURSOR / DISSOLVE: identical to image_page_ring_drop_oldest() —
+ * display lock taken here (the page's poll task, outside the lock, exactly like
+ * _add), and the free routed through ring_free_slot(), which LANDS ANY RUNNING
+ * DISSOLVE first. That is what makes dropping a slot that may be the live
+ * foreground of a dissolve safe: after ring_fade_finish() the displayed picture
+ * lives entirely in the page-owned scratch (`cur`), never in a ring slot, and
+ * ring_free_slot() then detaches the LVGL descriptors as well if the scratch
+ * was unavailable and they borrow this slot directly. Unlike the oldest-end
+ * eviction this one can free a slot in the MIDDLE of the list, so the slots
+ * above it are compacted down by one and the playback cursor follows them.
+ *
+ * false — freeing nothing — when @p stamp is 0, no slot carries it, the ring
+ * holds one frame or none (the newest must survive or the page goes blank), or
+ * the lock times out. Like _drop_oldest it does NOT re-arm the backfill. */
+bool image_page_ring_drop_stamp(image_page_t *p, uint32_t stamp)
+{
+    image_ring_t *r = ring_of(p);
+    if (!r || stamp == 0 || atomic_load(&r->count) <= 1) return false;
+    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return false;
+
+    int count = atomic_load(&r->count);
+    if (count > RADAR_RING_MAX) count = RADAR_RING_MAX;
+    int i = -1;
+    for (int k = 0; k < count; k++) {
+        if (r->slots[k].stamp == stamp) { i = k; break; }
+    }
+    if (count <= 1 || i < 0) {             /* both re-tested under the lock */
+        bsp_display_unlock();
+        return false;
+    }
+    ring_free_slot(p, r, i);               /* lands the dissolve, detaches LVGL, frees both allocations */
+    for (int k = i; k < count - 1; k++) r->slots[k] = r->slots[k + 1];
+    memset(&r->slots[count - 1], 0, sizeof(r->slots[0]));
+    count--;
+    atomic_store(&r->count, count);
+    if (r->play_idx > i) r->play_idx--;    /* the cursor's slot shifted down with the rest */
+    if (r->play_idx >= count) r->play_idx = 0;
+    /* ring_free_slot() clears `shown` when it had to detach the descriptors, so
+     * this is exactly the "nothing is on screen any more" test the same-stamp
+     * replace in _add uses. */
+    if (!r->shown && atomic_load(&p->active)) ring_show_idx(p, r->play_idx, false);
+    ring_timer_sync(p);
+    bsp_display_unlock();
+    return true;
+}
+
 void image_page_ring_reset(image_page_t *p)
 {
     image_ring_t *r = ring_of(p);
@@ -2022,6 +2379,10 @@ void image_page_ring_reset(image_page_t *p)
         r->timer = NULL;
     }
     for (int i = 0; i < RADAR_RING_MAX; i++) ring_free_slot(p, r, i);
+    /* The playback scratch is the ring's other display resource (3 MB): it goes
+     * with the frames, on the same page-leave / invalidate paths, and is rebuilt
+     * on the first show after the next activation. */
+    ring_scratch_free(p, r);
     atomic_store(&r->count, 0);
     r->play_idx = 0;
     r->shown    = NULL;
@@ -2161,9 +2522,13 @@ static bool radar_crop_frame(image_frame_t *f, uint8_t mode)
  * `cfg` and `red` are passed in rather than read here so the re-transform can
  * bake a whole ring from ONE snapshot of the settings.
  *
- * NOT ACCELERATED, deliberately: the PPA offers SRM (scale/rotate/mirror),
- * BLEND and FILL only — there is no colour-transform unit for the invert — and
- * the crop is already a row-wise memcpy. Software is correct for both. */
+ * CROP AND INVERT ARE NOT ACCELERATED, deliberately: the PPA offers SRM
+ * (scale/rotate/mirror), BLEND and FILL only — there is no colour-transform
+ * unit for the invert — and the crop is already a row-wise memcpy. Software is
+ * correct for both, and they stay cheap because the frame is still at its
+ * NATIVE size here: a ring slot is stored as decoded (and cropped), never
+ * scaled to the panel. Playback does the scale, once per step, on the PPA
+ * (ring_fit_into). */
 static void ring_bake(image_page_t *p, image_frame_t *f, const app_config_t *cfg, bool red)
 {
     if (p->src == IMG_SRC_RADAR) {
