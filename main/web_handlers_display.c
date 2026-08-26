@@ -252,6 +252,11 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
         }
         topology_changed = true;    /* optional page appeared/disappeared */
     }
+    /* Anonymous telemetry enable -- spawn the daily-report task. Disable needs
+     * no live action: the task re-checks the flag before every send. */
+    if (new_cfg->telemetry_enabled && !old_cfg->telemetry_enabled) {
+        telemetry_ensure_task_running();
+    }
     /* Clock page layout change — rebuild the clock widget tree in place. The
      * page is always present, so no topology change; nothing else reads the
      * field live. */
