@@ -995,7 +995,7 @@ esp_err_t telemetry_preview_get_handler(httpd_req_t *req)
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
-    int len = telemetry_build_payload(buf, 1024);
+    int len = telemetry_build_payload(buf, 1024, true);
     if (len <= 0) {
         heap_caps_free(buf);
         httpd_resp_send_500(req);

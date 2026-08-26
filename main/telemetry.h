@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #include <stddef.h>
 
 /* Anonymous telemetry: one small JSON health report a day, POSTed to
@@ -30,8 +31,12 @@
 void telemetry_init(void);
 
 /* Render the exact report JSON into @p buf. Returns the length written
- * (excluding the NUL) or a negative value when @p buf cannot hold it. */
-int telemetry_build_payload(char *buf, size_t cap);
+ * (excluding the NUL) or a negative value when @p buf cannot hold it.
+ * @p include_crash gates the crash{} block (still subject to the last reset
+ * actually being abnormal): the sender passes true only for the FIRST report
+ * of a boot so one panic is counted once server-side, not once per daily
+ * report; the preview endpoint always passes true. */
+int telemetry_build_payload(char *buf, size_t cap, bool include_crash);
 
 /* Sole owner/installer of the ESP32-P4 SoC temperature sensor (range -10..80).
  * Returns the last known reading in Celsius, 0 until the first success. */

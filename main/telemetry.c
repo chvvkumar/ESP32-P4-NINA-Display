@@ -92,7 +92,7 @@ float telemetry_read_temp_c(void)
     return s_last_c;
 }
 
-int telemetry_build_payload(char *buf, size_t cap)
+int telemetry_build_payload(char *buf, size_t cap, bool include_crash)
 {
     if (!buf || cap == 0) {
         return -1;
@@ -159,8 +159,9 @@ int telemetry_build_payload(char *buf, size_t cap)
     size_t pos = (size_t)n;
 
     /* Crash block only after an abnormal reset (panic, WDTs, brownout,
-     * CPU lockup: power_mgmt_reset_is_abnormal, the existing classifier). */
-    if (power_mgmt_reset_is_abnormal(reset_reason)) {
+     * CPU lockup: power_mgmt_reset_is_abnormal, the existing classifier),
+     * and only when the caller wants it (first report of the boot). */
+    if (include_crash && power_mgmt_reset_is_abnormal(reset_reason)) {
         n = snprintf(buf + pos, cap - pos,
             "\"crash\":{\"reason\":\"%s\",\"count\":%lu},",
             reason_str, (unsigned long)ci.crash_count);
@@ -188,13 +189,13 @@ int telemetry_build_payload(char *buf, size_t cap)
 }
 
 /* One POST, no retry; success and failure alike are a single debug line. */
-static void telemetry_send_report(void)
+static void telemetry_send_report(bool include_crash)
 {
     char *payload = heap_caps_malloc(TELEMETRY_PAYLOAD_CAP, MALLOC_CAP_SPIRAM);
     if (!payload) {
         return;
     }
-    int len = telemetry_build_payload(payload, TELEMETRY_PAYLOAD_CAP);
+    int len = telemetry_build_payload(payload, TELEMETRY_PAYLOAD_CAP, include_crash);
     if (len <= 0) {
         heap_caps_free(payload);
         return;
@@ -239,12 +240,22 @@ void telemetry_task(void *arg)
                         pdFALSE, pdFALSE, portMAX_DELAY);
     vTaskDelay(pdMS_TO_TICKS(TELEMETRY_START_DELAY_MS));
 
+    /* One panic must reach the server once, not once per daily report: the
+     * crash block rides only the first report of this boot. */
+    bool first_report = true;
     while (1) {
         if (app_config_get()->telemetry_enabled) {
-            telemetry_send_report();
+            telemetry_send_report(first_report);
+            first_report = false;
         }
         uint32_t sleep_s = TELEMETRY_PERIOD_S +
                            (esp_random() % (TELEMETRY_JITTER_MAX_S + 1u));
-        vTaskDelay(pdMS_TO_TICKS(sleep_s * 1000u));
+        /* Chunked delay: pdMS_TO_TICKS overflows 32-bit tick math for any
+         * span past about 71 minutes at the 1000 Hz tick (ms * tick rate
+         * wraps uint32), which turned the daily period into 8-68 minutes.
+         * One-minute chunks keep every conversion far below the wrap. */
+        for (uint32_t slept = 0; slept < sleep_s; slept += 60u) {
+            vTaskDelay(pdMS_TO_TICKS(60u * 1000u));
+        }
     }
 }
