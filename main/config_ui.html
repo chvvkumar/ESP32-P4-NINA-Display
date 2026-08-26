@@ -2582,6 +2582,7 @@
       data.mqtt_topic_prefix=$('mqtt_prefix').value.trim();
       data.debug_mode=!!$('debug_mode').checked;
       data.demo_mode=!!$('demo_mode').checked;
+      data.telemetry_enabled=!!$('telemetry_enabled').checked;
       data.wifi_power_save=!!$('wifi_power_save').checked;
       data.wifi_max_tx_dbm=parseInt($('wifi_max_tx_dbm').value)||0;
       data.deep_sleep_enabled=!!$('deep_sleep_enabled').checked;
@@ -3142,6 +3143,7 @@
 
       $('debug_mode').checked=!!data.debug_mode;
       $('demo_mode').checked=!!data.demo_mode;
+      $('telemetry_enabled').checked=!!data.telemetry_enabled;
       $('wifi_power_save').checked=data.wifi_power_save!==false;
       /* _prev is the value txPowerChanged() restores when the user declines the
          lockout warning; seed it here so a decline before any accepted change
@@ -3971,6 +3973,23 @@
       };
       /* A manual press bypasses the device-side result cache. */
       poll(true);
+    }
+
+    /* Fetch the exact telemetry report this device would send and show it
+       pretty-printed in the System tab's Telemetry card. */
+    function loadTelemetryPreview(){
+      var wrap=$('telemetryPreviewWrap');
+      var body=$('telemetryPreviewBody');
+      wrap.style.display='block';
+      body.textContent='Loading...';
+      fetch('/api/telemetry/preview').then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      }).then(function(obj){
+        body.textContent=JSON.stringify(obj,null,2);
+      }).catch(function(){
+        body.textContent='Could not load the preview. Try again.';
+      });
     }
 
     /* Update info from the passive badge check; consumed by the changelog modal. */

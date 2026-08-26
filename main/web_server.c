@@ -420,6 +420,7 @@ void start_web_server(void)
         { { "/api/config/backup",          HTTP_GET,  backup_get_handler,   NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/config/restore",         HTTP_POST, restore_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/status",                 HTTP_GET,  status_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/telemetry/preview",      HTTP_GET,  telemetry_preview_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/nina/status",            HTTP_GET,  nina_status_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/crash",                  HTTP_GET,  crash_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/weather",                HTTP_GET,  weather_get_handler, NULL }, ROUTE_AUTH_REQUIRED },

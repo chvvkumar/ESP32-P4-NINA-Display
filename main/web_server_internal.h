@@ -238,6 +238,7 @@ esp_err_t control_adjust_post_handler(httpd_req_t *req);
 esp_err_t backup_get_handler(httpd_req_t *req);
 esp_err_t restore_post_handler(httpd_req_t *req);
 esp_err_t status_get_handler(httpd_req_t *req);
+esp_err_t telemetry_preview_get_handler(httpd_req_t *req);
 esp_err_t nina_status_get_handler(httpd_req_t *req);
 esp_err_t crash_get_handler(httpd_req_t *req);
 esp_err_t weather_get_handler(httpd_req_t *req);

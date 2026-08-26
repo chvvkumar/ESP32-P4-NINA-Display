@@ -83,7 +83,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 77
+#define APP_CONFIG_VERSION 78
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -563,6 +563,15 @@ typedef struct {
                                        // gate. The web test/preview endpoints
                                        // bypass it so the speaker stays
                                        // testable while muted. Default false.
+
+    // Added after v77 (anonymous telemetry) -- must stay at end to preserve NVS binary compatibility
+    bool     telemetry_enabled;        // v78: send one anonymous health report a
+                                       // day (firmware version, uptime, crash
+                                       // counters, memory, feature bitmask;
+                                       // never URLs, names, coordinates or
+                                       // secrets). Fresh installs default true;
+                                       // the v78 migration forces false for
+                                       // every upgrader (opt in).
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -5945,6 +5954,18 @@ _Static_assert(offsetof(app_config_t, audio_muted) ==
                "app_config_v76_t snapshot drifted from app_config_t layout");
 _Static_assert(sizeof(app_config_v76_t) <= sizeof(app_config_t),
                "v76 snapshot must not exceed the current config struct");
+
+/* ── Version 77 layout -- used only for NVS migration to v78 ──── */
+/* No snapshot struct: v78 appended a single bool at the very end, so the live
+ * struct's prefix through audio_muted IS the v77 layout byte for byte (the
+ * append-only rule). migrate_from_v77 in app_config.c therefore uses
+ * offsetof(app_config_t, telemetry_enabled) as the v77 prefix size instead of
+ * a ~180-line snapshot body. The assert pins the new field directly after
+ * audio_muted so an insertion between them cannot silently shift that prefix. */
+_Static_assert(offsetof(app_config_t, telemetry_enabled) ==
+                   offsetof(app_config_t, audio_muted) +
+                       sizeof(((app_config_t *)0)->audio_muted),
+               "telemetry_enabled must directly follow audio_muted (v77 prefix rule)");
 
 
 

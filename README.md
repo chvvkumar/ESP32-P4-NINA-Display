@@ -35,6 +35,7 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 - [Installation](#installation)
 - [First-Time Setup](#first-time-setup)
 - [Security](#security)
+- [Telemetry](#telemetry)
 - [Pages](#pages)
   - [Summary and NINA Instance Pages](#summary-and-nina-instance-pages)
   - [Clock and Weather](#clock-and-weather)
@@ -106,6 +107,22 @@ The web UI is protected by a password login (default `changeme123!`, no username
 
 > [!WARNING]
 > Login can be turned off on the System tab. With it off, every endpoint is open to anyone on the LAN, including reboot, factory reset and firmware update. Use only on trusted networks.
+
+## Telemetry
+
+The firmware can send an anonymous usage and crash report to the maintainer. Every collected statistic is published at https://ninadash.challa.co/, so users see exactly what the maintainer sees.
+
+Each report contains:
+
+- A random device ID. It is not derived from the MAC address and is regenerated on factory reset.
+- Firmware tag, commit, branch, update channel and running partition.
+- Boot count, uptime and last reset reason; crash reason and crash count when the last boot crashed.
+- Free heap and PSRAM, CPU load, chip temperature and WiFi signal strength.
+- Which optional features are enabled or disabled.
+
+Never sent: WiFi network names, URLs, hostnames, coordinates, location names, passwords, API keys, tokens, or any other value entered on the device. The ingest server does not store IP addresses.
+
+Defaults: fresh installs send telemetry, with a checkbox on the first-time setup screen to opt out. Devices upgraded from earlier firmware do not send anything until telemetry is enabled. Change it at any time in the System tab of the web settings page; the "Show exactly what is sent" button there displays the exact report the device would send.
 
 ## Pages
 

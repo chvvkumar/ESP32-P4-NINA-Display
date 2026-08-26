@@ -279,6 +279,22 @@
       </div>
 
       <div class="card">
+        <div class="card-title"><span class="card-title-label">Telemetry <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
+        <div class="help-popover"><div class="help-popover-title">Anonymous telemetry</div><p>Devices with telemetry enabled send a small anonymous report: a random device ID, firmware version, boot count, uptime, last reset or crash reason, free memory, CPU load, temperature, and WiFi signal strength. Nothing you configure is ever sent: no network names, URLs, coordinates, passwords, or keys, and the server does not store IP addresses.</p><p>Show exactly what is sent fetches the exact report this device would send, so you can inspect it before deciding. All collected statistics are published on a public page, so every user sees exactly what the maintainer sees.</p></div>
+        <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
+          <span class="toggle-label">Send anonymous usage and crash reports</span>
+          <label class="toggle"><input type="checkbox" id="telemetry_enabled"><span class="toggle-track"></span></label>
+        </div>
+        <div class="field-hint" style="margin-top:4px;margin-bottom:12px">Sends a random device ID, firmware version, boot and crash info, free memory, CPU load, temperature and WiFi signal strength. Nothing you enter on the device is ever included.</div>
+        <button type="button" class="btn btn-outline" style="width:100%" onclick="loadTelemetryPreview()">Show exactly what is sent</button>
+        <div id="telemetryPreviewWrap" style="display:none;margin-top:12px;padding:12px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.03)">
+          <pre id="telemetryPreviewBody" style="margin:0;font-size:0.78rem;color:var(--text-muted);max-height:240px;overflow-y:auto;white-space:pre-wrap"></pre>
+        </div>
+        <div class="field-hint" style="margin-top:12px;margin-bottom:12px">Statistics collected from devices with anonymous telemetry enabled are public. The page below shows everything the maintainer can see.</div>
+        <a class="btn btn-outline" href="https://ninadash.challa.co/" target="_blank" rel="noopener" style="display:block;text-align:center;text-decoration:none">View Public Fleet Statistics</a>
+      </div>
+
+      <div class="card">
         <div class="card-title"><span class="card-title-label">Device <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
         <div class="help-popover"><div class="help-popover-title">Device actions and modes</div><p>Reboot restarts the device and applies pending reboot-required settings. Factory Reset erases all saved settings and returns every setting to defaults, including WiFi, so plan to reconnect over the device's own setup WiFi network afterward.</p><p>Debug Mode enables extra performance and diagnostic info; leave it off for normal use. Demo Mode generates simulated session data so the dashboard can be used with no live NINA connection. Reboot the device for the change to fully take effect. Capture Screenshot pulls a JPEG of the current display.</p><p>Example: enable Demo Mode to preview the dashboard layout before any N.I.N.A. instance is online, then disable it to return to live data.</p></div>
         <div class="subsection danger-zone">

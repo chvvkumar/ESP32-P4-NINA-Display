@@ -31,7 +31,7 @@
 #include "lwip/sockets.h"       /* getpeername — client IP in the reboot reason */
 #include "lwip/inet.h"
 #include "esp_wifi.h"
-#include "driver/temperature_sensor.h"
+#include "telemetry.h"
 #include "weather_client.h"
 #include "ui/nina_event_log.h"
 #include "voice_store.h"
@@ -885,25 +885,10 @@ esp_err_t status_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "psram_free", (double)heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
     cJSON_AddNumberToObject(root, "psram_total", (double)heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
 
-    // ESP32-P4 internal SoC temperature. Install + enable the sensor once and
-    // keep the handle static so repeated GETs reuse it.
-    static temperature_sensor_handle_t s_tsens = NULL;
-    static bool s_tsens_ready = false;
-    if (!s_tsens_ready) {
-        temperature_sensor_config_t tsens_cfg = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
-        if (temperature_sensor_install(&tsens_cfg, &s_tsens) == ESP_OK &&
-            temperature_sensor_enable(s_tsens) == ESP_OK) {
-            s_tsens_ready = true;
-        } else {
-            s_tsens = NULL;
-        }
-    }
-    float temp_c = 0.0f;
-    if (s_tsens_ready && temperature_sensor_get_celsius(s_tsens, &temp_c) == ESP_OK) {
-        cJSON_AddNumberToObject(root, "temperature_c", temp_c);
-    } else {
-        cJSON_AddNullToObject(root, "temperature_c");
-    }
+    // ESP32-P4 internal SoC temperature. telemetry_read_temp_c() is the sole
+    // installer/owner of the sensor now; it returns the last known reading,
+    // 0 until the first successful read.
+    cJSON_AddNumberToObject(root, "temperature_c", telemetry_read_temp_c());
 
     // WiFi station signal + SSID (null/empty when not associated).
     wifi_ap_record_t ap_info;
@@ -998,6 +983,28 @@ esp_err_t status_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "voice_custom_budget", (double)VOICE_STORE_BUDGET);
 
     return send_json_response(req, root);
+}
+
+// Handler for the telemetry preview: returns the EXACT bytes the daily report
+// would POST (telemetry_build_payload is the single source of truth), so the
+// user can inspect what leaves the device before opting in.
+esp_err_t telemetry_preview_get_handler(httpd_req_t *req)
+{
+    char *buf = heap_caps_malloc(1024, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    int len = telemetry_build_payload(buf, 1024);
+    if (len <= 0) {
+        heap_caps_free(buf);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, buf, len);
+    heap_caps_free(buf);
+    return ESP_OK;
 }
 
 // Handler for per-instance NINA connection health (test automation)

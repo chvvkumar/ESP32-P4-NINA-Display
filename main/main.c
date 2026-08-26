@@ -48,6 +48,7 @@
 #include "nina_connection.h"
 #include "power_mgmt.h"
 #include "crash_log.h"
+#include "telemetry.h"
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "weather_client.h"
@@ -798,6 +799,10 @@ void app_main(void)
     // Persist a crash record if this boot followed an abnormal reset (mounts
     // SPIFFS, reads reset reason + RTC panic text, enforces ring + retention).
     crash_log_init();
+
+    // Load or mint the anonymous telemetry device id. Before the web server
+    // starts so the /api/telemetry/preview handler already has it.
+    telemetry_init();
 
     /* Create the event-log mutex before any task or HTTP handler can reach it,
      * so the ring's add/clear/copy paths never race on lazy creation. */

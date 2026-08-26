@@ -934,6 +934,11 @@ static void set_defaults(app_config_t *cfg) {
     // v77 addition (global audio mute). Also a SETTINGS_TABLE row.
     cfg->audio_muted = false;           // sound on by default
 
+    // v78 addition (anonymous telemetry). Also a SETTINGS_TABLE row.
+    // Fresh installs default ON; the migration dispatcher tail forces it OFF
+    // for every upgrader (opt in for existing installs).
+    cfg->telemetry_enabled = true;
+
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
 
@@ -3139,6 +3144,27 @@ static void migrate_from_v76(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v76 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v77 -> v78 migration: appends telemetry_enabled (anonymous daily health
+ *     report). No snapshot struct: the v77 layout is the live struct's prefix
+ *     through audio_muted (append-only rule), so
+ *     offsetof(app_config_t, telemetry_enabled) is its exact meaningful size
+ *     (asserted next to the v76 snapshot in app_config.h). --- */
+static void migrate_from_v77(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t v77_size = offsetof(app_config_t, telemetry_enabled);
+    size_t copy = raw_size < v77_size ? raw_size : v77_size;
+    memcpy(cfg, raw, copy);
+
+    /* The field sits right past the copied prefix, so memcpy never reaches
+     * it. Re-assert anyway: telemetry is opt IN for existing installs, and
+     * set_defaults() above turned it on (the fresh-install default). */
+    cfg->telemetry_enabled = false;
+
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v77 to v%d", APP_CONFIG_VERSION);
+}
+
 
 static void migrate_from_v36(const void *raw, size_t raw_size, app_config_t *cfg)
 {
@@ -3952,6 +3978,10 @@ static bool validate_config(app_config_t *cfg) {
      * BOOL row handles default + web parse; the clamp there is a no-op. */
     cfg->audio_muted = cfg->audio_muted ? true : false;
 
+    /* Anonymous telemetry (v78): canonicalize a stale blob byte to a strict
+     * 0/1, same shape as audio_muted above. */
+    cfg->telemetry_enabled = cfg->telemetry_enabled ? true : false;
+
     /* ADS-B page (v68). The six numeric flights_* fields are SETTINGS_TABLE
      * rows, so settings_clamp_apply() above already applied their ranges
      * (interval 2-60 s, range 10-250 nm, gate 0-89 deg, up-azimuth 0-359 deg,
@@ -4082,12 +4112,24 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 77) {
+        /* v77 -> v78: appended telemetry_enabled. tiles_loaded stays false: a
+         * v77 device already keeps its tiles in the "json_tiles"/"ha_tiles"
+         * NVS keys, so the tail loads them. migrate_from_v77 already forced
+         * telemetry off; the dispatcher-tail v78 consent fixup below
+         * (version_check < 78) re-asserts it and re-saves, so the write-back
+         * here is superseded but never wrong. */
+        migrate_from_v77(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 76) {
         /* v76 -> v77: appended audio_muted (global audio mute). tiles_loaded
          * stays false: a v76 device already keeps its tiles in the
          * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. Safe to
-         * write back immediately: all dispatcher-tail fixups below are
-         * excluded by their literal version bounds. */
+         * write back immediately: the only dispatcher-tail fixup that covers
+         * this branch is the v78 telemetry consent one, and it does its own
+         * re-save; the older fixups are excluded by their literal bounds. */
         migrate_from_v76(raw, stored_size, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
@@ -4098,9 +4140,10 @@ void app_config_init(void) {
          * phrases) and v77 appended audio_muted, so the migration is a
          * prefix copy plus the mask OR. tiles_loaded stays false: a v75
          * device already keeps its tiles in the "json_tiles"/"ha_tiles" NVS
-         * keys, so the tail loads them. Safe to write back immediately: all
-         * three dispatcher-tail fixups below are excluded by their literal
-         * version bounds. */
+         * keys, so the tail loads them. Safe to write back immediately: the
+         * only dispatcher-tail fixup that covers this branch is the v78
+         * telemetry consent one, and it does its own re-save; the older
+         * fixups are excluded by their literal version bounds. */
         migrate_from_v75(raw, stored_size, &s_config);
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
@@ -4773,6 +4816,25 @@ void app_config_init(void) {
      * the tail if migration boot time ever matters. */
     if (version_check < 75) {
         voice_event_bits_default(&s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
+    }
+
+    /* v78 telemetry consent for EVERY upgrader. The dispatcher is
+     * NON-chaining: every legacy branch calls set_defaults(), which turns
+     * telemetry ON (the fresh-install default), and no migrate_from_vNN
+     * before v77 knows the field exists, so without this a v56 blob would
+     * land with telemetry silently on. Anonymous telemetry is opt IN for
+     * existing installs, no exceptions, so the bound deliberately includes
+     * v77 too (migrate_from_v77 already asserted false; this is belt and
+     * braces plus one redundant save on that branch). The forward-tolerant
+     * (version_check > APP_CONFIG_VERSION) and current-version branches are
+     * excluded by the comparison: a v78-or-newer blob holds a real user
+     * choice that must survive. The bound is the LITERAL 78; every version
+     * bump past 78 must leave this literal alone. */
+    if (version_check < 78) {
+        s_config.telemetry_enabled = false;
         validate_config(&s_config);
         nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
         nvs_commit(handle);

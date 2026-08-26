@@ -107,6 +107,10 @@ void octoprint_ensure_task_running(void);
  *  when a field only the poller acts on changes. No-op if the task isn't up. */
 void octoprint_wake_now(void);
 
+/** Create the anonymous telemetry task (telemetry.c) if it isn't already
+ *  running. Gated on telemetry_enabled. Safe to call multiple times. */
+void telemetry_ensure_task_running(void);
+
 /** Feature poll task handles and page-active flags — defined in tasks.c. */
 extern TaskHandle_t spotify_task_handle;
 extern _Atomic bool spotify_page_active;
