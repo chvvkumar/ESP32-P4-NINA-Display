@@ -19,6 +19,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_ota_ops.h"
 #include "esp_wifi.h"
+#include "esp_core_dump.h"
 #include "nvs.h"
 #include "driver/temperature_sensor.h"
 
@@ -92,6 +93,23 @@ float telemetry_read_temp_c(void)
     return s_last_c;
 }
 
+/* JSON-safe copy: printable ASCII only; quotes and backslashes become
+ * apostrophes, everything else non-printable becomes a space. */
+static void json_sanitize_copy(char *dst, size_t cap, const char *src)
+{
+    size_t o = 0;
+    for (const char *p = src; *p != '\0' && o + 1 < cap; p++) {
+        unsigned char c = (unsigned char)*p;
+        if (c == '"' || c == '\\') {
+            c = '\'';
+        } else if (c < 0x20 || c > 0x7e) {
+            c = ' ';
+        }
+        dst[o++] = (char)c;
+    }
+    dst[o] = '\0';
+}
+
 int telemetry_build_payload(char *buf, size_t cap, bool include_crash)
 {
     if (!buf || cap == 0) {
@@ -160,11 +178,35 @@ int telemetry_build_payload(char *buf, size_t cap, bool include_crash)
 
     /* Crash block only after an abnormal reset (panic, WDTs, brownout,
      * CPU lockup: power_mgmt_reset_is_abnormal, the existing classifier),
-     * and only when the caller wants it (first report of the boot). */
+     * and only when the caller wants it (first report of the boot).
+     * task/pc/detail come from the coredump the crash just wrote; on an
+     * abnormal reset the image is fresh (the crash overwrote any older one),
+     * so a stale image cannot be attributed to this reboot. */
     if (include_crash && power_mgmt_reset_is_abnormal(reset_reason)) {
+        char task_name[17] = "";
+        char detail[121] = "";
+        uint32_t pc = 0;
+        size_t cd_addr = 0, cd_size = 0;
+        if (esp_core_dump_image_get(&cd_addr, &cd_size) == ESP_OK) {
+            esp_core_dump_summary_t *sum =
+                heap_caps_calloc(1, sizeof(*sum), MALLOC_CAP_SPIRAM);
+            if (sum) {
+                if (esp_core_dump_get_summary(sum) == ESP_OK) {
+                    json_sanitize_copy(task_name, sizeof(task_name), sum->exc_task);
+                    pc = sum->exc_pc;
+                }
+                heap_caps_free(sum);
+            }
+            char raw[256] = "";
+            if (esp_core_dump_get_panic_reason(raw, sizeof(raw)) == ESP_OK) {
+                json_sanitize_copy(detail, sizeof(detail), raw);
+            }
+        }
         n = snprintf(buf + pos, cap - pos,
-            "\"crash\":{\"reason\":\"%s\",\"count\":%lu},",
-            reason_str, (unsigned long)ci.crash_count);
+            "\"crash\":{\"reason\":\"%s\",\"count\":%lu,\"task\":\"%s\","
+            "\"pc\":\"0x%08lx\",\"detail\":\"%s\"},",
+            reason_str, (unsigned long)ci.crash_count, task_name,
+            (unsigned long)pc, detail);
         if (n < 0 || pos + (size_t)n >= cap) {
             return -1;
         }

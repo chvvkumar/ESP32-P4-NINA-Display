@@ -35,7 +35,10 @@ void telemetry_init(void);
  * @p include_crash gates the crash{} block (still subject to the last reset
  * actually being abnormal): the sender passes true only for the FIRST report
  * of a boot so one panic is counted once server-side, not once per daily
- * report; the preview endpoint always passes true. */
+ * report; the preview endpoint always passes true. The crash block carries
+ * reason, cumulative count, crashed task name, faulting PC and the panic
+ * text (sanitized, truncated to 120 chars), all read from the coredump the
+ * crash wrote; task/pc/detail are empty when no coredump is readable. */
 int telemetry_build_payload(char *buf, size_t cap, bool include_crash);
 
 /* Sole owner/installer of the ESP32-P4 SoC temperature sensor (range -10..80).
