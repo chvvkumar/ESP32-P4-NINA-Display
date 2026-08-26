@@ -172,6 +172,9 @@ esp_err_t wifi_setup_post_handler(httpd_req_t *req)
     } else {
         cfg->wifi_networks[0].password[0] = '\0';
     }
+    /* Optional first-run telemetry consent from the setup page; an absent or
+     * non-bool key leaves the current value untouched. */
+    JSON_TO_BOOL(root, "telemetry_enabled", cfg->telemetry_enabled);
     /* Single atomic memcpy under mutex + NVS persist. */
     app_config_save(cfg);
     heap_caps_free(cfg);

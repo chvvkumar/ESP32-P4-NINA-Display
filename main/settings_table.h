@@ -236,7 +236,9 @@
     /* -- Clock page layout (v72) -- */ \
     INT_RESET (clock_layout,                 "clock_layout",                 0,     0,     6)     /* 0 = Classic (default), 1 = Console 92, 2 = Broadside, 3 = Evensong, 4 = Blueprint, 5 = Transit Line, 6 = Night Network. RESET, not clamp: layouts are unordered names, so an unknown index falls back to Classic, never to whichever layout sits at the far bound */ \
     /* -- Global audio mute (v77) -- */ \
-    BOOL      (audio_muted,                  "audio_muted",                  false) /* silence EVERY sound (voice alerts, event phrases, connection announcements, boot jingle) at the audio_alert enqueue gate; the web test/preview endpoints bypass it so the speaker stays testable while muted */
+    BOOL      (audio_muted,                  "audio_muted",                  false) /* silence EVERY sound (voice alerts, event phrases, connection announcements, boot jingle) at the audio_alert enqueue gate; the web test/preview endpoints bypass it so the speaker stays testable while muted */ \
+    /* -- Anonymous telemetry (v78) -- */ \
+    BOOL      (telemetry_enabled,            "telemetry_enabled",            true)  /* one anonymous daily health report (fw version, uptime, crash counters, memory, feature bitmask; never URLs, names, coordinates or secrets). Fresh installs default ON; the v78 migration tail forces OFF for every upgrader (opt in) */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

@@ -14,6 +14,7 @@
 #include "ha_client.h"
 #include "octoprint_client.h"
 #include "adsb_client.h"
+#include "telemetry.h"
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "app_config.h"
@@ -848,6 +849,19 @@ void octoprint_ensure_task_running(void)
                       octoprint_poll_task, "octoprint", 12288, NULL, 3, 0);
 }
 
+/* Sole spawn path for telemetry_task -- boot and the runtime enable from the
+ * web handler both land here. 12288 bytes: the daily HTTPS POST runs an
+ * mbedTLS handshake on this task's stack. */
+void telemetry_ensure_task_running(void)
+{
+    if (!app_config_get()->telemetry_enabled) return;
+
+    static TaskHandle_t telemetry_task_handle = NULL;
+    static portMUX_TYPE telemetry_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
+    psram_task_ensure(&telemetry_task_handle, &telemetry_spawn_mux,
+                      telemetry_task, "telemetry", 12288, NULL, 3, 0);
+}
+
 /* Cuts the wait for a config change that only the poller can act on (image
  * source, snapshot URL) from up to one poll interval to ~0. Same shape as the
  * page-activation wake below and image_page_wake's image-poller wake:
@@ -1311,6 +1325,11 @@ static void ensure_network_stack(void) {
      * does its own init and its own flights_enabled check, so this one call
      * covers both boot and the runtime enable from the web handler. */
     adsb_ensure_task_running();
+
+    /* Anonymous telemetry (pinned to Core 0, networking). The enable check
+     * lives inside telemetry_ensure_task_running(), so this one call covers
+     * both boot and the runtime enable from the web handler. */
+    telemetry_ensure_task_running();
 
     /* Image pages (GOES / Moon / Solar / Custom). Mutexes for all four, a
      * PSRAM poller for each source enabled in config; disabled sources spawn

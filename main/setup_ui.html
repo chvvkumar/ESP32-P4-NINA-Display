@@ -130,6 +130,13 @@
         <label for="pass">Password</label>
         <input id="pass" type="password" autocomplete="off" placeholder="Network password">
       </div>
+      <div class="form-group">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text);cursor:pointer;margin-bottom:4px">
+          <input id="telemetry_setup" type="checkbox" checked style="width:auto;margin:0;accent-color:var(--accent)">
+          Send anonymous usage and crash reports
+        </label>
+        <div style="font-size:11px;color:var(--text-hint)">Statistics are public at <a href="https://ninadash.challa.co/" target="_blank" rel="noopener" style="color:var(--accent)">ninadash.challa.co</a>. Nothing you enter on the device is ever sent.</div>
+      </div>
       <button class="btn-connect" id="btnConnect" type="submit">Connect</button>
       <div class="err" id="formErr"></div>
     </form>
@@ -347,7 +354,7 @@
     fetch('/api/wifi/setup',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ssid:ssid,password:passInput.value})
+      body:JSON.stringify({ssid:ssid,password:passInput.value,telemetry_enabled:document.getElementById('telemetry_setup').checked})
     }).then(function(r){
       if(!r.ok) throw new Error('HTTP '+r.status);
       pollStart=Date.now();
