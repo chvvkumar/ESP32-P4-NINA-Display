@@ -110,7 +110,7 @@ The web UI is protected by a password login (default `changeme123!`, no username
 
 ## Telemetry
 
-The firmware can send an anonymous usage and crash report to the maintainer. Every collected statistic is published at https://ninadash.challa.co/, so users see exactly what the maintainer sees.
+The firmware can send an anonymous usage and crash report to the maintainer. Every collected statistic is published on a public statistics page, linked from the System tab of the web settings, so users see exactly what the maintainer sees.
 
 Each report contains:
 
