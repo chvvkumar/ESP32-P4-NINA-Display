@@ -288,3 +288,29 @@ add_nina_host_test(test_image_fit
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_image_fit.c
 )
+
+# ---------------------------------------------------------------------------
+# test_board_detect -- the RDDID signature table and the controller match
+# (main/board_detect.c). Dependency free by design: no ESP-IDF, no FreeRTOS, no
+# LVGL, no NVS, so it compiles here directly. Everything that touches hardware
+# lives in main/board_profile.c, which is not host compiled.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_board_detect
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_board_detect.c
+        ${NINA_REPO_ROOT}/main/board_detect.c
+)
+
+# ---------------------------------------------------------------------------
+# test_screen_geom -- the panel safe area, the inscribed square and the inset
+# arithmetic for all three panel rows (main/screen_geom.c), plus the BSP
+# backlight curve (components/.../include/bsp/brightness_curve.h, header-only,
+# included by relative path so the BSP needs no host include dir).
+# screen_geom.h pulls in sdkconfig.h for the family macro, which the host shims
+# provide.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_screen_geom
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_screen_geom.c
+        ${NINA_REPO_ROOT}/main/screen_geom.c
+)
