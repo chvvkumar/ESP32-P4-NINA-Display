@@ -67,15 +67,23 @@ const char *ota_family_expected_name(void)
 ota_family_verdict_t ota_family_check(const uint8_t *hdr, size_t len)
 {
     if (!hdr || len < OTA_FAMILY_HDR_BYTES) {
-        return OTA_FAMILY_ACCEPT;   /* not decidable yet */
+        /* Both writers hold the full prefix before asking, so this means a
+         * caller skipped the accumulator. Never let it through the gate. */
+        ESP_LOGE(TAG, "family check called with %u bytes, need %u",
+                 (unsigned)len, (unsigned)OTA_FAMILY_HDR_BYTES);
+        return OTA_FAMILY_REFUSE;
     }
 
     uint32_t magic = 0;
     memcpy(&magic, hdr + OTA_DESC_OFFSET, sizeof(magic));
     if (magic != OTA_DESC_MAGIC) {
-        /* Not an app descriptor where one should be. esp_ota_end() validates
-         * the image properly; refusing here would only add a second opinion. */
-        return OTA_FAMILY_ACCEPT;
+        /* No app descriptor where one must be. Nothing downstream catches this
+         * on the P4: esp_image_verify() checks the descriptor magic only under
+         * SOC_MMU_PAGE_SIZE_CONFIGURABLE (undefined here) or
+         * CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK (off), so refuse it now. */
+        ESP_LOGE(TAG, "image has no app descriptor at offset %u (magic 0x%08x)",
+                 (unsigned)OTA_DESC_OFFSET, (unsigned)magic);
+        return OTA_FAMILY_NO_DESC;
     }
 
     char name[OTA_DESC_NAME_LEN + 1];
@@ -1050,8 +1058,8 @@ static void ota_download_task(void *arg) {
                     continue;
                 }
                 fam_checked = true;
-                if (ota_family_check(fam_hdr, OTA_FAMILY_HDR_BYTES) == OTA_FAMILY_REFUSE) {
-                    ESP_LOGE(TAG, "download refused: wrong firmware family");
+                if (ota_family_check(fam_hdr, OTA_FAMILY_HDR_BYTES) != OTA_FAMILY_ACCEPT) {
+                    ESP_LOGE(TAG, "download refused: not an image this device may write");
                     fam_refused = true;
                     failed = true;
                     break;

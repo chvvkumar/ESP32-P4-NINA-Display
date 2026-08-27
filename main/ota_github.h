@@ -18,8 +18,9 @@ extern "C" {
 #define OTA_FAMILY_HDR_BYTES 112
 
 typedef enum {
-    OTA_FAMILY_ACCEPT = 0,   /* this family's image, or not decidable yet */
+    OTA_FAMILY_ACCEPT = 0,   /* this family's image */
     OTA_FAMILY_REFUSE,       /* the other family's image, do not write it */
+    OTA_FAMILY_NO_DESC,      /* no app descriptor where one must be; also refused */
 } ota_family_verdict_t;
 
 /**
@@ -30,9 +31,14 @@ typedef enum {
  * The asset name protects only the download path and is a CI naming convention,
  * not a check on the device, so the structural gate lives here.
  *
- * Accepts when the buffer is short or the app-descriptor magic is absent: those
- * are cases esp_ota_end() validates properly, and refusing them here would
- * break legitimate uploads for no gain.
+ * Only OTA_FAMILY_ACCEPT may be written to flash. A buffer shorter than
+ * OTA_FAMILY_HDR_BYTES is refused, not deferred: both writers already hold the
+ * full prefix before they ask, so a short buffer means a caller skipped that.
+ * A missing app-descriptor magic is refused too, because nothing downstream
+ * catches it on this target: esp_image_verify() only checks the descriptor
+ * magic where SOC_MMU_PAGE_SIZE_CONFIGURABLE is defined (not on the ESP32-P4)
+ * or under CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK (off here), so an image with no
+ * descriptor would otherwise be written and booted unchecked.
  */
 ota_family_verdict_t ota_family_check(const uint8_t *hdr, size_t len);
 

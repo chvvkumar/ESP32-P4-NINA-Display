@@ -370,7 +370,8 @@ esp_err_t ota_post_handler(httpd_req_t *req)
                 continue;
             }
             fam_checked = true;
-            if (ota_family_check(fam_hdr, OTA_FAMILY_HDR_BYTES) == OTA_FAMILY_REFUSE) {
+            ota_family_verdict_t verdict = ota_family_check(fam_hdr, OTA_FAMILY_HDR_BYTES);
+            if (verdict != OTA_FAMILY_ACCEPT) {
                 /* Nothing has been written yet (OTA_WITH_SEQUENTIAL_WRITES
                  * erases nothing up front), so aborting here leaves the target
                  * slot exactly as it was. */
@@ -380,10 +381,17 @@ esp_err_t ota_post_handler(httpd_req_t *req)
                 ota_restore_network();
                 httpd_resp_set_status(req, "409 Conflict");
                 httpd_resp_set_type(req, "application/json");
-                httpd_resp_sendstr(req,
-                    "{\"error\":\"wrong firmware family: this image is built for the other "
-                    "panel shape and would leave the screen dark. Download the binary that "
-                    "matches this device.\"}");
+                if (verdict == OTA_FAMILY_NO_DESC) {
+                    httpd_resp_sendstr(req,
+                        "{\"error\":\"wrong firmware family: this file carries no firmware app "
+                        "descriptor, so it is not an ESP32-P4 application image. Download the "
+                        "binary that matches this device.\"}");
+                } else {
+                    httpd_resp_sendstr(req,
+                        "{\"error\":\"wrong firmware family: this image is built for the other "
+                        "panel shape and would leave the screen dark. Download the binary that "
+                        "matches this device.\"}");
+                }
                 return ESP_FAIL;
             }
             err = esp_ota_write(ota_handle, fam_hdr, OTA_FAMILY_HDR_BYTES);
