@@ -1,5 +1,6 @@
 #include "board_profile.h"
 #include "board_detect.h"
+#include "screen_geom.h"
 
 #include <string.h>
 
@@ -115,6 +116,7 @@ void board_profile_init(void)
     /* Width first: screenshot_encoder_init() and every geometry consumer read
      * it before display start runs. */
     bsp_display_set_panel_type(s_profile->panel_type);
+    screen_geom_set(s_profile->width, s_profile->safe_inset, s_profile->safe_radius);
 
     uint8_t id[3] = {0, 0, 0};
     esp_err_t err = bsp_display_probe_rddid(id);

@@ -301,7 +301,7 @@ void show_loading_state(void) {
 void nina_graph_overlay_create(lv_obj_t *parent) {
     overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(overlay);
-    lv_obj_set_size(overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(overlay, screen_size(), screen_size());
     lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
     lv_obj_set_flex_flow(overlay, LV_FLEX_FLOW_COLUMN);

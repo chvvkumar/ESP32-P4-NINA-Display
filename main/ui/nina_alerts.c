@@ -164,7 +164,7 @@ void nina_alerts_init(lv_obj_t *screen) {
     /* Full-screen transparent overlay with thick border */
     s_flash_overlay = lv_obj_create(screen);
     lv_obj_remove_style_all(s_flash_overlay);
-    lv_obj_set_size(s_flash_overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(s_flash_overlay, screen_size(), screen_size());
     lv_obj_set_style_bg_opa(s_flash_overlay, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_flash_overlay, FLASH_BORDER_W, 0);
     lv_obj_set_style_border_color(s_flash_overlay, lv_color_hex(0xFF0000), 0);

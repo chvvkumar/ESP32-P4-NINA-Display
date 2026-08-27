@@ -733,8 +733,8 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
 
     sum_page = lv_obj_create(parent);
     lv_obj_remove_style_all(sum_page);
-    lv_obj_set_size(sum_page, SCREEN_SIZE - 2 * OUTER_PADDING,
-                              SCREEN_SIZE - 2 * OUTER_PADDING);
+    lv_obj_set_size(sum_page, screen_size() - 2 * OUTER_PADDING,
+                              screen_size() - 2 * OUTER_PADDING);
     lv_obj_set_flex_flow(sum_page, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(sum_page, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

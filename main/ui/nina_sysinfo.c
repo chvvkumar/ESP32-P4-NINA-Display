@@ -142,7 +142,7 @@ static void net_debug_tap_cb(lv_event_t *e) {
 lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     si_page = lv_obj_create(parent);
     lv_obj_remove_style_all(si_page);
-    lv_obj_set_size(si_page, SCREEN_SIZE - 2 * OUTER_PADDING, SCREEN_SIZE - 2 * OUTER_PADDING);
+    lv_obj_set_size(si_page, screen_size() - 2 * OUTER_PADDING, screen_size() - 2 * OUTER_PADDING);
     lv_obj_set_flex_flow(si_page, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(si_page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(si_page, SI_GAP, 0);

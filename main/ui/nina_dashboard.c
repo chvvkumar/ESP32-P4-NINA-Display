@@ -686,7 +686,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
     p->page = lv_obj_create(parent);
     lv_obj_remove_style_all(p->page);
-    lv_obj_set_size(p->page, SCREEN_SIZE - 2 * OUTER_PADDING, SCREEN_SIZE - 2 * OUTER_PADDING);
+    lv_obj_set_size(p->page, screen_size() - 2 * OUTER_PADDING, screen_size() - 2 * OUTER_PADDING);
     lv_obj_set_style_pad_gap(p->page, GRID_GAP, 0);
 
     if (p->layout == 1) {
@@ -696,7 +696,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
          * layout body so it builds against the real 720x720 root. The
          * shared overlays created below inherit the full-screen size, which
          * is what a full-bleed page wants. */
-        lv_obj_set_size(p->page, SCREEN_SIZE, SCREEN_SIZE);
+        lv_obj_set_size(p->page, screen_size(), screen_size());
         lv_obj_set_pos(p->page, -OUTER_PADDING, -OUTER_PADDING);
         nina_layout_image_create(p, p->page, page_index);
         create_page_overlays(p, page_index);
@@ -1381,7 +1381,7 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
     main_cont = lv_obj_create(scr_dashboard);
     lv_obj_remove_style_all(main_cont);
-    lv_obj_set_size(main_cont, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(main_cont, screen_size(), screen_size());
     lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
@@ -1869,7 +1869,7 @@ void nina_dashboard_show_page_animated(int page_index, int instance_count, int e
         lv_anim_start(&a);
     } else if ((effect == 2 || effect == 3) && old_obj) {
         /* Slide left (2) or slide right (3) */
-        int slide_dist = SCREEN_SIZE;
+        int slide_dist = screen_size();
         /* effect 2 = slide-left: old goes left, new enters from right
          * effect 3 = slide-right: old goes right, new enters from left */
         int old_end_x   = (effect == 2) ? -slide_dist : slide_dist;

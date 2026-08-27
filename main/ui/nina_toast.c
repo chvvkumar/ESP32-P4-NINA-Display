@@ -636,7 +636,7 @@ static void create_bar(int idx) {
 
     lv_obj_t *bar = lv_obj_create(s_screen);
     lv_obj_remove_style_all(bar);
-    lv_obj_set_width(bar, SCREEN_SIZE - 2 * TOAST_MARGIN_X);
+    lv_obj_set_width(bar, screen_size() - 2 * TOAST_MARGIN_X);
     lv_obj_set_height(bar, TOAST_BAR_HEIGHT);
     lv_obj_set_align(bar, LV_ALIGN_BOTTOM_MID);
     lv_obj_set_style_translate_y(bar, TOAST_BOTTOM_Y, 0);

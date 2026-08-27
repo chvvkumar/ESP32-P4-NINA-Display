@@ -15,7 +15,7 @@
 #include "nina_empty_state.h"
 #include "nina_nav_arbiter.h"          /* nav_arbiter_notify_content_ready */
 #include "nina_dashboard.h"            /* nina_dashboard_set_image_page_enabled (config apply, B5) */
-#include "nina_dashboard_internal.h"   /* SCREEN_SIZE, OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
+#include "nina_dashboard_internal.h"   /* screen_size(), OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
 #include "image_red_remap.h"
 #include "image_fit.h"                 /* PPA fit: n/16 scale + symmetric trim */
 #include "image_night_invert.h"        /* radar: invert the greyscale basemap only */
@@ -89,7 +89,7 @@ static void init_image_dsc(lv_image_dsc_t *dsc)
 static void center_image_y(lv_obj_t *img, int h, uint16_t scale)
 {
     int32_t scaled_h = ((int32_t)h * (int32_t)scale) / 256;
-    int32_t y = ((int32_t)SCREEN_SIZE - scaled_h) / 2;
+    int32_t y = ((int32_t)screen_size() - scaled_h) / 2;
     if (y < 0) y = 0;
     if (lv_obj_get_style_y(img, LV_PART_MAIN) != y) lv_obj_set_y(img, y);
 }
@@ -378,7 +378,7 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
     lv_obj_t *page_container = lv_obj_create(parent);
     p->root = page_container;
     lv_obj_remove_style_all(page_container);
-    lv_obj_set_size(page_container, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(page_container, screen_size(), screen_size());
     /* Negate the parent main_cont's OUTER_PADDING so the image fills edge-to-edge
      * (matches nina_spotify spotify_page_create). Without this the page renders
      * inset by OUTER_PADDING, leaving a black band on the top and left. */
@@ -449,7 +449,7 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
 
     p->overlay_bar = lv_obj_create(page_container);
     lv_obj_remove_style_all(p->overlay_bar);
-    lv_obj_set_size(p->overlay_bar, SCREEN_SIZE, 68);
+    lv_obj_set_size(p->overlay_bar, screen_size(), 68);
     lv_obj_align(p->overlay_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
     /* No bar background: labels render text directly (apply_chip_style), so
      * overlay_bar is just an invisible positioning container for
@@ -696,7 +696,7 @@ void image_page_render_frame(image_page_t *p)
      * the display lock and on up to 1024x1024 pixels, plus — every bit as
      * expensive — an lv_image_set_scale() != 256 that made LVGL software-
      * resample the whole 720x720 screen on EVERY redraw in full-refresh mode.
-     * The destination is exactly SCREEN_SIZE wide, so the image is a blit now.
+     * The destination is exactly screen_size() wide, so the image is a blit now.
      *
      * image_fit_pick() works in LOGICAL (post-rotation) space and hands back the
      * n/16 scale plus the symmetric trim that keeps the output inside the panel;
@@ -709,10 +709,10 @@ void image_page_render_frame(image_page_t *p)
     uint8_t  *dst = NULL;
     size_t    dst_size = 0;
     esp_err_t err = ESP_ERR_INVALID_SIZE;
-    if (image_fit_pick(lw, lh, SCREEN_SIZE, &fit) &&
+    if (image_fit_pick(lw, lh, screen_size(), &fit) &&
         image_fit_logical_to_source(&fit, w, h, orient, &bx, &by, &bw, &bh)) {
         /* 128 B aligned address AND size: the PPA rejects anything else. */
-        dst_size = ((size_t)SCREEN_SIZE * fit.out_h * 2 + 127) & ~(size_t)127;
+        dst_size = ((size_t)screen_size() * fit.out_h * 2 + 127) & ~(size_t)127;
         dst = heap_caps_aligned_alloc(128, dst_size, MALLOC_CAP_SPIRAM);
         if (dst) {
             ppa_srm_job_t job = {
@@ -728,13 +728,13 @@ void image_page_render_frame(image_page_t *p)
                 .vflip         = do_vflip != 0,
                 .dst           = dst,
                 .dst_buf_size  = dst_size,
-                .dst_w         = SCREEN_SIZE,
+                .dst_w         = screen_size(),
                 .dst_h         = fit.out_h,
                 .dst_x         = fit.dst_x,
                 .dst_y         = 0,
                 .scale_n16     = fit.n16,
                 /* Only a source too wide to fill the panel leaves bands to clear. */
-                .clear_dst     = (fit.out_w < SCREEN_SIZE),
+                .clear_dst     = (fit.out_w < screen_size()),
             };
             err = ppa_srm_rgb565(&job);
         } else {
@@ -795,10 +795,10 @@ void image_page_render_frame(image_page_t *p)
         show_buf   = fb;
         show_w     = w;
         show_h     = h;
-        show_scale = (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w);
+        show_scale = (uint16_t)(((uint32_t)screen_size() * 256 + w / 2) / w);
     } else {
         show_buf = dst;
-        show_w   = SCREEN_SIZE;
+        show_w   = screen_size();
         show_h   = (uint16_t)fit.out_h;
     }
 
@@ -966,7 +966,7 @@ void image_page_show_scaled(image_page_t *p, const uint16_t *buf, int w, int h)
 
     /* Software-scale the small copy to fill the panel width (256 = 1.0x), the same
      * proven-clean path image_page_render_frame() uses. */
-    uint16_t scale = (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w);
+    uint16_t scale = (uint16_t)(((uint32_t)screen_size() * 256 + w / 2) / w);
     lv_image_set_src(p->img_back, back_dsc);
     lv_image_set_scale(p->img_back, scale);
     center_image_y(p->img_back, h, scale);   /* square moon render: resolves to 0 */
@@ -1052,7 +1052,7 @@ static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h
      * 720-wide dissolve scratch. The general expression stays for the ring's
      * no-scratch fallback, which borrows a slot at its NATIVE size (a 600 px
      * radar tile) and needs LVGL to scale it as it always did. */
-    uint16_t scale = (w > 0) ? (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w) : 256;
+    uint16_t scale = (w > 0) ? (uint16_t)(((uint32_t)screen_size() * 256 + w / 2) / w) : 256;
     lv_image_set_src(p->img_back, back_dsc);
     lv_image_set_scale(p->img_back, scale);
     /* Centres the wide radar tile; a full-panel 720 moon-drag buffer gets 0. */
@@ -1882,7 +1882,7 @@ uint32_t image_page_ring_judge_head(image_page_t *p,
 
 /* 1,036,800 B — a 128 B multiple, which is what the PPA demands of an output
  * buffer's SIZE as well as its address. */
-#define RING_SCRATCH_BYTES ((size_t)SCREEN_SIZE * SCREEN_SIZE * 2)
+#define RING_SCRATCH_BYTES ((size_t)screen_size() * screen_size() * 2)
 #define RING_FADE_STEP_MS  33          /* ~30 blends/s while a dissolve runs */
 
 /* Stop a running dissolve without committing it. Display lock held. */
@@ -1956,7 +1956,7 @@ static int ring_fit_into(image_ring_t *r, const ring_slot_t *s)
 {
     image_fit_t fit;
     uint32_t bx = 0, by = 0, bw = 0, bh = 0;
-    if (!image_fit_pick(s->w, s->h, SCREEN_SIZE, &fit) ||
+    if (!image_fit_pick(s->w, s->h, screen_size(), &fit) ||
         !image_fit_logical_to_source(&fit, s->w, s->h, 0, &bx, &by, &bw, &bh)) {
         return 0;
     }
@@ -1973,12 +1973,12 @@ static int ring_fit_into(image_ring_t *r, const ring_slot_t *s)
         .vflip         = false,
         .dst           = r->nxt,
         .dst_buf_size  = RING_SCRATCH_BYTES,
-        .dst_w         = SCREEN_SIZE,
+        .dst_w         = screen_size(),
         .dst_h         = fit.out_h,
         .dst_x         = fit.dst_x,
         .dst_y         = 0,
         .scale_n16     = fit.n16,
-        .clear_dst     = (fit.out_w < SCREEN_SIZE),
+        .clear_dst     = (fit.out_w < screen_size()),
     };
     return (ppa_srm_rgb565(&job) == ESP_OK) ? (int)fit.out_h : 0;
 }
@@ -1990,7 +1990,7 @@ static int ring_fit_into(image_ring_t *r, const ring_slot_t *s)
  * dissolving from a picture that is not the one on screen. Display lock held. */
 static bool ring_commit(image_page_t *p, image_ring_t *r, const uint8_t *fg, int h)
 {
-    if (ppa_blend_rgb565(r->cur, fg, r->mix, SCREEN_SIZE, (uint32_t)h, 255) != ESP_OK) {
+    if (ppa_blend_rgb565(r->cur, fg, r->mix, screen_size(), (uint32_t)h, 255) != ESP_OK) {
         r->cur_h = 0;
         return false;
     }
@@ -1998,7 +1998,7 @@ static bool ring_commit(image_page_t *p, image_ring_t *r, const uint8_t *fg, int
     r->cur = r->mix;
     r->mix = t;
     r->cur_h = (uint16_t)h;
-    swap_borrowed_buf(p, (const uint16_t *)r->cur, SCREEN_SIZE, h);
+    swap_borrowed_buf(p, (const uint16_t *)r->cur, screen_size(), h);
     return true;
 }
 
@@ -2009,7 +2009,7 @@ static bool ring_fade_blend(image_ring_t *r, int el)
     uint32_t a = (el <= 0) ? 0u : ((uint32_t)el * 255u) / RADAR_PLAY_FADE_MS;
     if (a > 255u) a = 255u;
     return ppa_blend_rgb565(r->cur, r->fade_fg, r->mix,
-                            SCREEN_SIZE, r->fade_h, (uint8_t)a) == ESP_OK;
+                            screen_size(), r->fade_h, (uint8_t)a) == ESP_OK;
 }
 
 /* End a running dissolve NOW, at full alpha: the incoming frame lands in `cur`
@@ -2064,7 +2064,7 @@ static bool ring_fade_start(image_page_t *p, image_ring_t *r, const uint8_t *fg,
         ring_fade_stop(r);
         return false;
     }
-    swap_borrowed_buf(p, (const uint16_t *)r->mix, SCREEN_SIZE, h);
+    swap_borrowed_buf(p, (const uint16_t *)r->mix, screen_size(), h);
     r->fade_timer = lv_timer_create(ring_fade_cb, RING_FADE_STEP_MS, p);
     if (!r->fade_timer) {
         ring_fade_finish(p, r);            /* no timer: land the frame now */
@@ -2089,7 +2089,7 @@ static void ring_play(image_page_t *p, image_ring_t *r, const ring_slot_t *s, bo
      * one SRM pass into `nxt`. */
     const uint8_t *fg = s->buf;
     int fg_h = (int)s->h;
-    if (s->w != SCREEN_SIZE || s->h > SCREEN_SIZE) {
+    if (s->w != screen_size() || s->h > screen_size()) {
         fg_h = ring_fit_into(r, s);
         if (fg_h <= 0) {
             swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h);

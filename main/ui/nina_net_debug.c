@@ -309,7 +309,7 @@ void nina_net_debug_show(void) {
 
     nd_root = lv_obj_create(lv_layer_top());
     lv_obj_remove_style_all(nd_root);
-    lv_obj_set_size(nd_root, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(nd_root, screen_size(), screen_size());
     lv_obj_set_style_bg_opa(nd_root, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(nd_root, INFO_OUTER_PAD, 0);
     lv_obj_set_style_pad_row(nd_root, 8, 0);

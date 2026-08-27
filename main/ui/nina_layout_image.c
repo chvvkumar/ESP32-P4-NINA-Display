@@ -58,7 +58,7 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define IF_FONT_FILTER    (&lv_font_montserrat_24)
 
 /* The page root IS full-bleed 720x720 for this layout: create_dashboard_page()
- * in nina_dashboard.c sizes it SCREEN_SIZE square and offsets it by
+ * in nina_dashboard.c sizes it screen_size() square and offsets it by
  * -OUTER_PADDING to negate main_cont's padding (same trick as the six image
  * pages in nina_image_page.c). The two text groups hug the panel edges; only
  * their inner padding keeps the glyphs off the physical edge. */
@@ -218,7 +218,7 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
      * NULL source) even when there is no capture so the tap target for the
      * full-screen preview is always present. */
     p->alt.cap_img = lv_image_create(parent);
-    lv_obj_set_size(p->alt.cap_img, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(p->alt.cap_img, screen_size(), screen_size());
     lv_obj_center(p->alt.cap_img);
     /* ponytail: LVGL software-scales the cover fit on redraw (PPA only helps at
      * 1.0x). Fine for a background that changes once per sub; if it ever shows

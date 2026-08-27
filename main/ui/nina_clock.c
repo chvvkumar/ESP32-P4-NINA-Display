@@ -1030,12 +1030,12 @@ static void build_layout_console(void) {
     /* ── Corner brackets ── */
     console_corners[0] = make_console_corner(clock_root, 12, 12,
                             LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT);
-    console_corners[1] = make_console_corner(clock_root, SCREEN_SIZE - 26, 12,
+    console_corners[1] = make_console_corner(clock_root, screen_size() - 26, 12,
                             LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_RIGHT);
-    console_corners[2] = make_console_corner(clock_root, 12, SCREEN_SIZE - 26,
+    console_corners[2] = make_console_corner(clock_root, 12, screen_size() - 26,
                             LV_BORDER_SIDE_BOTTOM | LV_BORDER_SIDE_LEFT);
-    console_corners[3] = make_console_corner(clock_root, SCREEN_SIZE - 26,
-                            SCREEN_SIZE - 26,
+    console_corners[3] = make_console_corner(clock_root, screen_size() - 26,
+                            screen_size() - 26,
                             LV_BORDER_SIDE_BOTTOM | LV_BORDER_SIDE_RIGHT);
 
     /* ── Hero time (centered, in the old header band) + PM chip ── */
@@ -1058,7 +1058,7 @@ static void build_layout_console(void) {
 
     /* ── Engraved section rule with knocked-out label ── */
     lv_obj_t *atmo_rule = make_rule(clock_root);
-    lv_obj_set_size(atmo_rule, SCREEN_SIZE - 112, 1);
+    lv_obj_set_size(atmo_rule, screen_size() - 112, 1);
     lv_obj_set_pos(atmo_rule, 56, 368);
     lv_obj_set_style_bg_color(atmo_rule, lv_color_hex(CON_LINE), 0);
 
@@ -1073,7 +1073,7 @@ static void build_layout_console(void) {
     lv_obj_t *grid = make_container(clock_root);
     /* Cell needs 4 pad + 25 cap + 8 + 44 val + 8 + 6 ruler + 8 + 39 sub
      * = 142px; 150 leaves breathing room so nothing clips. */
-    lv_obj_set_size(grid, SCREEN_SIZE - 112, 150);
+    lv_obj_set_size(grid, screen_size() - 112, 150);
     lv_obj_set_pos(grid, 56, 396);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START,
@@ -1106,7 +1106,7 @@ static void build_layout_console(void) {
 
     /* ── Forecast strip ── */
     forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, SCREEN_SIZE - 112, LV_SIZE_CONTENT);
+    lv_obj_set_size(forecast_row, screen_size() - 112, LV_SIZE_CONTENT);
     lv_obj_set_pos(forecast_row, 56, 554);
     lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_START,
@@ -1215,7 +1215,7 @@ static void build_layout_broadside(void) {
     lv_obj_t *hero = make_container(clock_root);
     /* 24 px wider than the content column so the PM mark can sit in the
      * root's right padding, clear of a four-digit time ("10:12"). */
-    lv_obj_set_size(hero, SCREEN_SIZE - 2 * 34 + 24, 212);
+    lv_obj_set_size(hero, screen_size() - 2 * 34 + 24, 212);
 
     lbl_time = make_label(hero, &lv_font_saira_black_300, BS_BONE, -4, "");
     lv_obj_align(lbl_time, LV_ALIGN_LEFT_MID, -6, 0);
@@ -1459,14 +1459,14 @@ static void build_layout_blueprint(void) {
 
     /* ── Sheet frames ── */
     blu_frame_o = make_container(clock_root);
-    lv_obj_set_size(blu_frame_o, SCREEN_SIZE - 36, SCREEN_SIZE - 36);
+    lv_obj_set_size(blu_frame_o, screen_size() - 36, screen_size() - 36);
     lv_obj_set_pos(blu_frame_o, 18, 18);
     lv_obj_set_style_border_width(blu_frame_o, 2, 0);
     lv_obj_set_style_border_color(blu_frame_o, lv_color_hex(BLU_LINE), 0);
     lv_obj_set_style_border_opa(blu_frame_o, LV_OPA_COVER, 0);
 
     blu_frame_i = make_container(clock_root);
-    lv_obj_set_size(blu_frame_i, SCREEN_SIZE - 88, SCREEN_SIZE - 88);
+    lv_obj_set_size(blu_frame_i, screen_size() - 88, screen_size() - 88);
     lv_obj_set_pos(blu_frame_i, 44, 44);
     lv_obj_set_style_border_width(blu_frame_i, 1, 0);
     lv_obj_set_style_border_color(blu_frame_i, lv_color_hex(BLU_DIM), 0);
@@ -1643,7 +1643,7 @@ static void build_layout_transit(void) {
 
     /* ── Route map (hidden until forecast data arrives) ── */
     forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(forecast_row, screen_size(), screen_size());
     lv_obj_set_pos(forecast_row, 0, 0);
     lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 
@@ -1779,7 +1779,7 @@ static void build_layout_network(void) {
 
     /* ── Network map (hidden until forecast data arrives) ── */
     forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(forecast_row, screen_size(), screen_size());
     lv_obj_set_pos(forecast_row, 0, 0);
     lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 
@@ -2248,7 +2248,7 @@ static void build_content(void) {
 lv_obj_t *clock_page_create(lv_obj_t *parent) {
     /* Root — full screen, own background, overrides parent padding */
     clock_root = lv_obj_create(parent);
-    lv_obj_set_size(clock_root, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(clock_root, screen_size(), screen_size());
     lv_obj_set_pos(clock_root, -OUTER_PADDING, -OUTER_PADDING);
     lv_obj_set_style_bg_color(clock_root, lv_color_hex(CLK_BG), 0);
     lv_obj_set_style_bg_opa(clock_root, LV_OPA_COVER, 0);

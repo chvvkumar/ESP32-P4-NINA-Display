@@ -1,5 +1,6 @@
 #include "nina_setup_screen.h"
 #include "app_config.h"
+#include "screen_geom.h"
 #include "themes.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -45,7 +46,7 @@ void nina_setup_screen_create(lv_obj_t *parent)
     /* Full-screen background */
     s_setup_cont = lv_obj_create(parent);
     lv_obj_remove_style_all(s_setup_cont);
-    lv_obj_set_size(s_setup_cont, 720, 720);
+    lv_obj_set_size(s_setup_cont, screen_size(), screen_size());
     lv_obj_set_style_bg_color(s_setup_cont, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_setup_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_setup_cont, 40, 0);

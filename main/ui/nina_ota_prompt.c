@@ -81,7 +81,7 @@ static uint32_t dim_color(uint32_t c) {
 void nina_ota_prompt_create(lv_obj_t *parent) {
     ota_overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(ota_overlay);
-    lv_obj_set_size(ota_overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(ota_overlay, screen_size(), screen_size());
     lv_obj_set_style_bg_color(ota_overlay, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
     lv_obj_add_flag(ota_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -91,7 +91,7 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     /* ── Info container (release notes + buttons) ── */
     info_cont = lv_obj_create(ota_overlay);
     lv_obj_remove_style_all(info_cont);
-    lv_obj_set_size(info_cont, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(info_cont, screen_size(), screen_size());
     lv_obj_center(info_cont);
     lv_obj_set_flex_flow(info_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(info_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -193,7 +193,7 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     /* ── Progress container (hidden initially) ── */
     progress_cont = lv_obj_create(ota_overlay);
     lv_obj_remove_style_all(progress_cont);
-    lv_obj_set_size(progress_cont, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(progress_cont, screen_size(), screen_size());
     lv_obj_center(progress_cont);
     lv_obj_set_flex_flow(progress_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(progress_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -258,7 +258,7 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     /* ── Error container (hidden initially) ── */
     error_cont = lv_obj_create(ota_overlay);
     lv_obj_remove_style_all(error_cont);
-    lv_obj_set_size(error_cont, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(error_cont, screen_size(), screen_size());
     lv_obj_center(error_cont);
     lv_obj_set_flex_flow(error_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(error_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -301,7 +301,7 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     /* ── Manual-flash container (hidden initially) ── */
     manual_cont = lv_obj_create(ota_overlay);
     lv_obj_remove_style_all(manual_cont);
-    lv_obj_set_size(manual_cont, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(manual_cont, screen_size(), screen_size());
     lv_obj_center(manual_cont);
     lv_obj_set_flex_flow(manual_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(manual_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

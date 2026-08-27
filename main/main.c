@@ -39,6 +39,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stddef.h>          /* offsetof - disp_ctx_compat_t layout asserts */
 #include <stdio.h>
 #include <time.h>
 #include "esp_heap_caps.h"
@@ -107,8 +108,10 @@ static void                 *s_fb[3];    /* the three DPI framebuffers      */
  * because the DPI driver's initial cur_fb_index is 0. */
 static uint8_t               s_rot_dst = 1;
 
-/* 720*720*2 = 1,036,800 — a whole number of 128-byte cache lines. */
-#define ROT_FB_BYTES (BSP_LCD_H_RES * BSP_LCD_V_RES * 2)
+/* 720*720*2 = 1,036,800 and 800*800*2 = 1,280,000: both a whole number of
+ * 128-byte cache lines, which is what the PPA demands of an output buffer's
+ * SIZE as well as its address. */
+#define ROT_FB_BYTES ((size_t)screen_size() * screen_size() * 2)
 
 /* Mirror of the BSP's private lvgl_port_display_ctx_t — only the fields we
  * need for rotation.  Must match esp_lvgl_port 2.8.0 layout.
@@ -135,6 +138,15 @@ typedef struct {
         unsigned int sw_rotate:   1;
     } flags;
 } disp_ctx_compat_t;
+
+/* If CONFIG_LVGL_PORT_ENABLE_PPA is ever set, the port inserts a ppa_handle
+ * pointer before flags and the sw_rotate write below lands inside a pointer the
+ * port later frees. These two asserts turn that into a build failure instead of
+ * silent memory corruption. Verified against esp_lvgl_port 2.8.0. */
+_Static_assert(sizeof(disp_ctx_compat_t) == 56,
+               "esp_lvgl_port display context layout changed: re-check disp_ctx_compat_t");
+_Static_assert(offsetof(disp_ctx_compat_t, flags) == 52,
+               "esp_lvgl_port flags offset changed: re-check disp_ctx_compat_t");
 
 /* LVGL rotation enum → PPA SRM angle.  Both are counter-clockwise, so this is
  * a straight 1:1 map.  If the panel comes up rotated the wrong way, swap
@@ -167,13 +179,14 @@ static void rotated_flush_cb(lv_display_t *drv, const lv_area_t *area,
      * whichever of fb0/fb1 was not committed last flush.  The PPA driver does
      * its own cache maintenance on both windows, so no msync here. */
     uint8_t dst = s_rot_dst;
+    const uint32_t fb_dim = (uint32_t)screen_size();
     ppa_srm_oper_config_t srm = {
         .in  = { .buffer = color_map,
-                 .pic_w = BSP_LCD_H_RES, .pic_h = BSP_LCD_V_RES,
-                 .block_w = BSP_LCD_H_RES, .block_h = BSP_LCD_V_RES,
+                 .pic_w = fb_dim, .pic_h = fb_dim,
+                 .block_w = fb_dim, .block_h = fb_dim,
                  .srm_cm = PPA_SRM_COLOR_MODE_RGB565 },
         .out = { .buffer = s_fb[dst], .buffer_size = ROT_FB_BYTES,
-                 .pic_w = BSP_LCD_H_RES, .pic_h = BSP_LCD_V_RES,
+                 .pic_w = fb_dim, .pic_h = fb_dim,
                  .srm_cm = PPA_SRM_COLOR_MODE_RGB565 },
         .rotation_angle = s_rot_map[rot & 3],
         .scale_x = 1.0f, .scale_y = 1.0f,
@@ -1017,7 +1030,7 @@ void app_main(void)
         if (splash_ready) {
             lv_obj_t *splash_cont = lv_obj_create(scr);
             lv_obj_remove_style_all(splash_cont);
-            lv_obj_set_size(splash_cont, 720, 720);
+            lv_obj_set_size(splash_cont, screen_size(), screen_size());
             lv_obj_set_style_bg_color(splash_cont, lv_color_hex(0x000000), 0);
             lv_obj_set_style_bg_opa(splash_cont, LV_OPA_COVER, 0);
             lv_obj_center(splash_cont);

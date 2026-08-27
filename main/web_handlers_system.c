@@ -120,7 +120,7 @@ static void ota_show_overlay(const char *message) {
         /* ── Fullscreen black overlay ── */
         ota_overlay = lv_obj_create(lv_scr_act());
         lv_obj_remove_style_all(ota_overlay);
-        lv_obj_set_size(ota_overlay, SCREEN_SIZE, SCREEN_SIZE);
+        lv_obj_set_size(ota_overlay, screen_size(), screen_size());
         lv_obj_set_style_bg_color(ota_overlay, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
         lv_obj_center(ota_overlay);

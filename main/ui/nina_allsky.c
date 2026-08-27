@@ -582,8 +582,8 @@ lv_obj_t *allsky_page_create(lv_obj_t *parent) {
 
     allsky_page = lv_obj_create(parent);
     lv_obj_remove_style_all(allsky_page);
-    lv_obj_set_size(allsky_page, SCREEN_SIZE - 2 * OUTER_PADDING,
-                    SCREEN_SIZE - 2 * OUTER_PADDING);
+    lv_obj_set_size(allsky_page, screen_size() - 2 * OUTER_PADDING,
+                    screen_size() - 2 * OUTER_PADDING);
     lv_obj_set_flex_flow(allsky_page, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(allsky_page, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

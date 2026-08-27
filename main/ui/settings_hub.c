@@ -25,7 +25,7 @@
 #include "ui_helpers.h"
 #include "ui_styles.h"
 #include "nina_toast.h"                /* demo-mode state feedback */
-#include "display_defs.h"              /* SCREEN_SIZE, display_rotation_apply */
+#include "display_defs.h"              /* screen_size(), display_rotation_apply */
 #include "wifi_join.h"                 /* notify-cb deregistration on leaving the WiFi family */
 #include "tasks.h"                     /* data_task_handle — demo tile wake */
 #include "power_mgmt.h"                /* app_reboot — single logged restart path */
@@ -43,7 +43,7 @@
 #include <string.h>
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
-#define HUB_ROOT_SIZE   (SCREEN_SIZE - 2 * OUTER_PADDING)  /* 688, same as the tabview root */
+#define HUB_ROOT_SIZE   (screen_size() - 2 * OUTER_PADDING)  /* 688, same as the tabview root */
 #define HUB_HEADER_H     72
 #define HUB_BACK_W       96
 #define HUB_TILE_W      330   /* 2 x 330 + 20 gap + 2 x 4 pad = 688 */

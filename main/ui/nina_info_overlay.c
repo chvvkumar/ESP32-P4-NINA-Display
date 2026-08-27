@@ -69,7 +69,7 @@ void nina_info_overlay_create(lv_obj_t *parent) {
     /* Base container */
     info_overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(info_overlay);
-    lv_obj_set_size(info_overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(info_overlay, screen_size(), screen_size());
     if (current_theme) {
         lv_obj_set_style_bg_color(info_overlay, lv_color_hex(current_theme->bg_main), 0);
     } else {

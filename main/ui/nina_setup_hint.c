@@ -184,7 +184,7 @@ static void build_overlay(const char *url, const char *hostname)
 
     s_cont = lv_obj_create(scr);
     lv_obj_remove_style_all(s_cont);
-    lv_obj_set_size(s_cont, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(s_cont, screen_size(), screen_size());
     lv_obj_set_style_bg_color(s_cont, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_cont, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_cont, 0, 0);

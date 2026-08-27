@@ -256,6 +256,10 @@ target_compile_definitions(test_radar_wms PRIVATE
 add_nina_host_test(test_clouds_wms
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_clouds_wms.c
+        # clouds_wms.h derives CLOUDS_PX from screen_size(), which reads
+        # g_screen_size out of this file. The default there is 720, so every
+        # existing 720-based assertion in this test still holds.
+        ${NINA_REPO_ROOT}/main/screen_geom.c
 )
 
 # ---------------------------------------------------------------------------

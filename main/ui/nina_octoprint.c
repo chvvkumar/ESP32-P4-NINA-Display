@@ -54,7 +54,7 @@ static const char *TAG = "octo_ui";
 
 #define OCTO_PAD   16   /* outer padding, matches OUTER_PADDING */
 #define OCTO_GAP   12   /* inter-card gap (mockup v1) */
-#define OCTO_W     (SCREEN_SIZE - 2 * OCTO_PAD)
+#define OCTO_W     (screen_size() - 2 * OCTO_PAD)
 
 /* ── Shared styles ────────────────────────────────────────────────────── */
 
@@ -671,7 +671,7 @@ static void build_content(void)
      * held copy and re-flags a rescale just before this runs). */
     s_img_cover = ops->image_cover;
 
-    int size = ops->full_bleed ? SCREEN_SIZE : OCTO_W;
+    int size = ops->full_bleed ? screen_size() : OCTO_W;
     int off  = ops->full_bleed ? -OCTO_PAD : 0;
     lv_obj_set_size(s_root, size, size);
     lv_obj_set_pos(s_root, off, off);
@@ -928,7 +928,7 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
  * second pass scales by exactly 1.
  *
  * COVER guard: a very lopsided source (a tall thumbnail) would cover a 720
- * square with an enormous copy, so anything past 2 * SCREEN_SIZE on either axis
+ * square with an enormous copy, so anything past 2 * screen_size() on either axis
  * falls back to FIT for that frame. The decision depends only on the aspect and
  * the box, never on the size, so the fallback is idempotent too: re-running
  * COVER on a fitted copy of the same aspect trips the same guard and returns
@@ -940,11 +940,11 @@ static bool fit_into_box(uint16_t src_w, uint16_t src_h, int32_t bw, int32_t bh,
     if (bw < 8 || bh < 8 || src_w == 0 || src_h == 0) {
         return false;
     }
-    if (bw > SCREEN_SIZE) {
-        bw = SCREEN_SIZE;
+    if (bw > screen_size()) {
+        bw = screen_size();
     }
-    if (bh > SCREEN_SIZE) {
-        bh = SCREEN_SIZE;
+    if (bh > screen_size()) {
+        bh = screen_size();
     }
 
     if (cover) {
@@ -964,7 +964,7 @@ static bool fit_into_box(uint16_t src_w, uint16_t src_h, int32_t bw, int32_t bh,
                 cw = bw;
             }
         }
-        if (cw <= 2 * SCREEN_SIZE && ch <= 2 * SCREEN_SIZE) {
+        if (cw <= 2 * screen_size() && ch <= 2 * screen_size()) {
             *out_w = (uint16_t)cw;
             *out_h = (uint16_t)ch;
             return true;
@@ -1186,8 +1186,8 @@ static void image_update(octoprint_data_t *data, octo_staged_t *st,
     int32_t bh = lv_obj_get_content_height(s_w.img_hero);
     bool box_known = (bw >= 8 && bh >= 8);
     if (box_known) {
-        s_box_w = (uint16_t)((bw > SCREEN_SIZE) ? SCREEN_SIZE : bw);
-        s_box_h = (uint16_t)((bh > SCREEN_SIZE) ? SCREEN_SIZE : bh);
+        s_box_w = (uint16_t)((bw > screen_size()) ? screen_size() : bw);
+        s_box_h = (uint16_t)((bh > screen_size()) ? screen_size() : bh);
     }
 
     if (st->buf && box_known) {

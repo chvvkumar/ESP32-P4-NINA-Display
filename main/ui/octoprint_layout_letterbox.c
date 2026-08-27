@@ -73,11 +73,12 @@
  * — the bands run to the physical panel edge and carry their own padding.
  */
 
+#include "display_defs.h"   /* screen_size(): LB_PAGE is the live panel width */
 #include "nina_octoprint_internal.h"
 
 /* ── Geometry ─────────────────────────────────────────────────────────── */
 
-#define LB_PAGE        720      /* full-bleed page is the whole panel */
+#define LB_PAGE        (screen_size())   /* full-bleed page is the whole panel */
 #define LB_TOP_H        72
 #define LB_BOT_H       110
 #define LB_IMG_H       (LB_PAGE - LB_TOP_H - LB_BOT_H)   /* 538 */

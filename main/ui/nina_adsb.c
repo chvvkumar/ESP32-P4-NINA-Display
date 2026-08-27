@@ -55,7 +55,7 @@
 
 #include "nina_adsb.h"
 
-#include "nina_dashboard_internal.h"   /* SCREEN_SIZE, OUTER_PADDING, current_theme */
+#include "nina_dashboard_internal.h"   /* screen_size(), OUTER_PADDING, current_theme */
 #include "nina_empty_state.h"
 #include "adsb_client.h"
 #include "adsb_geom.h"
@@ -978,13 +978,19 @@ static int       s_tag_area_n;
 static lv_area_t s_ring_lbl_area[3];
 static bool      s_ring_lbl_used[3];     /* slot placed this cycle */
 
-/* Scope corner text blocks, scored like placed tags (Scope only). */
-static const lv_area_t s_corner_area[4] = {
-    { 0,                        0,           CORNER_W_L,  CORNER_TOP_H },
-    { SCREEN_SIZE - CORNER_W_R, 0,           SCREEN_SIZE, CORNER_TOP_H },
-    { 0,                        CORNER_BL_Y, CORNER_W_L,  SCREEN_SIZE  },
-    { SCREEN_SIZE - CORNER_W_R, CORNER_BR_Y, SCREEN_SIZE, SCREEN_SIZE  },
-};
+/* Scope corner text blocks, scored like placed tags (Scope only). Filled at
+ * page create rather than statically initialised: the panel width is a runtime
+ * value, so the right edge cannot be a constant expression. */
+static lv_area_t s_corner_area[4];
+
+static void adsb_fill_corner_areas(void)
+{
+    const int32_t w = (int32_t)screen_size();
+    s_corner_area[0] = (lv_area_t){ 0,               0,           CORNER_W_L, CORNER_TOP_H };
+    s_corner_area[1] = (lv_area_t){ w - CORNER_W_R,  0,           w,          CORNER_TOP_H };
+    s_corner_area[2] = (lv_area_t){ 0,               CORNER_BL_Y, CORNER_W_L, w            };
+    s_corner_area[3] = (lv_area_t){ w - CORNER_W_R,  CORNER_BR_Y, w,          w            };
+}
 
 static bool boxes_hit(const lv_area_t *a, const lv_area_t *b)
 {
@@ -995,9 +1001,9 @@ static bool boxes_hit(const lv_area_t *a, const lv_area_t *b)
 static void clamp_tag(int *ax, int *ay)
 {
     if (*ax < 6)                          *ax = 6;
-    if (*ax > SCREEN_SIZE - TAG_W - 6)    *ax = SCREEN_SIZE - TAG_W - 6;
+    if (*ax > screen_size() - TAG_W - 6)    *ax = screen_size() - TAG_W - 6;
     if (*ay < HDR_H + 4)                          *ay = HDR_H + 4;
-    if (*ay > SCREEN_SIZE - STRIP_H - TAG_H - 4)  *ay = SCREEN_SIZE - STRIP_H - TAG_H - 4;
+    if (*ay > screen_size() - STRIP_H - TAG_H - 4)  *ay = screen_size() - STRIP_H - TAG_H - 4;
 }
 
 /** Innermost drawn ring, the "crowded middle" threshold for the leader length.
@@ -1033,7 +1039,7 @@ static int tag_score(const lv_area_t *box, int skip)
     for (int i = 0; i < 3; i++) {
         if (s_ring_lbl_used[i] && boxes_hit(box, &s_ring_lbl_area[i])) s += 3;
     }
-    if (box->y1 < HDR_H || box->y2 > SCREEN_SIZE - STRIP_H) s += 2;
+    if (box->y1 < HDR_H || box->y2 > screen_size() - STRIP_H) s += 2;
     return s;
 }
 
@@ -1172,7 +1178,7 @@ static void place_compass(void)
          * inward instead of vanishing under the strip text. */
         int ly = y - 16;
         if (ly < HDR_H + 2)                       ly = HDR_H + 2;
-        if (ly > SCREEN_SIZE - STRIP_H - 34)      ly = SCREEN_SIZE - STRIP_H - 34;
+        if (ly > screen_size() - STRIP_H - 34)      ly = screen_size() - STRIP_H - 34;
         lv_obj_set_pos(s_lbl_card[i], x - 12, ly);
     }
     float tn = (-s_up_deg) * ADSB_DEG2RAD;
@@ -1737,7 +1743,7 @@ static void recompute(void)
         }
         int x = (int)(fx + 0.5f);
         int y = (int)(fy + 0.5f);
-        if (x < 4 || x > SCREEN_SIZE - 4 || y < 4 || y > SCREEN_SIZE - 4) {
+        if (x < 4 || x > screen_size() - 4 || y < 4 || y > screen_size() - 4) {
             continue;
         }
 
@@ -1970,7 +1976,7 @@ static lv_obj_t *mk_scrim(lv_obj_t *parent, int y, int h)
 {
     lv_obj_t *o = lv_obj_create(parent);
     lv_obj_remove_style_all(o);
-    lv_obj_set_size(o, SCREEN_SIZE, h);
+    lv_obj_set_size(o, screen_size(), h);
     lv_obj_set_pos(o, 0, y);
     lv_obj_set_style_bg_opa(o, LV_OPA_70, 0);
     lv_obj_clear_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
@@ -1979,6 +1985,8 @@ static lv_obj_t *mk_scrim(lv_obj_t *parent, int y, int h)
 
 static lv_obj_t *adsb_page_create(lv_obj_t *parent)
 {
+    adsb_fill_corner_areas();
+
     if (s_root) {
         return s_root;
     }
@@ -2003,7 +2011,7 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
 
     s_root = lv_obj_create(parent);
     lv_obj_remove_style_all(s_root);
-    lv_obj_set_size(s_root, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(s_root, screen_size(), screen_size());
     /* Negate main_cont's OUTER_PADDING so the disc really reaches the edge
      * (same trick as nina_image_page / nina_spotify). */
     lv_obj_set_pos(s_root, -OUTER_PADDING, -OUTER_PADDING);
@@ -2019,14 +2027,14 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
      * root; exists purely so the STALE tier can dim everything at once. */
     s_content = lv_obj_create(s_root);
     lv_obj_remove_style_all(s_content);
-    lv_obj_set_size(s_content, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(s_content, screen_size(), screen_size());
     lv_obj_set_pos(s_content, 0, 0);
     lv_obj_clear_flag(s_content, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
     /* Draw host: full screen, transparent, one DRAW_MAIN_END callback. */
     s_disc = lv_obj_create(s_content);
     lv_obj_remove_style_all(s_disc);
-    lv_obj_set_size(s_disc, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(s_disc, screen_size(), screen_size());
     lv_obj_set_pos(s_disc, 0, 0);
     lv_obj_clear_flag(s_disc, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s_disc, disc_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
@@ -2061,7 +2069,7 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
      * Digit advance at 36 pt is <= 24 px, at 22 pt <= 15 px; the fixed widths
      * below are sized from that. */
     {
-        const int right_x = SCREEN_SIZE - CORNER_PAD;
+        const int right_x = screen_size() - CORNER_PAD;
         /* Top-left: CONTACTS  "NN / NNN" */
         s_sc_cap_contacts = mk_label(s_content, &lv_font_montserrat_18, COL_SCOPE_CAP, "CONTACTS");
         lv_obj_set_pos(s_sc_cap_contacts, CORNER_PAD, 12);
@@ -2092,7 +2100,7 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
     /* Board: lead block, five ranked rows, lead detail card. */
     s_board = lv_obj_create(s_content);
     lv_obj_remove_style_all(s_board);
-    lv_obj_set_size(s_board, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(s_board, screen_size(), screen_size());
     lv_obj_set_pos(s_board, 0, 0);
     lv_obj_clear_flag(s_board, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
@@ -2197,20 +2205,20 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
     s_lbl_mount = mk_label(s_hdr, &lv_font_montserrat_22, 0x808080, "");
     lv_obj_align(s_lbl_mount, LV_ALIGN_RIGHT_MID, -20, 0);
 
-    s_strip = mk_scrim(s_root, SCREEN_SIZE - STRIP_H, STRIP_H);
+    s_strip = mk_scrim(s_root, screen_size() - STRIP_H, STRIP_H);
     s_lbl_strip = mk_label(s_strip, &lv_font_montserrat_26, 0x808080, "");
     lv_obj_align(s_lbl_strip, LV_ALIGN_LEFT_MID, 20, 0);
 
     /* Scope reconnect cue: bottom-right, above the message rate, undimmed. */
     s_sc_cue = mk_num(s_root, &lv_font_montserrat_22, COL_SCOPE_GREEN,
-                      SCREEN_SIZE - CORNER_PAD - CORNER_W_R, 646, CORNER_W_R);
+                      screen_size() - CORNER_PAD - CORNER_W_R, 646, CORNER_W_R);
     lv_obj_clear_flag(s_sc_cue, LV_OBJ_FLAG_CLICKABLE);
 
     /* Empty state needs its own opaque backdrop (nina_empty_state is 80%
      * inline by contract; full-coverage consumers supply the ground). */
     s_backdrop = lv_obj_create(s_root);
     lv_obj_remove_style_all(s_backdrop);
-    lv_obj_set_size(s_backdrop, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(s_backdrop, screen_size(), screen_size());
     lv_obj_set_pos(s_backdrop, 0, 0);
     lv_obj_set_style_bg_opa(s_backdrop, LV_OPA_COVER, 0);
     lv_obj_clear_flag(s_backdrop, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);

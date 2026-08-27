@@ -4,7 +4,7 @@ file(GLOB_RECURSE LV_DEMOS_SOURCES ${LV_DEMO_DIR}/*.c)
 idf_component_register(
     SRCS main.c tasks.c axi_qos.c power_mgmt.c jpeg_utils.c stb_image.c image_red_remap.c perf_monitor.c ota_github.c
          http_fetch.c poll_task.c image_page_poll.c radar_sites.c time_parse.c wifi_join.c
-         board_detect.c board_profile.c
+         board_detect.c board_profile.c screen_geom.c
          nina_connection.c nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
          net_diag.c net_trace.c allsky_client.c json_client.c ha_client.c adsb_client.c octoprint_client.c octoprint_appkeys.c goes_client.c weather_client.c telemetry.c moon_ephemeris.c moon_sphere.cpp moon_interaction.c spotify_auth.c spotify_client.c demo_data.c
          audio_alert.c web_test_audio.c voice_store.c web_handlers_voice.c

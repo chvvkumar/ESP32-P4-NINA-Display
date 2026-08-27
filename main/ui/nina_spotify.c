@@ -368,7 +368,7 @@ static void apply_label_long_mode(void)
 lv_obj_t *spotify_page_create(lv_obj_t *parent)
 {
     spotify_page = lv_obj_create(parent);
-    lv_obj_set_size(spotify_page, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(spotify_page, screen_size(), screen_size());
     /* Negate the parent's OUTER_PADDING so album art fills edge-to-edge */
     lv_obj_set_pos(spotify_page, -OUTER_PADDING, -OUTER_PADDING);
     lv_obj_set_style_pad_all(spotify_page, 0, 0);
@@ -388,7 +388,7 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
 
     /* 2. Dim overlay (semi-transparent black, animated) */
     dim_overlay = lv_obj_create(spotify_page);
-    lv_obj_set_size(dim_overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(dim_overlay, screen_size(), screen_size());
     lv_obj_set_style_bg_color(dim_overlay, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(dim_overlay, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(dim_overlay, 0, 0);
@@ -512,7 +512,7 @@ static void create_controls(void)
     int zone_h = 236;              /* Enough for: progress bar + time labels + buttons */
     controls_zone = lv_obj_create(spotify_page);
     lv_obj_set_pos(controls_zone, 0, zone_y);
-    lv_obj_set_size(controls_zone, SCREEN_SIZE, zone_h);
+    lv_obj_set_size(controls_zone, screen_size(), zone_h);
     lv_obj_set_style_bg_opa(controls_zone, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(controls_zone, 0, 0);
     lv_obj_set_style_pad_all(controls_zone, 0, 0);
@@ -521,7 +521,7 @@ static void create_controls(void)
 
     /* Progress bar — full-width thin line */
     bar_progress = lv_bar_create(controls_zone);
-    lv_obj_set_size(bar_progress, SCREEN_SIZE - (SIDE_MARGIN * 2), 4);
+    lv_obj_set_size(bar_progress, screen_size() - (SIDE_MARGIN * 2), 4);
     lv_obj_set_pos(bar_progress, SIDE_MARGIN, 16);  /* 16px below zone top */
     lv_obj_set_style_bg_color(bar_progress, lv_color_make(0x44, 0x44, 0x44), 0);
     lv_obj_set_style_bg_color(bar_progress, lv_color_white(), LV_PART_INDICATOR);
@@ -675,7 +675,7 @@ static void create_status_panel(void)
      * black screen. Mirrors the wait-overlay layout (centered title/subtitle). */
     status_panel = lv_obj_create(spotify_page);
     lv_obj_remove_style_all(status_panel);
-    lv_obj_set_size(status_panel, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(status_panel, screen_size(), screen_size());
     lv_obj_set_pos(status_panel, 0, 0);
     lv_obj_set_style_bg_color(status_panel,
         lv_color_hex(current_theme ? current_theme->bg_main : 0x000000), 0);
@@ -1023,8 +1023,8 @@ void nina_spotify_set_album_art(const uint8_t *rgb565_data, uint32_t w, uint32_t
     /* Scale to fill 720x720 screen from top-left corner.
      * Pivot is (0,0) so scaling expands right and down, filling the screen.
      * lv_image_set_scale uses 256 = 1.0x. */
-    if (w > 0 && w < SCREEN_SIZE) {
-        uint32_t scale = (SCREEN_SIZE * 256 + w / 2) / w;  /* round to nearest */
+    if (w > 0 && w < screen_size()) {
+        uint32_t scale = (screen_size() * 256 + w / 2) / w;  /* round to nearest */
         lv_image_set_scale(img_album_art, scale);
     } else {
         lv_image_set_scale(img_album_art, 256);

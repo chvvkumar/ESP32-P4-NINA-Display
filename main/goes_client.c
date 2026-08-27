@@ -1,6 +1,7 @@
 #include "goes_client.h"
 #include "jpeg_utils.h"
 #include "http_fetch.h"
+#include "screen_geom.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
@@ -111,8 +112,8 @@ void solar_band_url(uint8_t idx, char *out, size_t sz)
     snprintf(out, sz,
              "https://api.helioviewer.org/v2/takeScreenshot/"
              "?date=%s&imageScale=3.4&layers=%%5B%d,1,100%%5D"
-             "&x0=0&y0=0&width=720&height=720&display=true&watermark=false",
-             ts, SUVI_SOURCE_IDS[idx - SOLAR_SUVI_FIRST]);
+             "&x0=0&y0=0&width=%d&height=%d&display=true&watermark=false",
+             ts, SUVI_SOURCE_IDS[idx - SOLAR_SUVI_FIRST], screen_size(), screen_size());
 }
 
 const char *solar_band_label(uint8_t idx) { return idx < SOLAR_BAND_COUNT ? SOLAR_LABELS[idx] : SOLAR_LABELS[0]; }

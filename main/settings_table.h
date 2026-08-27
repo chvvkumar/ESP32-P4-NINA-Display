@@ -214,7 +214,7 @@
     BOOL      (clouds_show_overlay,          "clouds_show_overlay",          true) \
     INT       (clouds_update_interval_s,     "clouds_update_interval_s",     900,   300,   7200)  /* 15 min default (GIBS publishes every 10 min). True clamp, matching the image POST handler's clamp-to-bound */ \
     INT_RESET (clouds_frames,                "clouds_frames",                6,     1,     10)    /* animation depth, ~1 MB PSRAM per 720x720 frame. RESET: 0 (unset blob) and >10 both fall back to the default */ \
-    INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the 720 px picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */ \
+    INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the panel-sized picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */ \
     /* -- Clouds satellite channel (v67) -- */ \
     INT_RESET (clouds_channel,               "clouds_channel",               0,     0,     2)     /* which GOES ABI product the Clouds page shows: 0 = GeoColor (default), 1 = Clean Infrared (Band 13), 2 = Air Mass. RESET, not clamp: an unknown channel falls back to GeoColor, which every satellite publishes, rather than to the nearest bound */ \
     /* -- Clouds map overlay (v73) -- */ \

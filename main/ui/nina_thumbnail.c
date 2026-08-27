@@ -160,13 +160,13 @@ static void apply_zoom(void) {
      * When SW-fallback, LVGL scales orig_w x orig_h by scale factor. */
     lv_obj_set_size(thumbnail_img, (int32_t)disp_w, (int32_t)disp_h);
 
-    if (disp_w > SCREEN_SIZE || disp_h > SCREEN_SIZE) {
+    if (disp_w > screen_size() || disp_h > screen_size()) {
         lv_obj_set_style_align(thumbnail_img, LV_ALIGN_TOP_LEFT, 0);
         lv_obj_add_flag(img_container, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_scroll_dir(img_container, LV_DIR_ALL);
         lv_obj_scroll_to(img_container,
-                         (disp_w > SCREEN_SIZE) ? (int32_t)(disp_w - SCREEN_SIZE) / 2 : 0,
-                         (disp_h > SCREEN_SIZE) ? (int32_t)(disp_h - SCREEN_SIZE) / 2 : 0,
+                         (disp_w > screen_size()) ? (int32_t)(disp_w - screen_size()) / 2 : 0,
+                         (disp_h > screen_size()) ? (int32_t)(disp_h - screen_size()) / 2 : 0,
                          LV_ANIM_OFF);
     } else {
         lv_obj_clear_flag(img_container, LV_OBJ_FLAG_SCROLLABLE);
@@ -216,7 +216,7 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     /* --- Fullscreen overlay --- */
     thumbnail_overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(thumbnail_overlay);
-    lv_obj_set_size(thumbnail_overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(thumbnail_overlay, screen_size(), screen_size());
     lv_obj_set_style_bg_color(thumbnail_overlay, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(thumbnail_overlay, LV_OPA_COVER, 0);
     lv_obj_add_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -227,7 +227,7 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     /* --- Image container (child of overlay, fills 720x720) --- */
     img_container = lv_obj_create(thumbnail_overlay);
     lv_obj_remove_style_all(img_container);
-    lv_obj_set_size(img_container, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(img_container, screen_size(), screen_size());
     lv_obj_set_style_bg_opa(img_container, LV_OPA_TRANSP, 0);
     lv_obj_add_flag(img_container, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(img_container, LV_OBJ_FLAG_SCROLLABLE);
@@ -334,7 +334,7 @@ void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32
     orig_w = w;
     orig_h = h;
     if (w > 0) {
-        fit_scale = (uint32_t)SCREEN_SIZE * 256 / w;
+        fit_scale = (uint32_t)screen_size() * 256 / w;
     } else {
         fit_scale = 256;
     }

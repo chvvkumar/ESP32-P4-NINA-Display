@@ -28,11 +28,6 @@
 #define BSP_PANEL_ROUND_3_4   (1)   /* JD9365, 800x800 round  */
 #define BSP_PANEL_ROUND_4C    (2)   /* JD9365, 720x720 round  */
 
-/* DEPRECATED compile-time geometry. Still defined so main/main.c keeps
- * building until the geometry conversion lands; use bsp_display_get_h_res() /
- * bsp_display_get_v_res(), which follow the selected panel row at runtime. */
-#define BSP_LCD_H_RES              (720)
-#define BSP_LCD_V_RES              (720)
 #define BSP_LCD_MIPI_DSI_LANE_BITRATE_MBPS (480)
 
 #define BSP_LCD_MIPI_DSI_LANE_NUM          (2)    // 2 data lanes

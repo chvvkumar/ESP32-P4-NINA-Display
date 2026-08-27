@@ -17,7 +17,7 @@
  */
 
 #include "nina_tile_grid.h"
-#include "nina_dashboard_internal.h"  /* current_theme, OUTER_PADDING, GRID_GAP, SCREEN_SIZE */
+#include "nina_dashboard_internal.h"  /* current_theme, OUTER_PADDING, GRID_GAP, screen_size() */
 #include "nina_empty_state.h"
 #include "app_config.h"
 #include "themes.h"
@@ -771,8 +771,8 @@ nina_tile_grid_t *nina_tile_grid_create(lv_obj_t *parent,
 
     g->root = lv_obj_create(parent);
     lv_obj_remove_style_all(g->root);
-    lv_obj_set_size(g->root, SCREEN_SIZE - 2 * OUTER_PADDING,
-                    SCREEN_SIZE - 2 * OUTER_PADDING);
+    lv_obj_set_size(g->root, screen_size() - 2 * OUTER_PADDING,
+                    screen_size() - 2 * OUTER_PADDING);
     lv_obj_clear_flag(g->root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(g->root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(g->root, LV_FLEX_ALIGN_START,
