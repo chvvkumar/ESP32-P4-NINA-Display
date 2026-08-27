@@ -1,6 +1,7 @@
 #include "ota_github.h"
 #include "build_version.h"
 #include "http_fetch.h"
+#include "board_profile.h"
 #include "esp_log.h"
 #include "esp_http_client.h"
 #include "esp_ota_ops.h"
@@ -125,6 +126,13 @@ void ota_github_note_network_ready(void) {
 }
 
 esp_err_t ota_github_ensure_can_update(void) {
+    if (!board_display_present()) {
+        /* Headless boot: this image cannot drive the panel it found, so it must
+         * never be confirmed. A pending image in this state has already been
+         * rolled back by the board layer, so reaching here means the slot is
+         * already VALID and an upload can proceed without a confirm. */
+        return ESP_OK;
+    }
     const esp_partition_t *running = esp_ota_get_running_partition();
     esp_ota_img_states_t st;
     if (esp_ota_get_state_partition(running, &st) != ESP_OK ||

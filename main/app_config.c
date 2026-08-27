@@ -16,6 +16,7 @@
 #include "settings_table.h"
 #include "themes.h"
 #include "voice_store.h"
+#include "board_profile.h"
 #include "ui/page_registry.h"
 
 static const char *TAG = "app_config";
@@ -5047,6 +5048,22 @@ void app_config_factory_reset(void) {
      * defers the wipe to the mount task instead of blocking here. */
     voice_store_wipe();
 
+    /* The panel variant is a property of the silicon, not of the user's
+     * configuration, so it survives a factory reset. Read it out first and
+     * write it back after the erase, but ONLY when the key really existed:
+     * board_panel_nvs_get() cannot tell "absent" from "1", so restoring
+     * unconditionally would write a board/panel key onto every square device
+     * that was factory reset, which is new NVS content for no reason. */
+    uint8_t saved_panel = 0;
+    bool have_saved_panel = false;
+    {
+        nvs_handle_t bh;
+        if (nvs_open("board", NVS_READONLY, &bh) == ESP_OK) {
+            have_saved_panel = (nvs_get_u8(bh, "panel", &saved_panel) == ESP_OK);
+            nvs_close(bh);
+        }
+    }
+
     /* Erase the entire NVS partition. This also removes the tiles keys
      * "json_tiles"/"ha_tiles" along with "config"; the app_config_init() below
      * re-runs tiles_caches_alloc() (alloc-guarded: reuses buffers, resets to "")
@@ -5062,6 +5079,11 @@ void app_config_factory_reset(void) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to re-initialize NVS: %s", esp_err_to_name(err));
         return;
+    }
+
+    if (have_saved_panel &&
+        board_panel_nvs_set((int)saved_panel) != ESP_OK) {
+        ESP_LOGW(TAG, "Could not restore the board/panel key after factory reset");
     }
 
     ESP_LOGI(TAG, "Factory reset complete - all settings erased");

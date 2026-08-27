@@ -63,6 +63,7 @@
 #include "ui/nina_image_page.h"
 #include "ui/themes.h"
 #include "image_red_remap.h"
+#include "board_profile.h"
 #include "build_version.h"
 
 /* Splash credit fonts (defined in ui/lv_font_overpass_*.c) */
@@ -562,9 +563,9 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             if (ssid[0] != '\0' && !wifi_join_active()) {
                 nina_toast_show_fmt(TOAST_SUCCESS, "Connected to %s", ssid);
             }
-            if (lvgl_port_lock(100)) {
+            if (bsp_display_lock(100)) {
                 settings_hub_refresh();
-                lvgl_port_unlock();
+                bsp_display_unlock();
             }
         }
 
@@ -597,8 +598,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             /* spotify_auth_init() already ran before dashboard creation above. */
             spotify_client_init();
 
-            xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
-            xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
+            if (board_display_present()) {
+                xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
+                xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
+            }
             if (app_config_get()->spotify_enabled) {
                 spotify_ensure_task_running();
             }
@@ -782,6 +785,12 @@ void app_main(void)
 
     app_config_init();
 
+    /* Board layer. Resolves the panel row from the compiled family plus the NVS
+     * board/panel key, tells the BSP, then probes RDDID and validates the
+     * controller. Must run before screenshot_encoder_init() and before any
+     * geometry consumer, and it needs NVS, which is up. */
+    board_profile_init();
+
     /* Image pages: instance identities + mutexes must exist before the web
      * server (httpd workers reach image_page_get()) and before
      * create_nina_dashboard() (which builds the four pages through the registry
@@ -868,72 +877,82 @@ void app_main(void)
         ESP_LOGI(TAG, "No WiFi configured — entering setup mode");
     }
 
-    bsp_display_cfg_t cfg = {
-        .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
-        .buffer_size = BSP_LCD_DRAW_BUFF_SIZE,
-        .double_buffer = BSP_LCD_DRAW_BUFF_DOUBLE,
-        .flags = {
-            .buff_dma = true,
-            .buff_spiram = true,
-            .sw_rotate = false,
-        }
-    };
-    cfg.lvgl_port_cfg.task_stack = 10240; /* Default 7168 is too tight for settings page */
-    bsp_display_start_with_config(&cfg);
-    bsp_display_backlight_on();
-    bsp_display_brightness_set(app_config_get()->brightness);
-    ota_github_note_display_ready();  /* boot-health milestone for the rollback confirm guard */
-
-    /* Raise DW-GDMA (DSI scanout) PSRAM read priority above Cache/CPU so the
-     * MIPI-DSI framebuffer fetch is not starved by LVGL/PPA traffic. Fixes the
-     * brief blue-screen flashes (scanout FIFO underrun). Must run after the DPI
-     * panel + its DW-GDMA channel exist. */
-    board_boost_dsi_axi_qos();
-
-    /* ── PPA hardware rotation setup ──
-     * Grab all three DPI framebuffers and a dedicated SRM client.  A dedicated
-     * client (not the shared one in jpeg_utils.c) keeps the flush path off the
-     * shared client's pending queue (4 slots, used by the pollers, the LVGL
-     * task and the fetch worker), so a burst of image fits can never fail the
-     * rotation transaction. */
-    {
-        lv_display_t *disp = lv_display_get_default();
-        if (disp) {
-            disp_ctx_compat_t *ctx =
-                (disp_ctx_compat_t *)lv_display_get_driver_data(disp);
-            esp_lcd_panel_handle_t panel =
-                ctx ? (esp_lcd_panel_handle_t)ctx->panel_handle : NULL;
-
-            bool ppa_ok = false;
-            if (panel && esp_lcd_dpi_panel_get_frame_buffer(
-                             panel, 3, &s_fb[0], &s_fb[1], &s_fb[2]) == ESP_OK) {
-                ppa_client_config_t pcfg = {
-                    .oper_type = PPA_OPERATION_SRM,
-                    .max_pending_trans_num = 1,
-                };
-                ppa_ok = (ppa_register_client(&pcfg, &s_ppa_rot) == ESP_OK);
+    if (!board_display_present()) {
+        ESP_LOGE(TAG, "No usable panel: skipping display start, rotation and UI. "
+                      "Web server, console and OTA remain available.");
+    } else {
+        bsp_display_cfg_t cfg = {
+            .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
+            .buffer_size = BSP_LCD_DRAW_BUFF_SIZE,
+            .double_buffer = BSP_LCD_DRAW_BUFF_DOUBLE,
+            .flags = {
+                .buff_dma = true,
+                .buff_spiram = true,
+                .sw_rotate = false,
             }
-
-            if (ppa_ok) {
-                ESP_LOGI(TAG, "Screen rotation: PPA hardware");
-            } else {
-                ESP_LOGW(TAG, "Screen rotation disabled (PPA init failed)");
-            }
-
-            /* Swap the flush callback and apply the saved rotation under the
-             * port lock — the LVGL task is already running and could otherwise
-             * be mid-flush.  The apply is unconditional: even at rot 0 it is
-             * what binds LVGL to fb0/fb1 for the PPA layout. */
-            lvgl_port_lock(0);
-            /* Enable sw_rotate in BSP context so LVGL handles coordinate
-             * transforms and the BSP rotation-update returns early. */
-            if (ctx) ctx->flags.sw_rotate = 1;
-            orig_flush = disp->flush_cb;
-            lv_display_set_flush_cb(disp, rotated_flush_cb);
-            display_rotation_apply(app_config_get()->screen_rotation);
-            lvgl_port_unlock();
+        };
+        cfg.lvgl_port_cfg.task_stack = 10240; /* Default 7168 is too tight for settings page */
+        lv_display_t *disp_started = bsp_display_start_with_config(&cfg);
+        bsp_display_backlight_on();
+        bsp_display_brightness_set(app_config_get()->brightness);
+        if (disp_started) {
+            /* boot-health milestone for the rollback confirm guard */
+            ota_github_note_display_ready();
+        } else {
+            ESP_LOGE(TAG, "display start failed; not raising the display-ready milestone");
         }
-    }
+
+        /* Raise DW-GDMA (DSI scanout) PSRAM read priority above Cache/CPU so the
+         * MIPI-DSI framebuffer fetch is not starved by LVGL/PPA traffic. Fixes the
+         * brief blue-screen flashes (scanout FIFO underrun). Must run after the DPI
+         * panel + its DW-GDMA channel exist. */
+        board_boost_dsi_axi_qos();
+
+        /* ── PPA hardware rotation setup ──
+         * Grab all three DPI framebuffers and a dedicated SRM client.  A dedicated
+         * client (not the shared one in jpeg_utils.c) keeps the flush path off the
+         * shared client's pending queue (4 slots, used by the pollers, the LVGL
+         * task and the fetch worker), so a burst of image fits can never fail the
+         * rotation transaction. */
+        {
+            lv_display_t *disp = lv_display_get_default();
+            if (disp) {
+                disp_ctx_compat_t *ctx =
+                    (disp_ctx_compat_t *)lv_display_get_driver_data(disp);
+                esp_lcd_panel_handle_t panel =
+                    ctx ? (esp_lcd_panel_handle_t)ctx->panel_handle : NULL;
+
+                bool ppa_ok = false;
+                if (panel && esp_lcd_dpi_panel_get_frame_buffer(
+                                 panel, 3, &s_fb[0], &s_fb[1], &s_fb[2]) == ESP_OK) {
+                    ppa_client_config_t pcfg = {
+                        .oper_type = PPA_OPERATION_SRM,
+                        .max_pending_trans_num = 1,
+                    };
+                    ppa_ok = (ppa_register_client(&pcfg, &s_ppa_rot) == ESP_OK);
+                }
+
+                if (ppa_ok) {
+                    ESP_LOGI(TAG, "Screen rotation: PPA hardware");
+                } else {
+                    ESP_LOGW(TAG, "Screen rotation disabled (PPA init failed)");
+                }
+
+                /* Swap the flush callback and apply the saved rotation under the
+                 * port lock — the LVGL task is already running and could otherwise
+                 * be mid-flush.  The apply is unconditional: even at rot 0 it is
+                 * what binds LVGL to fb0/fb1 for the PPA layout. */
+                lvgl_port_lock(0);
+                /* Enable sw_rotate in BSP context so LVGL handles coordinate
+                 * transforms and the BSP rotation-update returns early. */
+                if (ctx) ctx->flags.sw_rotate = 1;
+                orig_flush = disp->flush_cb;
+                lv_display_set_flush_cb(disp, rotated_flush_cb);
+                display_rotation_apply(app_config_get()->screen_rotation);
+                lvgl_port_unlock();
+            }
+        }
+    } /* end if (board_display_present()) - display start and rotation */
 
     jpeg_utils_ppa_init();  /* shared PPA SRM client for the image scalers */
 
@@ -1062,21 +1081,26 @@ void app_main(void)
         } /* end else (normal mode) */
 
         bsp_display_unlock();
+    } else if (!board_display_present()) {
+        ESP_LOGW(TAG, "Headless boot: no UI built");
     } else {
         ESP_LOGE(TAG, "Failed to acquire display lock during init!");
     }
 
     if (!setup_mode) {
-        nina_dashboard_set_page_change_cb(on_page_changed);
+        if (board_display_present()) {
+            nina_dashboard_set_page_change_cb(on_page_changed);
 
-        /* Fresh first resolution — let the arbiter pick the page from current
-         * state instead of force-navigating on boot. */
-        nav_arbiter_resolve(esp_timer_get_time() / 1000);
+            /* Fresh first resolution - let the arbiter pick the page from
+             * current state instead of force-navigating on boot. */
+            nav_arbiter_resolve(esp_timer_get_time() / 1000);
 
-        /* WiFi comes up before the display, so the got-IP handler may have run
-         * while there was no screen to draw on. Re-check now that the dashboard
-         * exists; a no-op unless the device is factory-fresh and has an IP. */
-        nina_setup_hint_show_if_needed();
+            /* WiFi comes up before the display, so the got-IP handler may have
+             * run while there was no screen to draw on. Re-check now that the
+             * dashboard exists; a no-op unless the device is factory-fresh and
+             * has an IP. */
+            nina_setup_hint_show_if_needed();
+        }
 
         /* Voice alerts — spawns the playback task. Deliberately outside the
          * display lock above (codec init + task create, no LVGL work). */
@@ -1099,8 +1123,15 @@ void app_main(void)
 
         /* weather_client_init() already called above, before dashboard creation */
 
-        /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
-        {
+        /* input_task polls the BOOT button and calls lvgl_port_lock() directly
+         * (tasks.c:375); data_update_task does the same in six places
+         * (tasks.c:2573 onward). Neither is meaningful without a screen, so on
+         * a headless boot they are not spawned at all. Everything that reads
+         * data_task_handle already NULL-checks it (nina_websocket.c:976,
+         * tasks.c:302/540/1257, nina_nav_arbiter.c:79/129,
+         * settings_hub.c:436). */
+        if (board_display_present()) {
+            /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
             StackType_t *input_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
             StaticTask_t *input_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
             if (input_stack && input_tcb) {
