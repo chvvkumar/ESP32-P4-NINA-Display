@@ -9,8 +9,9 @@ dependencies:
   idf: '>=5.4'
   lvgl/lvgl: '>=8,<10'
   waveshare/esp_lcd_st7703: '*'
-description: Based on ESP32-P4 chip, waveshare electronics designed a 3.4-inch, 4-inch
-  circular screen, highly integrated development board
+  espressif/esp_lcd_jd9365: "~1.0.4"
+description: Waveshare ESP32-P4 720x720 square (ST7703) and 800x800 / 720x720 round
+  (JD9365) boards
 repository: git://github.com/waveshareteam/Waveshare-ESP32-components.git
 repository_info:
   commit_sha: 42d31e94fa5430769725779ab88881100df66716

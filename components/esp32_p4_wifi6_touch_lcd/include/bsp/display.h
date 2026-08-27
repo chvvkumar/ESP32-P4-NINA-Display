@@ -1,4 +1,6 @@
 #pragma once
+#include <stdbool.h>
+#include <stdint.h>
 #include "esp_lcd_types.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "sdkconfig.h"
@@ -20,6 +22,15 @@
 /* LCD display color space */
 #define BSP_LCD_COLOR_SPACE         (ESP_LCD_COLOR_SPACE_RGB)
 
+/* Panel table row ids. Values 1 and 2 are also the accepted values of the NVS
+ * board/panel key, so the round rows map onto it directly. */
+#define BSP_PANEL_SQUARE_4B   (0)   /* ST7703, 720x720 square */
+#define BSP_PANEL_ROUND_3_4   (1)   /* JD9365, 800x800 round  */
+#define BSP_PANEL_ROUND_4C    (2)   /* JD9365, 720x720 round  */
+
+/* DEPRECATED compile-time geometry. Still defined so main/main.c keeps
+ * building until the geometry conversion lands; use bsp_display_get_h_res() /
+ * bsp_display_get_v_res(), which follow the selected panel row at runtime. */
 #define BSP_LCD_H_RES              (720)
 #define BSP_LCD_V_RES              (720)
 #define BSP_LCD_MIPI_DSI_LANE_BITRATE_MBPS (480)
@@ -50,6 +61,38 @@ typedef struct {
     esp_lcd_panel_handle_t      panel;         /*!< ESP LCD panel (color) handle */
     esp_lcd_panel_handle_t      control;       /*!< ESP LCD panel (control) handle */
 } bsp_lcd_handles_t;
+
+/**
+ * @brief Select the panel table row to bring up. Must be called before
+ *        bsp_display_start_with_config(); an unknown id keeps the default.
+ */
+esp_err_t bsp_display_set_panel_type(int panel_type);
+
+/** @brief Horizontal resolution of the selected panel row. */
+int bsp_display_get_h_res(void);
+
+/** @brief Vertical resolution of the selected panel row. */
+int bsp_display_get_v_res(void);
+
+/**
+ * @brief Read the panel controller id (DCS RDDID 0x04, three bytes).
+ *
+ * Pulses LCD reset, opens the DSI bus and a DBI IO channel at the 480 Mbps
+ * probe rate, reads, and closes both again. DCS reads run in low power mode,
+ * where the high speed lane rate does not apply, so one probe rate serves both
+ * controllers. Call before bsp_display_start_with_config(); the panel
+ * constructor performs its own reset afterwards.
+ */
+esp_err_t bsp_display_probe_rddid(uint8_t out[3]);
+
+/**
+ * @brief True once bsp_display_start_with_config() has produced a display.
+ *
+ * While this is false there is no LVGL mutex, so bsp_display_lock() returns
+ * false rather than asserting. Callers that already check the lock's return
+ * value need no change; callers that ignore it must be audited.
+ */
+bool bsp_display_started(void);
 
 /**
  * @brief Create new display panel

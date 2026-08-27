@@ -1,4 +1,5 @@
 #include "sdkconfig.h"
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -14,8 +15,10 @@
 #include "usb/usb_host.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
 #include "esp_lcd_st7703.h"
+#include "esp_lcd_jd9365.h"
 #include "bsp/esp32_p4_wifi6_touch_lcd_4b.h"
 #include "bsp/display.h"
+#include "bsp/brightness_curve.h"
 #include "bsp/touch.h"
 #include "esp_lcd_touch_gt911.h"
 #include "bsp_err_check.h"
@@ -26,6 +29,13 @@ static const char *TAG = "ESP32_P4_4B";
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
 static lv_indev_t *disp_indev = NULL;
 #endif // (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
+
+/* False until a display really came up. bsp_display_lock() consults it so that
+ * a headless boot (no usable panel, see main/board_profile.c) turns every
+ * display-lock site in the application into a clean "lock not acquired" instead
+ * of the esp_lvgl_port NULL-mutex assert. Never cleared: nothing tears a
+ * started display down. */
+static bool s_display_started = false;
 
 sdmmc_card_t *bsp_sdcard = NULL;    // Global uSD card handler
 static bool i2c_initialized = false;
@@ -342,6 +352,119 @@ esp_err_t bsp_display_brightness_init(void)
     return ESP_OK;
 }
 
+/* Panel table
+ *
+ * Every GPIO, the DSI PHY LDO channel and voltage, the lane count, the LEDC
+ * timer/channel/frequency/polarity and the DBI command widths are identical on
+ * all three boards and stay constants above. Only what actually differs is a
+ * row here.
+ *
+ * The two round rows instantiate ONE init macro with the page-1 register 0x40
+ * byte as its parameter, so each row owns an immutable table. The square row
+ * passes init_cmds = NULL and the ST7703 driver runs its own default sequence,
+ * which is exactly what this BSP did before the table existed. */
+
+typedef esp_err_t (*bsp_panel_new_fn)(const esp_lcd_panel_io_handle_t io,
+                                      const esp_lcd_panel_dev_config_t *dev_cfg,
+                                      esp_lcd_panel_handle_t *ret_panel);
+
+typedef struct {
+    const char        *name;
+    bsp_panel_new_fn   panel_new;
+    const void        *init_cmds;      /* jd9365_lcd_init_cmd_t[], NULL for ST7703 */
+    uint16_t           init_cmds_size;
+    uint16_t           h_res;
+    uint16_t           v_res;
+    uint32_t           lane_rate_mbps;
+    uint32_t           dpi_clock_mhz;
+    uint16_t           hbp, hpw, hfp;
+    uint16_t           vbp, vpw, vfp;
+    uint8_t            bright_floor_pct;  /* first point of the brightness curve */
+    /* Base orientation, applied ONCE at init as hardware MADCTL state through
+     * lvgl_port_display_cfg_t.rotation. Never an LVGL rotation and never a
+     * post-start bsp_display_rotate(). 1 means 180 degrees, which both round
+     * panels need. The square row stays 0: the ST7703 driver implements
+     * mirror_y but neither mirror_x nor swap_xy, so a non-zero base
+     * orientation on that panel would silently do the wrong thing.
+     * With LVGL rotation pinned at 0 the digitiser must carry the same
+     * transform itself, so this one field drives both. */
+    uint8_t            base_rot_180;
+} bsp_panel_row_t;
+
+/* JD9365 init sequence. The shared entries live in jd9365_init_table.h, which
+ * is included ONCE PER ROW with the table name and the page-1 register 0x40
+ * byte defined by the includer, so each row owns an immutable table and the
+ * shared entries exist in one place. */
+#define JD9365_TABLE_NAME s_jd9365_init_3_4
+#define JD9365_REG40      0x00
+#include "jd9365_init_table.h"
+
+#define JD9365_TABLE_NAME s_jd9365_init_4c
+#define JD9365_REG40      0x04
+#include "jd9365_init_table.h"
+
+static const bsp_panel_row_t s_panel_rows[] = {
+    [BSP_PANEL_SQUARE_4B] = {
+        .name = "4B 720x720 ST7703", .panel_new = esp_lcd_new_panel_st7703,
+        .init_cmds = NULL, .init_cmds_size = 0,
+        .h_res = 720, .v_res = 720,
+        .lane_rate_mbps = 480, .dpi_clock_mhz = 38,
+        .hbp = 50, .hpw = 20, .hfp = 50,
+        .vbp = 20, .vpw = 4,  .vfp = 20,
+        .bright_floor_pct = 47,
+        .base_rot_180 = 0,
+    },
+    [BSP_PANEL_ROUND_3_4] = {
+        .name = "3.4C 800x800 JD9365", .panel_new = esp_lcd_new_panel_jd9365,
+        .init_cmds = s_jd9365_init_3_4,
+        .init_cmds_size = sizeof(s_jd9365_init_3_4) / sizeof(s_jd9365_init_3_4[0]),
+        .h_res = 800, .v_res = 800,
+        .lane_rate_mbps = 1500, .dpi_clock_mhz = 80,
+        .hbp = 20, .hpw = 20, .hfp = 40,
+        .vbp = 12, .vpw = 4,  .vfp = 24,
+        .bright_floor_pct = 0,
+        .base_rot_180 = 1,
+    },
+    [BSP_PANEL_ROUND_4C] = {
+        .name = "4C 720x720 JD9365", .panel_new = esp_lcd_new_panel_jd9365,
+        .init_cmds = s_jd9365_init_4c,
+        .init_cmds_size = sizeof(s_jd9365_init_4c) / sizeof(s_jd9365_init_4c[0]),
+        .h_res = 720, .v_res = 720,
+        .lane_rate_mbps = 1500, .dpi_clock_mhz = 80,
+        .hbp = 20, .hpw = 20, .hfp = 40,
+        .vbp = 12, .vpw = 4,  .vfp = 24,
+        .bright_floor_pct = 0,
+        .base_rot_180 = 1,
+    },
+};
+
+#define BSP_PANEL_ROW_COUNT (sizeof(s_panel_rows) / sizeof(s_panel_rows[0]))
+
+#if CONFIG_NINA_FAMILY_ROUND
+static int s_panel_type = BSP_PANEL_ROUND_3_4;
+#else
+static int s_panel_type = BSP_PANEL_SQUARE_4B;
+#endif
+
+static const bsp_panel_row_t *bsp_panel_row(void)
+{
+    return &s_panel_rows[s_panel_type];
+}
+
+esp_err_t bsp_display_set_panel_type(int panel_type)
+{
+    if (panel_type < 0 || panel_type >= (int)BSP_PANEL_ROW_COUNT) {
+        ESP_LOGW(TAG, "unknown panel type %d, keeping %s", panel_type, bsp_panel_row()->name);
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_panel_type = panel_type;
+    ESP_LOGI(TAG, "panel row selected: %s", bsp_panel_row()->name);
+    return ESP_OK;
+}
+
+int bsp_display_get_h_res(void) { return bsp_panel_row()->h_res; }
+int bsp_display_get_v_res(void) { return bsp_panel_row()->v_res; }
+
 esp_err_t bsp_display_brightness_set(int brightness_percent)
 {
     if (brightness_percent > 100) {
@@ -350,11 +473,13 @@ esp_err_t bsp_display_brightness_set(int brightness_percent)
         brightness_percent = 0;
     }
 
-    int actual_percent = 47 + (brightness_percent * (100 - 47)) / 100;
+    /* Curve and duty both live in bsp/brightness_curve.h, which the host test
+     * pins against the square panel's historical numbers. */
+    const int floor_pct = bsp_panel_row()->bright_floor_pct;
 
     ESP_LOGI(TAG, "Setting LCD backlight: %d%%", brightness_percent);
 
-    uint32_t duty_cycle = (1023 * actual_percent) / 100;
+    uint32_t duty_cycle = (uint32_t)bsp_brightness_duty(floor_pct, brightness_percent);
     BSP_ERROR_CHECK_RETURN_ERR(ledc_set_duty(LEDC_LOW_SPEED_MODE, LCD_LEDC_CH, duty_cycle));
     BSP_ERROR_CHECK_RETURN_ERR(ledc_update_duty(LEDC_LOW_SPEED_MODE, LCD_LEDC_CH));
 
@@ -399,8 +524,73 @@ esp_err_t bsp_display_new(const bsp_display_config_t *config, esp_lcd_panel_hand
     return ret;
 }
 
+/* DCS Read Display ID. Both vendor drivers issue this same read during their
+ * own init, so it is a known working transaction on both controllers. */
+#define BSP_DCS_RDDID              0x04
+#define BSP_DSI_PROBE_LANE_MBPS    480
+
+esp_err_t bsp_display_probe_rddid(uint8_t out[3])
+{
+    if (!out) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Configure the reset pin before pulsing it: the panel constructor does its
+     * own reset later through reset_gpio_num, but nothing has configured this
+     * pin yet at probe time. */
+    const gpio_config_t rst_cfg = {
+        .pin_bit_mask = 1ULL << BSP_LCD_RST,
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    ESP_RETURN_ON_ERROR(gpio_config(&rst_cfg), TAG, "probe: reset pin config failed");
+    gpio_set_level(BSP_LCD_RST, 0);
+    vTaskDelay(pdMS_TO_TICKS(20));
+    gpio_set_level(BSP_LCD_RST, 1);
+    vTaskDelay(pdMS_TO_TICKS(120));
+
+    ESP_RETURN_ON_ERROR(bsp_enable_dsi_phy_power(), TAG, "probe: DSI PHY power failed");
+
+    esp_lcd_dsi_bus_config_t bus_config = {
+        .bus_id = 0,
+        .num_data_lanes = BSP_LCD_MIPI_DSI_LANE_NUM,
+        .phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
+        .lane_bit_rate_mbps = BSP_DSI_PROBE_LANE_MBPS,
+    };
+    esp_lcd_dsi_bus_handle_t bus = NULL;
+    ESP_RETURN_ON_ERROR(esp_lcd_new_dsi_bus(&bus_config, &bus), TAG, "probe: new DSI bus failed");
+
+    esp_lcd_dbi_io_config_t dbi_config = {
+        .virtual_channel = 0,
+        .lcd_cmd_bits = 8,
+        .lcd_param_bits = 8,
+    };
+    esp_lcd_panel_io_handle_t io = NULL;
+    esp_err_t err = esp_lcd_new_panel_io_dbi(bus, &dbi_config, &io);
+    if (err != ESP_OK) {
+        esp_lcd_del_dsi_bus(bus);
+        ESP_RETURN_ON_ERROR(err, TAG, "probe: new DBI panel IO failed");
+    }
+
+    uint8_t id[3] = {0, 0, 0};
+    err = esp_lcd_panel_io_rx_param(io, BSP_DCS_RDDID, id, sizeof(id));
+
+    esp_lcd_panel_io_del(io);
+    esp_lcd_del_dsi_bus(bus);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "RDDID read failed: %s", esp_err_to_name(err));
+        return err;
+    }
+    memcpy(out, id, sizeof(id));
+    return ESP_OK;
+}
+
 esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_lcd_handles_t *ret_handles)
 {
+    const bsp_panel_row_t *row = bsp_panel_row();
     esp_err_t ret = ESP_OK;
 
     ESP_RETURN_ON_ERROR(bsp_display_brightness_init(), TAG, "Brightness init failed");
@@ -413,7 +603,7 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
         .bus_id = 0,
         .num_data_lanes = BSP_LCD_MIPI_DSI_LANE_NUM,
         .phy_clk_src = MIPI_DSI_PHY_CLK_SRC_DEFAULT,
-        .lane_bit_rate_mbps = BSP_LCD_MIPI_DSI_LANE_BITRATE_MBPS,
+        .lane_bit_rate_mbps = row->lane_rate_mbps,
     };
     ESP_RETURN_ON_ERROR(esp_lcd_new_dsi_bus(&bus_config, &mipi_dsi_bus), TAG, "New DSI bus init failed");
 
@@ -428,23 +618,44 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
     ESP_GOTO_ON_ERROR(esp_lcd_new_panel_io_dbi(mipi_dsi_bus, &dbi_config, &io), err, TAG, "New panel IO failed");
 
     esp_lcd_panel_handle_t disp_panel = NULL;
-    ESP_LOGI(TAG, "Install Waveshare ESP32-P4-WIFI6-Touch-LCD-4B LCD control panel");
-#if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
-    esp_lcd_dpi_panel_config_t dpi_config = ST7703_720_720_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB888);
-#else
-    esp_lcd_dpi_panel_config_t dpi_config = ST7703_720_720_PANEL_60HZ_DPI_CONFIG(LCD_COLOR_PIXEL_FORMAT_RGB565);
-#endif
-    dpi_config.num_fbs = CONFIG_BSP_LCD_DPI_BUFFER_NUMS;
+    ESP_LOGI(TAG, "Install MIPI DSI panel: %s", row->name);
 
-    st7703_vendor_config_t vendor_config = {
-        .flags = {
-            .use_mipi_interface = 1,
+    esp_lcd_dpi_panel_config_t dpi_config = {
+        .dpi_clk_src = MIPI_DSI_DPI_CLK_SRC_DEFAULT,
+        .dpi_clock_freq_mhz = row->dpi_clock_mhz,
+        .virtual_channel = 0,
+#if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
+        .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB888,
+#else
+        .pixel_format = LCD_COLOR_PIXEL_FORMAT_RGB565,
+#endif
+        .num_fbs = CONFIG_BSP_LCD_DPI_BUFFER_NUMS,
+        .video_timing = {
+            .h_size = row->h_res,
+            .v_size = row->v_res,
+            .hsync_back_porch  = row->hbp,
+            .hsync_pulse_width = row->hpw,
+            .hsync_front_porch = row->hfp,
+            .vsync_back_porch  = row->vbp,
+            .vsync_pulse_width = row->vpw,
+            .vsync_front_porch = row->vfp,
         },
-        .mipi_config = {
-            .dsi_bus = mipi_dsi_bus,
-            .dpi_config = &dpi_config,
-        },
+        .flags.use_dma2d = true,
     };
+
+    /* lane_num is forwarded ONLY to the JD9365 constructor: the ST7703 vendor
+     * config has no such field. */
+    st7703_vendor_config_t st7703_cfg = {
+        .flags = { .use_mipi_interface = 1 },
+        .mipi_config = { .dsi_bus = mipi_dsi_bus, .dpi_config = &dpi_config },
+    };
+    jd9365_vendor_config_t jd9365_cfg = {
+        .init_cmds = (const jd9365_lcd_init_cmd_t *)row->init_cmds,
+        .init_cmds_size = row->init_cmds_size,
+        .mipi_config = { .dsi_bus = mipi_dsi_bus, .dpi_config = &dpi_config,
+                         .lane_num = BSP_LCD_MIPI_DSI_LANE_NUM },
+    };
+
     esp_lcd_panel_dev_config_t lcd_dev_config = {
 #if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
         .bits_per_pixel = 24,
@@ -453,9 +664,11 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
 #endif
         .rgb_ele_order = BSP_LCD_COLOR_SPACE,
         .reset_gpio_num = BSP_LCD_RST,
-        .vendor_config = &vendor_config,
+        .vendor_config = (row->panel_new == esp_lcd_new_panel_st7703)
+                             ? (void *)&st7703_cfg : (void *)&jd9365_cfg,
     };
-    ESP_GOTO_ON_ERROR(esp_lcd_new_panel_st7703(io, &lcd_dev_config, &disp_panel), err, TAG, "New LCD panel Waveshare failed");
+    ESP_GOTO_ON_ERROR(row->panel_new(io, &lcd_dev_config, &disp_panel), err, TAG,
+                      "New LCD panel failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(disp_panel), err, TAG, "LCD panel reset failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_init(disp_panel), err, TAG, "LCD panel init failed");
 
@@ -488,26 +701,53 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config, esp_lcd_touch_handle_t
     BSP_ERROR_CHECK_RETURN_ERR(bsp_i2c_init());
 
     /* Initialize touch */
+    const bsp_panel_row_t *row = bsp_panel_row();
+
+    /* x_max/y_max must be the LIVE panel resolution: esp_lcd_touch computes
+     * x = x_max - x for mirror_x, so a stale 720 on an 800 px panel lands every
+     * mirrored touch 80 px off.
+     *
+     * The transform carries the base orientation. With MADCTL 180 as hardware
+     * state and LVGL rotation pinned at 0, the port compensates nothing, so an
+     * uncompensated digitiser puts every touch on a round board at the
+     * antipode. That is a first-boot symptom which reads as a broken panel. */
     const esp_lcd_touch_config_t tp_cfg = {
-#if CONFIG_BSP_LCD_TYPE_480_640_2_8_INCH || CONFIG_BSP_LCD_TYPE_480_800_4_INCH
-        .x_max = BSP_LCD_V_RES,
-        .y_max = BSP_LCD_H_RES,
-#else
-        .x_max = BSP_LCD_H_RES,
-        .y_max = BSP_LCD_V_RES,
-#endif
-        .rst_gpio_num = BSP_LCD_TOUCH_RST, // Shared with LCD reset
+        .x_max = bsp_display_get_h_res(),
+        .y_max = bsp_display_get_v_res(),
+        .rst_gpio_num = BSP_LCD_TOUCH_RST,
         .int_gpio_num = BSP_LCD_TOUCH_INT,
         .levels = {
             .reset = 0,
             .interrupt = 0,
         },
         .flags = {
-            .swap_xy = 0,
-            .mirror_x = 0,
-            .mirror_y = 0,
+            .swap_xy  = 0,
+            .mirror_x = (row->base_rot_180 != 0),
+            .mirror_y = (row->base_rot_180 != 0),
         },
     };
+
+    /* The retry ladder below toggles BSP_LCD_TOUCH_RST directly. Nothing else
+     * in this component configures that pin as an output, so without this every
+     * "hard reset" in rounds 2 to 5 was a no-op and the ladder burned 3.5 s for
+     * nothing. */
+    const gpio_config_t rst_cfg = {
+        .pin_bit_mask = 1ULL << BSP_LCD_TOUCH_RST,
+        .mode         = GPIO_MODE_OUTPUT,
+        .pull_up_en   = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    if (gpio_config(&rst_cfg) != ESP_OK) {
+        ESP_LOGW(TAG, "touch reset pin config failed; the retry ladder cannot reset GT911");
+    } else {
+        /* Drive it HIGH straight away. gpio_config() on an output leaves the
+         * output register at its 0 default, which would hold GT911 in reset
+         * from here until the driver's own reset pulse; the board previously
+         * idled this pin high through its pull-up. Matching that keeps the
+         * square board's pre-init state exactly as it was. */
+        gpio_set_level(BSP_LCD_TOUCH_RST, 1);
+    }
 
     /*
      * GT911 I2C address depends on the INT pin state during reset:
@@ -562,6 +802,7 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config, esp_lcd_touch_handle_t
 static lv_display_t *bsp_display_lcd_init(const bsp_display_cfg_t *cfg)
 {
     assert(cfg != NULL);
+    const bsp_panel_row_t *row = bsp_panel_row();
     bsp_lcd_handles_t lcd_panels;
     BSP_ERROR_CHECK_RETURN_NULL(bsp_display_new_with_handles(NULL, &lcd_panels));
 
@@ -573,14 +814,16 @@ static lv_display_t *bsp_display_lcd_init(const bsp_display_cfg_t *cfg)
         .control_handle = lcd_panels.control,
         .buffer_size = cfg->buffer_size,
         .double_buffer = cfg->double_buffer,
-        .hres = BSP_LCD_H_RES,
-        .vres = BSP_LCD_V_RES,
+        .hres = bsp_display_get_h_res(),
+        .vres = bsp_display_get_v_res(),
         .monochrome = false,
-        /* Rotation values must be same as used in esp_lcd for initial settings of the screen */
+        /* Base orientation as HARDWARE MADCTL state, applied once here by the
+         * port at add time. Not an LVGL rotation: the application pins LVGL at
+         * rotation 0 and does user rotation on the PPA. */
         .rotation = {
-            .swap_xy = false,
-            .mirror_x = false,
-            .mirror_y = false,
+            .swap_xy  = false,
+            .mirror_x = (row->base_rot_180 != 0),
+            .mirror_y = (row->base_rot_180 != 0),
         },
 #if LVGL_VERSION_MAJOR >= 9
 #if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
@@ -640,7 +883,7 @@ lv_display_t *bsp_display_start(void)
 {
     bsp_display_cfg_t cfg = {
         .lvgl_port_cfg = ESP_LVGL_PORT_INIT_CONFIG(),
-        .buffer_size = BSP_LCD_DRAW_BUFF_SIZE,
+        .buffer_size = (bsp_display_get_h_res() * 50),
         .double_buffer = BSP_LCD_DRAW_BUFF_DOUBLE,
         .flags = {
 #if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
@@ -668,6 +911,10 @@ lv_display_t *bsp_display_start_with_config(const bsp_display_cfg_t *cfg)
 
     BSP_NULL_CHECK(disp_indev = bsp_display_indev_init(disp), NULL);
 
+    if (disp != NULL) {
+        s_display_started = true;
+    }
+
     return disp;
 }
 
@@ -681,13 +928,27 @@ void bsp_display_rotate(lv_display_t *disp, lv_disp_rotation_t rotation)
     lv_disp_set_rotation(disp, rotation);
 }
 
+bool bsp_display_started(void)
+{
+    return s_display_started;
+}
+
 bool bsp_display_lock(uint32_t timeout_ms)
 {
+    /* No display, no LVGL mutex. Returning false is the honest answer and it is
+     * what every caller in this project already handles; calling through would
+     * hit the esp_lvgl_port assert instead. */
+    if (!s_display_started) {
+        return false;
+    }
     return lvgl_port_lock(timeout_ms);
 }
 
 void bsp_display_unlock(void)
 {
+    if (!s_display_started) {
+        return;
+    }
     lvgl_port_unlock();
 }
 
