@@ -453,6 +453,13 @@ static const bsp_panel_row_t *bsp_panel_row(void)
 
 esp_err_t bsp_display_set_panel_type(int panel_type)
 {
+    /* The row is read during bring-up and again by the touch and brightness
+     * paths, so swapping it afterwards would leave the live panel and the
+     * table disagreeing. Selection is a pre-start decision only. */
+    if (s_display_started) {
+        ESP_LOGW(TAG, "panel type is fixed once the display has started");
+        return ESP_ERR_INVALID_STATE;
+    }
     if (panel_type < 0 || panel_type >= (int)BSP_PANEL_ROW_COUNT) {
         ESP_LOGW(TAG, "unknown panel type %d, keeping %s", panel_type, bsp_panel_row()->name);
         return ESP_ERR_INVALID_ARG;
@@ -909,11 +916,13 @@ lv_display_t *bsp_display_start_with_config(const bsp_display_cfg_t *cfg)
 
     BSP_NULL_CHECK(disp = bsp_display_lcd_init(cfg), NULL);
 
-    BSP_NULL_CHECK(disp_indev = bsp_display_indev_init(disp), NULL);
+    /* The panel and LVGL are up from here, so the mutex exists and the lock
+     * gate opens now rather than after touch. A GT911 failure below must not
+     * leave every display-lock site in the application closed against a screen
+     * that is actually running. */
+    s_display_started = true;
 
-    if (disp != NULL) {
-        s_display_started = true;
-    }
+    BSP_NULL_CHECK(disp_indev = bsp_display_indev_init(disp), NULL);
 
     return disp;
 }
