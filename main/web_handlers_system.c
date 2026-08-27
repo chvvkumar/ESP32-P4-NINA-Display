@@ -329,6 +329,9 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     bool failed = false;
     bool timed_out = false;
     int timeout_count = 0;
+    uint8_t fam_hdr[OTA_FAMILY_HDR_BYTES];
+    int  fam_have = 0;
+    bool fam_checked = false;
 
     while (remaining > 0) {
         int to_read = remaining < OTA_BUF_SIZE ? remaining : OTA_BUF_SIZE;
@@ -351,11 +354,55 @@ esp_err_t ota_post_handler(httpd_req_t *req)
         }
         timeout_count = 0;
 
-        err = esp_ota_write(ota_handle, buf, received);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
-            failed = true;
-            break;
+        const uint8_t *wp = (const uint8_t *)buf;
+        int wl = received;
+
+        if (!fam_checked) {
+            int take = OTA_FAMILY_HDR_BYTES - fam_have;
+            if (take > wl) take = wl;
+            memcpy(fam_hdr + fam_have, wp, (size_t)take);
+            fam_have += take;
+            if (fam_have < OTA_FAMILY_HDR_BYTES) {
+                /* httpd_req_recv returns whatever the socket has; a first chunk
+                 * shorter than 112 bytes is legal, so hold the write. */
+                remaining -= received;
+                received_total += received;
+                continue;
+            }
+            fam_checked = true;
+            if (ota_family_check(fam_hdr, OTA_FAMILY_HDR_BYTES) == OTA_FAMILY_REFUSE) {
+                /* Nothing has been written yet (OTA_WITH_SEQUENTIAL_WRITES
+                 * erases nothing up front), so aborting here leaves the target
+                 * slot exactly as it was. */
+                free(buf);
+                esp_ota_abort(ota_handle);
+                ota_remove_overlay();
+                ota_restore_network();
+                httpd_resp_set_status(req, "409 Conflict");
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_sendstr(req,
+                    "{\"error\":\"wrong firmware family: this image is built for the other "
+                    "panel shape and would leave the screen dark. Download the binary that "
+                    "matches this device.\"}");
+                return ESP_FAIL;
+            }
+            err = esp_ota_write(ota_handle, fam_hdr, OTA_FAMILY_HDR_BYTES);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+                failed = true;
+                break;
+            }
+            wp += take;
+            wl -= take;
+        }
+
+        if (wl > 0) {
+            err = esp_ota_write(ota_handle, wp, (size_t)wl);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+                failed = true;
+                break;
+            }
         }
 
         remaining -= received;

@@ -30,8 +30,71 @@ static const char *TAG = "ota_github";
 #define RELEASE_URL_BUF   256      /* generous bound for GITHUB_API_URL + "&page=NN" */
 #define OTA_BUF_SIZE      4096
 #define MAX_RESPONSE_SIZE (128 * 1024)
+/* The square family keeps this asset name FOREVER: every fielded device matches
+ * it with an exact strcmp, so changing it would stop the whole square fleet
+ * seeing updates. The round family gets its own name, which is the first of the
+ * three cross-family defences (the other two are the image header check below
+ * and the rollback the board layer performs on a mismatch). */
+#if CONFIG_NINA_FAMILY_ROUND
+#define OTA_ASSET_NAME    "nina-display-round-ota.bin"
+#else
 #define OTA_ASSET_NAME    "nina-display-ota.bin"
+#endif
 #define SND_ALPHA_TAG     "snd-alpha"   /* fixed tag of the rolling Alpha (snd) pre-release */
+
+/* esp_app_desc_t layout, from esp_app_desc.h: magic_word at +0,
+ * project_name[32] at +48. The descriptor itself starts at image offset 32. */
+#define OTA_DESC_OFFSET        32u
+#define OTA_DESC_MAGIC         0xABCD5432u
+#define OTA_DESC_NAME_OFFSET   48u
+#define OTA_DESC_NAME_LEN      32u
+
+/* Legacy project name every square release before the family split carries.
+ * A square device must accept it: rolling the fleet back to an older release is
+ * a supported operation. A round device must refuse it, because it names a
+ * square image. */
+#define OTA_LEGACY_PROJECT_NAME "lvgl_demo_v9"
+
+const char *ota_family_expected_name(void)
+{
+#if CONFIG_NINA_FAMILY_ROUND
+    return "nina-display-round";
+#else
+    return "nina-display";
+#endif
+}
+
+ota_family_verdict_t ota_family_check(const uint8_t *hdr, size_t len)
+{
+    if (!hdr || len < OTA_FAMILY_HDR_BYTES) {
+        return OTA_FAMILY_ACCEPT;   /* not decidable yet */
+    }
+
+    uint32_t magic = 0;
+    memcpy(&magic, hdr + OTA_DESC_OFFSET, sizeof(magic));
+    if (magic != OTA_DESC_MAGIC) {
+        /* Not an app descriptor where one should be. esp_ota_end() validates
+         * the image properly; refusing here would only add a second opinion. */
+        return OTA_FAMILY_ACCEPT;
+    }
+
+    char name[OTA_DESC_NAME_LEN + 1];
+    memcpy(name, hdr + OTA_DESC_OFFSET + OTA_DESC_NAME_OFFSET, OTA_DESC_NAME_LEN);
+    name[OTA_DESC_NAME_LEN] = '\0';
+
+    if (strcmp(name, ota_family_expected_name()) == 0) {
+        return OTA_FAMILY_ACCEPT;
+    }
+#if !CONFIG_NINA_FAMILY_ROUND
+    if (strcmp(name, OTA_LEGACY_PROJECT_NAME) == 0) {
+        return OTA_FAMILY_ACCEPT;   /* pre-split square release */
+    }
+#endif
+
+    ESP_LOGE(TAG, "image project_name '%s' is not this family (expected '%s')",
+             name, ota_family_expected_name());
+    return OTA_FAMILY_REFUSE;
+}
 
 /* ── Boot-time rollback confirm guard ───────────────────────────────── */
 /* With CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE the first boot of a fresh OTA
@@ -952,6 +1015,10 @@ static void ota_download_task(void *arg) {
         int received = 0;
         int last_pct = -1;
         bool failed = false;
+        uint8_t fam_hdr[OTA_FAMILY_HDR_BYTES];
+        int  fam_have = 0;
+        bool fam_checked = false;
+        bool fam_refused = false;
 
         while (1) {
             int len = esp_http_client_read(client, buf, OTA_BUF_SIZE);
@@ -967,11 +1034,45 @@ static void ota_download_task(void *arg) {
                 break;
             }
 
-            err = esp_ota_write(ota_handle, buf, len);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
-                failed = true;
-                break;
+            const uint8_t *wp = (const uint8_t *)buf;
+            int wl = len;
+
+            if (!fam_checked) {
+                int take = OTA_FAMILY_HDR_BYTES - fam_have;
+                if (take > wl) take = wl;
+                memcpy(fam_hdr + fam_have, wp, (size_t)take);
+                fam_have += take;
+                if (fam_have < OTA_FAMILY_HDR_BYTES) {
+                    /* Nothing written yet: hold the prefix until the family is
+                     * decidable. httpd and esp_http_client both return whatever
+                     * the socket has, so a first chunk under 112 bytes is legal. */
+                    received += len;
+                    continue;
+                }
+                fam_checked = true;
+                if (ota_family_check(fam_hdr, OTA_FAMILY_HDR_BYTES) == OTA_FAMILY_REFUSE) {
+                    ESP_LOGE(TAG, "download refused: wrong firmware family");
+                    fam_refused = true;
+                    failed = true;
+                    break;
+                }
+                err = esp_ota_write(ota_handle, fam_hdr, OTA_FAMILY_HDR_BYTES);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+                    failed = true;
+                    break;
+                }
+                wp += take;
+                wl -= take;
+            }
+
+            if (wl > 0) {
+                err = esp_ota_write(ota_handle, wp, (size_t)wl);
+                if (err != ESP_OK) {
+                    ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+                    failed = true;
+                    break;
+                }
             }
 
             received += len;
@@ -993,7 +1094,7 @@ static void ota_download_task(void *arg) {
 
         if (failed) {
             esp_ota_abort(ota_handle);
-            ctx->result = ESP_FAIL;
+            ctx->result = fam_refused ? ESP_ERR_INVALID_VERSION : ESP_FAIL;
             goto done;
         }
 
