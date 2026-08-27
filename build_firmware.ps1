@@ -73,6 +73,8 @@ if ($PSBoundParameters.Count -eq 0) {
         }
     }
 
+    if ($Family -eq 'round' -and $OTA) { Write-Host "  OTA disabled: no round device configured" -ForegroundColor Yellow; $OTA = $false }
+
     # Show final summary
     $summary = @("Build")
     $summary += "Family=$Family"
