@@ -3,6 +3,7 @@
 #include "esp_system.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
+#include "board_profile.h"
 #include "esp_app_format.h"
 #include "perf_monitor.h"
 #include "freertos/FreeRTOS.h"
@@ -497,6 +498,82 @@ esp_err_t version_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "git_sha", BUILD_GIT_SHA);
     cJSON_AddStringToObject(root, "git_branch", BUILD_GIT_BRANCH);
 
+    /* Board identity. The bench needs to tell a square build from a round one
+     * without reading the console, and the web UI's circular preview masks
+     * (phase 3) key on "shape". */
+    cJSON_AddStringToObject(root, "board", board_profile_id());
+    cJSON_AddStringToObject(root, "shape", board_profile_shape());
+
+    return send_json_response(req, root);
+}
+
+/* Panel variant select. The value lives in NVS namespace "board", key "panel",
+ * OUTSIDE app_config_t, because it describes the hardware rather than the
+ * user's configuration and has to survive a factory reset. board_profile_init()
+ * reads it once at boot, so a change needs a restart to take effect and the
+ * response says so rather than pretending it applied live. */
+esp_err_t panel_get_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    cJSON_AddNumberToObject(root, "panel", board_panel_nvs_get());
+    cJSON_AddStringToObject(root, "board", board_profile_id());
+    cJSON_AddStringToObject(root, "shape", board_profile_shape());
+    return send_json_response(req, root);
+}
+
+esp_err_t panel_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    /* The square family has exactly one panel, so there is nothing to select
+     * and writing the key would only leave misleading NVS content behind. */
+    if (strcmp(board_profile_shape(), "round") != 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"panel select is round family only\"}");
+        return ESP_FAIL;
+    }
+
+    char body[64];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        return send_400(req, "No body");
+    }
+    body[received] = '\0';
+
+    cJSON *json = cJSON_Parse(body);
+    if (!json) {
+        return send_400(req, "Invalid JSON");
+    }
+    const cJSON *item = cJSON_GetObjectItem(json, "panel");
+    const int panel = cJSON_IsNumber(item) ? item->valueint : 0;
+    cJSON_Delete(json);
+
+    if (panel != 1 && panel != 2) {
+        return send_400(req, "panel must be 1 (3.4in 800x800) or 2 (4.0in 720x720)");
+    }
+
+    const esp_err_t err = board_panel_nvs_set(panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "board/panel write failed: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "board/panel set to %d, restart required", panel);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    cJSON_AddNumberToObject(root, "panel", panel);
+    cJSON_AddBoolToObject(root, "restart_required", true);
     return send_json_response(req, root);
 }
 
