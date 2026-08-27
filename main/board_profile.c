@@ -127,14 +127,29 @@ void board_profile_init(void)
         return;
     }
     /* Logged unconditionally and before the match: capturing these three bytes
-     * on real hardware is a phase 1 deliverable, not a debug aid. */
-    ESP_LOGW(TAG, "RDDID %02X %02X %02X", id[0], id[1], id[2]);
+     * on real hardware is a phase 1 deliverable, not a debug aid. Please report
+     * this line with the board revision if the id is not in the table. */
+    ESP_LOGW(TAG, "RDDID %02X %02X %02X (report this id with the board revision)",
+             id[0], id[1], id[2]);
 
     size_t count = 0;
     const board_rddid_entry_t *table = board_detect_table(&count);
     const board_controller_t got = board_detect_controller(table, count, id);
 
-    if (got != expect) {
+    /* Asymmetric on purpose. The table holds exactly one verified ST7703
+     * capture (38 21 1F, one device); other square boards and panel revisions
+     * are unverified, so refusing an unknown id would make a square device
+     * headless on a factory flash and roll it back forever on OTA. On the
+     * square family an unknown id therefore proceeds to display start, where
+     * the ST7703 driver does its own ID read and fails honestly if the panel is
+     * something else. A POSITIVE match on the other family's controller is real
+     * evidence of the wrong binary and still refuses. The round family has both
+     * of its ids verified, so it refuses anything that is not JD9365. */
+    if (got == BOARD_CTRL_UNKNOWN && expect == BOARD_CTRL_ST7703) {
+        ESP_LOGE(TAG, "RDDID %02X %02X %02X not in the table, proceeding on the "
+                      "square family: record this id",
+                 id[0], id[1], id[2]);
+    } else if (got != expect) {
         ESP_LOGE(TAG, "panel controller %s does not match this %s-family binary "
                       "(expected %s)",
                  board_detect_controller_name(got), board_profile_shape(),

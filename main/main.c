@@ -611,7 +611,10 @@ static void event_handler(void *arg, esp_event_base_t event_base,
             /* spotify_auth_init() already ran before dashboard creation above. */
             spotify_client_init();
 
-            if (board_display_present()) {
+            /* bsp_display_started(), not board_display_present(): the RDDID can
+             * validate and bsp_display_start_with_config() still fail, and these
+             * two tasks take the LVGL lock and touch lv_scr_act(). */
+            if (bsp_display_started()) {
                 xTaskCreatePinnedToCore(input_task, "input_task", 6144, NULL, 5, NULL, 0);
                 xTaskCreatePinnedToCore(data_update_task, "data_task", 12288, NULL, 4, &data_task_handle, 1);
             }
@@ -905,10 +908,13 @@ void app_main(void)
             }
         };
         cfg.lvgl_port_cfg.task_stack = 10240; /* Default 7168 is too tight for settings page */
-        lv_display_t *disp_started = bsp_display_start_with_config(&cfg);
+        (void)bsp_display_start_with_config(&cfg);
         bsp_display_backlight_on();
         bsp_display_brightness_set(app_config_get()->brightness);
-        if (disp_started) {
+        /* bsp_display_started() rather than the return value: a GT911 failure
+         * returns NULL with the panel and LVGL already running, and that is a
+         * screen the rollback guard should count. */
+        if (bsp_display_started()) {
             /* boot-health milestone for the rollback confirm guard */
             ota_github_note_display_ready();
         } else {
@@ -1094,14 +1100,14 @@ void app_main(void)
         } /* end else (normal mode) */
 
         bsp_display_unlock();
-    } else if (!board_display_present()) {
+    } else if (!bsp_display_started()) {
         ESP_LOGW(TAG, "Headless boot: no UI built");
     } else {
         ESP_LOGE(TAG, "Failed to acquire display lock during init!");
     }
 
     if (!setup_mode) {
-        if (board_display_present()) {
+        if (bsp_display_started()) {
             nina_dashboard_set_page_change_cb(on_page_changed);
 
             /* Fresh first resolution - let the arbiter pick the page from
@@ -1142,8 +1148,9 @@ void app_main(void)
          * a headless boot they are not spawned at all. Everything that reads
          * data_task_handle already NULL-checks it (nina_websocket.c:976,
          * tasks.c:302/540/1257, nina_nav_arbiter.c:79/129,
-         * settings_hub.c:436). */
-        if (board_display_present()) {
+         * settings_hub.c:436). Gated on bsp_display_started(), not on the RDDID
+         * verdict: a valid id whose display start failed must stay headless. */
+        if (bsp_display_started()) {
             /* Allocate task stacks in PSRAM to save internal heap; TCBs stay internal */
             StackType_t *input_stack = heap_caps_malloc(6144 * sizeof(StackType_t), MALLOC_CAP_SPIRAM);
             StaticTask_t *input_tcb  = heap_caps_calloc(1, sizeof(StaticTask_t), MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);

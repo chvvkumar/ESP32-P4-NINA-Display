@@ -81,6 +81,27 @@ target_compile_options(
         -Wno-unused-function  # unused atomic.h inlines in lv_freertos.c (upstream ESP-IDF issue)
 )
 
+# The root CMakeLists picks the project name from the SDKCONFIG_DEFAULTS string
+# before sdkconfig exists, so a menuconfig flip of the family can leave a round
+# image named nina-display. That name is esp_app_desc_t.project_name, which the
+# OTA family check reads, so a disagreement ships an image that lies about its
+# panel. CONFIG_* is available here; fail the build instead. The bare CMake
+# PROJECT_NAME is "esp-idf" inside a component, so read the build property that
+# actually lands in the image header.
+idf_build_get_property(nina_app_name PROJECT_NAME)
+if(CONFIG_NINA_FAMILY_ROUND AND NOT "${nina_app_name}" STREQUAL "nina-display-round")
+    message(FATAL_ERROR
+        "family/name mismatch: CONFIG_NINA_FAMILY_ROUND is set but the project "
+        "name is '${nina_app_name}' (expected 'nina-display-round'). Build with "
+        "-DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.round'.")
+endif()
+if(CONFIG_NINA_FAMILY_SQUARE AND NOT "${nina_app_name}" STREQUAL "nina-display")
+    message(FATAL_ERROR
+        "family/name mismatch: CONFIG_NINA_FAMILY_SQUARE is set but the project "
+        "name is '${nina_app_name}' (expected 'nina-display'). Build with "
+        "-DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.square'.")
+endif()
+
 # Custom LVGL malloc backend (routes lv_malloc -> PSRAM). Must be compiled INTO the
 # LVGL library, not main: lv_mem.c (inside liblvgl) references lv_*_core, and liblvgl
 # is linked after libmain. A single-pass linker would not extract these symbols from

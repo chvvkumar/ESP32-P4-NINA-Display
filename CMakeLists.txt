@@ -14,7 +14,11 @@ file(STRINGS "version.txt" PROJECT_VER)
 # passed, not from CONFIG_NINA_FAMILY_ROUND. A plain `idf.py build` with no
 # argument is the square family, which is what every existing invocation means.
 set(NINA_FAMILY "square")
-if(DEFINED SDKCONFIG_DEFAULTS AND "${SDKCONFIG_DEFAULTS}" MATCHES "sdkconfig\\.defaults\\.round")
+# The environment form is honoured too: `SDKCONFIG_DEFAULTS=... idf.py build`
+# never reaches the cache variable. main/CMakeLists.txt asserts afterwards that
+# this name and the parsed CONFIG_NINA_FAMILY_* agree.
+if(("${SDKCONFIG_DEFAULTS}" MATCHES "sdkconfig\\.defaults\\.round") OR
+   ("$ENV{SDKCONFIG_DEFAULTS}" MATCHES "sdkconfig\\.defaults\\.round"))
     set(NINA_FAMILY "round")
 endif()
 message(STATUS "NINA shape family: ${NINA_FAMILY}")
