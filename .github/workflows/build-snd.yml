@@ -168,11 +168,12 @@ jobs:
         if: steps.check_skip.outputs.skip != 'true'
         run: |
           # Decide whether managed_components also needs purging BEFORE removing
-          # build/, since the comparison hash lives in build/.build_config_hash.
+          # build_square/, since the comparison hash lives in
+          # build_square/.build_config_hash.
           NEEDS_DEPS_CLEAN=false
-          if [ -f build/.build_config_hash ]; then
-            OLD_HASH=$(cat build/.build_config_hash)
-            NEW_HASH=$(cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1)
+          if [ -f build_square/.build_config_hash ]; then
+            OLD_HASH=$(cat build_square/.build_config_hash)
+            NEW_HASH=$(cat sdkconfig.defaults sdkconfig.defaults.square sdkconfig.defaults.round main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1)
             if [ "$OLD_HASH" != "$NEW_HASH" ]; then
               echo "Build config changed, will also purge managed_components"
               NEEDS_DEPS_CLEAN=true
@@ -182,12 +183,13 @@ jobs:
             NEEDS_DEPS_CLEAN=true
           fi
 
-          # Always purge build/ and sdkconfig: a stale sdkconfig selects the wrong
-          # display pipeline and a stale build/ keeps a stale build_version.h and
+          # Always purge the family build directories and any legacy root
+          # sdkconfig: a stale sdkconfig selects the wrong display pipeline and a
+          # stale build_square/ or build_round/ keeps a stale build_version.h and
           # object files. ccache (separate CCACHE_DIR) is untouched, so recompiles
           # stay fast.
-          rm -rf build sdkconfig
-          echo "Removed build and sdkconfig"
+          rm -rf build build_square build_round sdkconfig
+          echo "Removed build_square, build_round and any legacy build/sdkconfig"
 
           # Only re-download managed_components when the dependency/config hash
           # changed: it is pinned by dependencies.lock, and re-fetching from the
@@ -205,12 +207,21 @@ jobs:
           IDF_CCACHE_ENABLE: 1
         run: |
           . $IDF_PATH/export.sh
-          idf.py build
+          # Both families are built in ONE job on purpose. A strategy.matrix
+          # would fork every later step in this job, including the tag push and
+          # the release create, which would produce two releases per commit.
+          for FAMILY in square round; do
+            echo "=== building family: $FAMILY ==="
+            idf.py -B "build_${FAMILY}" \
+              -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.${FAMILY}" \
+              -DSDKCONFIG="build_${FAMILY}/sdkconfig" \
+              build
+          done
 
       - name: Save build config hash
         if: steps.check_skip.outputs.skip != 'true'
         run: |
-          cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1 > build/.build_config_hash
+          cat sdkconfig.defaults sdkconfig.defaults.square sdkconfig.defaults.round main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1 > build_square/.build_config_hash
 
       - name: Show ccache stats
         if: steps.check_skip.outputs.skip != 'true'
@@ -223,44 +234,43 @@ jobs:
           . $IDF_PATH/export.sh
           mkdir -p firmware
 
-          # Detect app binary from project_description.json
-          APP_BIN=$(python3 -c "
+          for FAMILY in square round; do
+            BDIR="build_${FAMILY}"
+            if [ "$FAMILY" = "round" ]; then PREFIX="nina-display-round"; else PREFIX="nina-display"; fi
+
+            APP_BIN=$(python3 -c "
           import json
-          with open('build/project_description.json') as f:
+          with open('${BDIR}/project_description.json') as f:
               d = json.load(f)
-          print('build/' + d['app_bin'])
+          print('${BDIR}/' + d['app_bin'])
+          ")
+            APP_ELF=$(python3 -c "
+          import json
+          with open('${BDIR}/project_description.json') as f:
+              d = json.load(f)
+          print('${BDIR}/' + d['app_elf'])
           ")
 
-          # Merge factory binary (bootloader + partition table + app)
-          python3 -m esptool --chip esp32p4 merge_bin \
-            --flash_mode dio \
-            --flash_size 32MB \
-            --flash_freq 80m \
-            -o firmware/nina-display-factory.bin \
-            0x2000  build/bootloader/bootloader.bin \
-            0x8000  build/partition_table/partition-table.bin \
-            0x20000 "$APP_BIN"
+            python3 -m esptool --chip esp32p4 merge_bin \
+              --flash_mode dio \
+              --flash_size 32MB \
+              --flash_freq 80m \
+              -o "firmware/${PREFIX}-factory.bin" \
+              0x2000  "${BDIR}/bootloader/bootloader.bin" \
+              0x8000  "${BDIR}/partition_table/partition-table.bin" \
+              0x20000 "$APP_BIN"
 
-          # Copy app binary as OTA file
-          cp "$APP_BIN" firmware/nina-display-ota.bin
+            cp "$APP_BIN" "firmware/${PREFIX}-ota.bin"
+            cp "$APP_ELF" "firmware/${PREFIX}.elf"
 
-          # Keep bootloader + partition table on disk (build/ tree) for local
-          # inspection only. They are not uploaded as release assets.
-          cp build/bootloader/bootloader.bin firmware/bootloader.bin
-          cp build/partition_table/partition-table.bin firmware/partition-table.bin
+            echo "${FAMILY} factory: $(du -h firmware/${PREFIX}-factory.bin | cut -f1)"
+            echo "${FAMILY} OTA:     $(du -h firmware/${PREFIX}-ota.bin | cut -f1)"
+          done
 
-          # Copy ELF for crash backtrace decoding
-          APP_ELF=$(python3 -c "
-          import json
-          with open('build/project_description.json') as f:
-              d = json.load(f)
-          print('build/' + d['app_elf'])
-          ")
-          cp "$APP_ELF" firmware/nina-display.elf
-
-          # Report sizes
-          echo "Factory: $(du -h firmware/nina-display-factory.bin | cut -f1)"
-          echo "OTA:     $(du -h firmware/nina-display-ota.bin | cut -f1)"
+          # Bootloader + partition table of the SQUARE build only, kept on disk
+          # for local inspection. They are not uploaded as release assets.
+          cp build_square/bootloader/bootloader.bin firmware/bootloader.bin
+          cp build_square/partition_table/partition-table.bin firmware/partition-table.bin
 
       - name: Check for network_adapter.bin
         if: steps.check_skip.outputs.skip != 'true'
@@ -307,6 +317,9 @@ jobs:
             firmware/nina-display-factory.bin \
             firmware/nina-display-ota.bin \
             firmware/nina-display.elf \
+            firmware/nina-display-round-factory.bin \
+            firmware/nina-display-round-ota.bin \
+            firmware/nina-display-round.elf \
             --target "$GITHUB_SHA" \
             --title "snd-alpha (${SHORT_SHA})" \
             --notes-file /tmp/snd-notes.md \

@@ -1,1 +1,31 @@
 # Performance monitoring is now a runtime toggle (debug_mode in web config).
+
+menu "NINA Display"
+
+choice NINA_PANEL_FAMILY
+    prompt "Panel shape family"
+    default NINA_FAMILY_SQUARE
+    help
+        Selects the shape family this binary is built for. The family decides
+        which layout sources compile, the OTA asset name the update checker
+        matches, the CMake project name stamped into the image header, and
+        which panel controller the board layer will accept at boot.
+
+    config NINA_FAMILY_SQUARE
+        bool "Square 720x720 (ESP32-P4-WIFI6-Touch-LCD-4B, ST7703)"
+
+    config NINA_FAMILY_ROUND
+        bool "Round (3.4C 800x800 and 4C 720x720, JD9365)"
+endchoice
+
+config NINA_ROUND_INSET_AID
+    bool "Development inset aid (round only)"
+    depends on NINA_FAMILY_ROUND
+    default y
+    help
+        Pads the universal page parent by the panel safe inset instead of the
+        16 px square padding, so every square page stays inside the circle
+        while the round layouts are being designed. This is a phase 1
+        development aid and is removed at the end of phase 2.
+
+endmenu

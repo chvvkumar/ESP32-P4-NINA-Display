@@ -5,6 +5,8 @@
 # Usage:
 #   .\build_firmware.ps1              # Normal build
 #   .\build_firmware.ps1 -FullClean   # Clean rebuild
+#   .\build_firmware.ps1 -Family round # Build the round-family binary (build_round/)
+#   .\build_firmware.ps1 -Family square # Explicit square build (the default)
 #   .\build_firmware.ps1 -OTA         # Build + OTA flash to both devices
 #   .\build_firmware.ps1 -OTA -Devices "NinaDash1.lan","NinaDash2.lan"
 #   .\build_firmware.ps1 -Release      # Enforce clean tree + tag matches version.txt, fail otherwise
@@ -13,6 +15,8 @@
     Justification='Dev tool: password sourced from env var or interactive prompt; not persisted.')]
 param(
     [string]$IdfPath = "C:\Espressif\frameworks\esp-idf-v5.5.2",
+    [ValidateSet("square", "round")]
+    [string]$Family = "square",
     [switch]$FullClean,
     [switch]$OTA,
     [switch]$Release,
@@ -25,7 +29,7 @@ $ErrorActionPreference = "Stop"
 # Interactive menu when invoked without arguments
 if ($PSBoundParameters.Count -eq 0) {
     function Show-Menu {
-        param($IdfPath, $FullClean, $OTA, $Devices)
+        param($IdfPath, $FullClean, $OTA, $Devices, $Family)
         Write-Host ""
         Write-Host "  ESP32-P4 NINA Display - Build Options" -ForegroundColor Cyan
         Write-Host "  ======================================" -ForegroundColor Cyan
@@ -38,13 +42,14 @@ if ($PSBoundParameters.Count -eq 0) {
         Write-Host "  [2] OTA Flash:   " -NoNewline; Write-Host $otaLabel -ForegroundColor $otaColor
         Write-Host "  [3] Devices:     " -NoNewline; Write-Host ($Devices -join ", ") -ForegroundColor White
         Write-Host "  [4] IDF Path:    " -NoNewline; Write-Host $IdfPath -ForegroundColor White
+        Write-Host "  [5] Family:      " -NoNewline; Write-Host $Family -ForegroundColor White
         Write-Host ""
     }
 
     $OTA = $true  # Default to OTA enabled in interactive mode
     $menuLoop = $true
     while ($menuLoop) {
-        Show-Menu -IdfPath $IdfPath -FullClean $FullClean -OTA $OTA -Devices $Devices
+        Show-Menu -IdfPath $IdfPath -FullClean $FullClean -OTA $OTA -Devices $Devices -Family $Family
         $selection = Read-Host "  Enter option numbers to toggle (e.g. 1,2), or press Enter to build"
         if ([string]::IsNullOrWhiteSpace($selection)) {
             $menuLoop = $false
@@ -62,6 +67,7 @@ if ($PSBoundParameters.Count -eq 0) {
                     $newPath = Read-Host "  IDF Path [$IdfPath]"
                     if (-not [string]::IsNullOrWhiteSpace($newPath)) { $IdfPath = $newPath }
                 }
+                '5' { $Family = if ($Family -eq 'square') { 'round' } else { 'square' } }
                 default { Write-Host "  Unknown option: $choice" -ForegroundColor Red }
             }
         }
@@ -69,6 +75,7 @@ if ($PSBoundParameters.Count -eq 0) {
 
     # Show final summary
     $summary = @("Build")
+    $summary += "Family=$Family"
     if ($FullClean) { $summary += "FullClean" }
     if ($OTA) { $summary += "OTA -> $($Devices -join ', ')" }
     Write-Host ""
@@ -77,7 +84,9 @@ if ($PSBoundParameters.Count -eq 0) {
 }
 
 $ProjectDir = $PSScriptRoot
-$BuildDir = Join-Path $ProjectDir "build"
+$BuildDir = Join-Path $ProjectDir "build_$Family"
+$SdkConfig = Join-Path $BuildDir "sdkconfig"
+$SdkDefaults = "sdkconfig.defaults;sdkconfig.defaults.$Family"
 
 # Verify ESP-IDF path exists
 if (-not (Test-Path (Join-Path $IdfPath "export.ps1"))) {
@@ -147,13 +156,14 @@ if ($FullClean) {
     Write-Host "`nRunning fullclean ..." -ForegroundColor Yellow
     Push-Location $ProjectDir
     try {
-        idf.py fullclean
-        # fullclean only removes build/; delete sdkconfig too so it regenerates
-        # from sdkconfig.defaults. Otherwise a stale local sdkconfig overrides the
-        # defaults (the build drifts from CI and can keep the wrong panel type).
-        if (Test-Path sdkconfig) {
-            Remove-Item -Force sdkconfig
-            Write-Host "Removed stale sdkconfig (regenerates from sdkconfig.defaults)" -ForegroundColor Yellow
+        idf.py -B $BuildDir fullclean
+        # fullclean only removes the build directory; delete that family's
+        # sdkconfig too so it regenerates from sdkconfig.defaults plus
+        # sdkconfig.defaults.<family>. A stale per-family sdkconfig otherwise
+        # overrides the defaults and the build drifts from CI.
+        if (Test-Path $SdkConfig) {
+            Remove-Item -Force $SdkConfig
+            Write-Host "Removed stale $SdkConfig (regenerates from $SdkDefaults)" -ForegroundColor Yellow
         }
     } finally {
         Pop-Location
@@ -161,10 +171,10 @@ if ($FullClean) {
 }
 
 # Build the project
-Write-Host "`nBuilding project ..." -ForegroundColor Cyan
+Write-Host "`nBuilding project (family: $Family) ..." -ForegroundColor Cyan
 Push-Location $ProjectDir
 try {
-    idf.py build
+    idf.py -B $BuildDir -DSDKCONFIG_DEFAULTS="$SdkDefaults" -DSDKCONFIG="$SdkConfig" build
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Build failed."
         exit 1
