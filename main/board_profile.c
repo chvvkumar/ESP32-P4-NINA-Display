@@ -67,10 +67,18 @@ esp_err_t board_panel_nvs_set(int value)
 
 /* Pending images that cannot drive the panel they found do not wait for a
  * health check that will never fail: nothing marks the slot invalid, and the
- * confirm guard's uptime fallback would otherwise validate a blind image five
- * minutes in. Rolling back here brings the previous family's image straight
- * back. A factory flash of the wrong family is not pending, so it stays up
- * headless and the user can upload the right image over the web. */
+ * confirm guard's uptime fallback validates the image on its own once the
+ * device has been up long enough. Rolling back here brings the previous
+ * family's image straight back before that happens. A factory flash of the
+ * wrong family is not pending, so it stays up headless and the user can upload
+ * the right image over the web.
+ *
+ * The rollback can legitimately fail: esp_ota_mark_app_invalid_rollback_and_
+ * reboot() returns ESP_ERR_OTA_ROLLBACK_FAILED when there is no bootable
+ * sibling to fall back to, and ESP_FAIL when running from the factory app. In
+ * that case there is nowhere to go, so we deliberately fall through to the
+ * headless branch and let the confirm guard's uptime fallback validate this
+ * image. A device with no bootable sibling must not sit pending forever. */
 static void rollback_if_pending(void)
 {
     const esp_partition_t *running = esp_ota_get_running_partition();
@@ -78,8 +86,11 @@ static void rollback_if_pending(void)
     if (running && esp_ota_get_state_partition(running, &st) == ESP_OK &&
         st == ESP_OTA_IMG_PENDING_VERIFY) {
         ESP_LOGE(TAG, "wrong-family image is pending verify, rolling back now");
-        esp_ota_mark_app_invalid_rollback_and_reboot();
-        /* does not return */
+        esp_err_t err = esp_ota_mark_app_invalid_rollback_and_reboot();
+        /* Only reached when the rollback could not happen. */
+        ESP_LOGE(TAG, "rollback impossible (%s): staying on this image, confirm "
+                      "guard will validate it on the uptime fallback",
+                 esp_err_to_name(err));
     }
     ESP_LOGE(TAG, "booting headless: web server and console stay up so the "
                   "correct firmware family can be uploaded");
