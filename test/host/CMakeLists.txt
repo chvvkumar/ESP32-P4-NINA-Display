@@ -290,6 +290,18 @@ add_nina_host_test(test_image_fit
 )
 
 # ---------------------------------------------------------------------------
+# test_clock_dial -- the Classic round clock face's 12-hour forecast dial
+# (main/ui/clock_dial.h): 30 degrees per hour, the entry for hour H at the
+# clock position of H % 12, each block spanning the hours until the next
+# entry (1 on Open-Meteo and Weather Underground, 3 on OpenWeatherMap after
+# a short first gap), and nothing past 12 hours from the first entry.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_clock_dial
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_clock_dial.c
+)
+
+# ---------------------------------------------------------------------------
 # test_board_detect -- the RDDID signature table and the controller match
 # (main/board_detect.c). Dependency free by design: no ESP-IDF, no FreeRTOS, no
 # LVGL, no NVS, so it compiles here directly. Everything that touches hardware

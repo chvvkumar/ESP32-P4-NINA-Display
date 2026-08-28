@@ -33,6 +33,8 @@ set(nina_round_srcs
     ui/nina_summary_round.c
     ui/octoprint_layout_bento_round.c
     ui/octoprint_layout_glass_round.c
+    ui/nina_clock_round.c
+    ui/lv_font_playfair_200.c
 )
 set(nina_square_srcs)
 if(CONFIG_NINA_FAMILY_ROUND)
