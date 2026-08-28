@@ -13,13 +13,10 @@
  */
 
 #include "settings_hub_internal.h"
+#include "settings_wifi_internal.h"   /* settings_wifi_round_fit() */
 #include "ui_round.h"
 #include "screen_geom.h"
 #include "lvgl.h"
-
-/* Supplied by settings_wifi_round.c from task F3; stubbed at the bottom of this
- * file until then. */
-void settings_wifi_round_fit(lv_obj_t *screen, hub_screen_t which);
 
 /* Hub rows, absolute pixels, as offsets from the panel centre (board 8). */
 #define HUBR_HEADER_W    420
@@ -248,11 +245,4 @@ void settings_hub_round_fit(lv_obj_t *screen, hub_screen_t which)
         fit_flex_screen(screen);
         break;
     }
-}
-
-/* Removed in task F3, which supplies the real settings_wifi_round_fit(). */
-void settings_wifi_round_fit(lv_obj_t *screen, hub_screen_t which)
-{
-    (void)which;
-    fit_flex_screen(screen);
 }
