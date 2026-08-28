@@ -18,14 +18,4 @@ choice NINA_PANEL_FAMILY
         bool "Round (3.4C 800x800 and 4C 720x720, JD9365)"
 endchoice
 
-config NINA_ROUND_INSET_AID
-    bool "Development inset aid (round only)"
-    depends on NINA_FAMILY_ROUND
-    default y
-    help
-        Pads the universal page parent by the panel safe inset instead of the
-        16 px square padding, so every square page stays inside the circle
-        while the round layouts are being designed. This is a phase 1
-        development aid and is removed at the end of phase 2.
-
 endmenu

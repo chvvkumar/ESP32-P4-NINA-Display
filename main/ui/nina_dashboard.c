@@ -1456,17 +1456,11 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
     lv_obj_set_size(main_cont, screen_size(), screen_size());
     lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
-#if CONFIG_NINA_ROUND_INSET_AID
-    /* Phase 1 development aid, round family only: pad the universal page parent
-     * by the panel safe inset so every square page stays inside the circle while
-     * the round layouts are being designed. Removed at the end of phase 2, when
-     * every page has a real round layout. On a square panel screen_safe_inset()
-     * is 0, so the fallback keeps the historical 16 px exactly. */
-    const int page_pad = (screen_safe_inset() > 0) ? screen_safe_inset() : OUTER_PADDING;
-    lv_obj_set_style_pad_all(main_cont, page_pad, 0);
-#else
+    /* Every page now carries its own round composition, so the universal page
+     * parent keeps the historical 16 px pad on both families. Pages that want
+     * the inscribed square ask ui_page_inset() for it; pages that want the whole
+     * disc negate this pad the way the image page always has. */
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
-#endif
 
     /* Optional feature pages — created here ONLY if the feature is enabled in
      * config; otherwise on the first runtime enable (see
