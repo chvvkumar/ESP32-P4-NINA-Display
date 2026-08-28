@@ -209,6 +209,15 @@ extern const octoprint_layout_ops_t octoprint_layout_glass;
 extern const octoprint_layout_ops_t octoprint_layout_overlay;
 extern const octoprint_layout_ops_t octoprint_layout_letterbox;
 
+/* Round-family builders. Defined in ui/octoprint_layout_bento_round.c and
+ * ui/octoprint_layout_glass_round.c, which are compiled into nina_round_srcs
+ * only (phase 2 sub-plan D). Declared here so the round dispatch in
+ * nina_octoprint.c has one place to name them. Grid is the inscribed pick and
+ * Immersive the radial one; layouts 5 and 6 have no round composition and
+ * resolve to Immersive (spec addendum section 7). */
+extern const octoprint_layout_ops_t octoprint_layout_bento_round;
+extern const octoprint_layout_ops_t octoprint_layout_glass_round;
+
 /* ── Shared widget factories (implemented in nina_octoprint.c) ─────────
  * These are the whole widget library. Layouts compose them; nothing else.
  * ──────────────────────────────────────────────────────────────────── */

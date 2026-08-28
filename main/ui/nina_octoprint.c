@@ -660,6 +660,20 @@ static void build_content(void)
     if (idx >= OCTO_LAYOUT_COUNT) {
         idx = 0;
     }
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Round removals (spec addendum section 7): "Floating overlay" (5) and
+     * "Letterbox" (6) have no round composition, so both resolve to the glass
+     * "Immersive image" builder. The stored config value is NOT rewritten and
+     * the web UI keeps offering them, so a board swapped back to a square panel
+     * gets its chosen layout again.
+     *
+     * sub-plan D replaces this arm: idx 2 (and remapped 5, 6) -> glass_round,
+     * everything else -> bento_round. Until then the round build renders the
+     * square builders, so it stays usable at every task in between. */
+    if (idx == 5 || idx == 6) {
+        idx = 2;
+    }
+#endif
     const octoprint_layout_ops_t *ops = s_layouts[idx];
 
     /* Canvas first: a full-bleed layout gets the whole screen, shifted up and

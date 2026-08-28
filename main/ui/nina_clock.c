@@ -2214,6 +2214,15 @@ static void reset_widget_ptrs(void) {
     }
 }
 
+#if CONFIG_NINA_FAMILY_ROUND
+/* Round clock builders. Defined in ui/nina_clock_round.c, a nina_round_srcs
+ * source added by phase 2 sub-plan E. Declared here rather than in a new
+ * internal header because it is one prototype and the clock page has no widget
+ * struct to share. Not called yet: in this task the round build still renders
+ * the square builders below. */
+void clock_round_build(uint8_t layout);
+#endif
+
 /**
  * Build the content of the configured layout onto clock_root.
  * clock_root must exist. Does not touch the minute timer.
@@ -2225,6 +2234,23 @@ static void build_content(void) {
 
     uint8_t layout = app_config_get()->clock_layout;
     s_layout = (layout <= 6) ? layout : 0;
+
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Round removal (spec addendum section 7): "Transit Line" (5) has no round
+     * composition and resolves to Classic (0). The stored config value is NOT
+     * rewritten and the web UI keeps offering it.
+     *
+     * SEAM (sub-plan E): this arm becomes
+     *     clock_round_build(s_layout);
+     *     return;
+     * once nina_clock_round.c exists. Broadside (2) and Evensong (3) stay on
+     * the shared inset builders below even then (spec B.5 rows 19 and 20), so
+     * sub-plan E's dispatcher forwards those two back here. Until then the
+     * round build renders the square builders, so it stays usable. */
+    if (s_layout == 5) {
+        s_layout = 0;
+    }
+#endif
 
     if (s_layout == 1) {
         build_layout_console();
