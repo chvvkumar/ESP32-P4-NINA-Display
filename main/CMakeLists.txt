@@ -35,6 +35,7 @@ set(nina_round_srcs
     ui/octoprint_layout_glass_round.c
     ui/nina_clock_round.c
     ui/nina_image_page_round.c
+    ui/settings_hub_round.c
     ui/lv_font_playfair_200.c
 )
 set(nina_square_srcs)
