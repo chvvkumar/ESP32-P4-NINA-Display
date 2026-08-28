@@ -665,16 +665,22 @@ static void build_content(void)
      * "Letterbox" (6) have no round composition, so both resolve to the glass
      * "Immersive image" builder. The stored config value is NOT rewritten and
      * the web UI keeps offering them, so a board swapped back to a square panel
-     * gets its chosen layout again.
-     *
-     * sub-plan D replaces this arm: idx 2 (and remapped 5, 6) -> glass_round,
-     * everything else -> bento_round. Until then the round build renders the
-     * square builders, so it stays usable at every task in between. */
+     * gets its chosen layout again. */
     if (idx == 5 || idx == 6) {
         idx = 2;
     }
-#endif
+    /* Key on 2, not on 0: slots 1, 3 and 4 are RETIRED ALIASES that render Grid
+     * on square (see the s_layouts comment), and they must render Grid here too.
+     *
+     * s_layouts[2] is still the SQUARE Immersive builder. Sub-plan D2 replaces
+     * that half of the ternary with &octoprint_layout_glass_round once that file
+     * exists; keeping the square one for now means the round build renders a
+     * usable page at every commit in between. */
+    const octoprint_layout_ops_t *ops = (idx == 2) ? s_layouts[2]
+                                                   : &octoprint_layout_bento_round;
+#else
     const octoprint_layout_ops_t *ops = s_layouts[idx];
+#endif
 
     /* Canvas first: a full-bleed layout gets the whole screen, shifted up and
      * left to negate main_cont's OUTER_PADDING (the same negation the image,

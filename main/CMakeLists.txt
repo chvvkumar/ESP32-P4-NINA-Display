@@ -30,6 +30,7 @@ set(nina_round_srcs
     ui/nina_layout_dashboard_round.c
     ui/nina_layout_image_round.c
     ui/nina_summary_round.c
+    ui/octoprint_layout_bento_round.c
 )
 set(nina_square_srcs)
 if(CONFIG_NINA_FAMILY_ROUND)
