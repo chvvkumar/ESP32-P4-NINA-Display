@@ -35,6 +35,8 @@ extern const lv_font_t lv_font_playfair_90;
 extern const lv_font_t lv_font_overpass_27;
 LV_FONT_DECLARE(lv_font_saira_thin_240)    /* round Console 92 hero */
 LV_FONT_DECLARE(lv_font_stencil_190)       /* round Blueprint hero */
+LV_FONT_DECLARE(lv_font_hanken_black_96)   /* round Night Network hero */
+LV_FONT_DECLARE(lv_font_hanken_black_40)   /* round Night Network weekday */
 /* Full ASCII fallback: the Playfair cuts carry no minus sign. */
 LV_FONT_DECLARE(lv_font_saira_light_46)
 
@@ -675,6 +677,191 @@ static void build_round_blueprint(void)
     clock_round_restyle = blueprint_restyle;
 }
 
+/* ══ Face 6, Night Network ═══════════════════════════════════════════ */
+
+/* The round temperature line carries six stations, not ten. */
+#define NET_ROUND_STATIONS 6
+
+static void network_restyle(const weather_data_t *wd, const struct tm *tm_now,
+                            bool red_night, bool is_metric)
+{
+    (void)tm_now;
+    (void)is_metric;
+
+    if (!met_peak_ring || !wd->valid) return;
+
+    /* The peak is over the SIX hours this line draws, not the ten
+     * restyle_forecast() scanned. */
+    int i_pk = 0;
+    float t_min = wd->hourly_temps[0];
+    float t_max = wd->hourly_temps[0];
+    for (int i = 1; i < NET_ROUND_STATIONS; i++) {
+        if (wd->hourly_temps[i] > wd->hourly_temps[i_pk]) i_pk = i;
+        if (wd->hourly_temps[i] < t_min) t_min = wd->hourly_temps[i];
+        if (wd->hourly_temps[i] > t_max) t_max = wd->hourly_temps[i];
+    }
+    float t_range = t_max - t_min;
+    if (t_range < 1.0f) t_range = 1.0f;
+
+    /* restyle_forecast() has already placed the pair at the square face's
+     * coordinates over all ten hours; put it back on this face's line. */
+    const int cy = screen_center();
+    const int tx = cy + 133;
+    int sy = cy - 30 + i_pk * 58;
+    lv_obj_set_pos(met_peak_ring, tx - 11, sy - 18);
+    if (met_peak_core) {
+        lv_obj_set_pos(met_peak_core, tx + 1, sy - 6);
+    }
+    /* Same reason for the bottom end tick: restyle_forecast() colours it from
+     * slot 9, and this line ends at slot 5. */
+    if (met_tick_b) {
+        float f5 = (wd->hourly_temps[NET_ROUND_STATIONS - 1] - t_min) / t_range;
+        int band = (int)(f5 * 4.0f);
+        if (band > 3) band = 3;
+        if (band < 0) band = 0;
+        static const uint32_t ramp[4]    = { MET_TEAL, MET_GOLD,
+                                             MET_ORANGE, MET_RED };
+        static const uint32_t ramp_rn[4] = { 0x500000, 0x800000,
+                                             0xC00000, 0xFF0000 };
+        lv_obj_set_style_bg_color(met_tick_b,
+            lv_color_hex(red_night ? ramp_rn[band] : ramp[band]), 0);
+    }
+}
+
+/**
+ * Night Network: the corner name block walks to the top cardinal and loses
+ * its fill and border (guideline C1), the conditions line stays a chord with
+ * both end ticks, the temperature line moves in from x 621 to a vertical run
+ * at x 493 with six stations, each conditions station carries one caption
+ * plus value row instead of a stacked pair, and the legend is not built.
+ * inscribed_batch3.md board 5 with the addendum's C1 and no-legend rulings.
+ */
+static void build_round_network(void)
+{
+    lv_obj_set_style_pad_all(clock_root, 0, 0);
+    lv_obj_set_style_pad_row(clock_root, 0, 0);
+    lv_obj_set_layout(clock_root, LV_LAYOUT_NONE);
+    lv_obj_set_style_bg_color(clock_root, lv_color_hex(MET_BG), 0);
+
+    const int cy = screen_center();
+
+    /* Name block on the top cardinal. C1: no fill, no border. Height is
+     * LV_SIZE_CONTENT so the real Hanken metrics cannot clip the column. */
+    met_panel = make_container(clock_root);
+    lv_obj_set_size(met_panel, 420, LV_SIZE_CONTENT);
+    lv_obj_align(met_panel, LV_ALIGN_TOP_MID, 0, cy - 264);
+    lv_obj_set_flex_flow(met_panel, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(met_panel, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_row(met_panel, 4, 0);
+
+    lv_obj_t *trow = make_container(met_panel);
+    lv_obj_set_size(trow, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(trow, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(trow, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END,
+                          LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_column(trow, 10, 0);
+    lbl_time = make_label(trow, &lv_font_hanken_black_96, MET_INK, -2, "");
+    lbl_ampm = make_label(trow, &lv_font_overpass_27, MET_GOLD, 1, "");
+    lv_obj_set_style_pad_bottom(lbl_ampm, 4, 0);
+
+    met_name = make_label(met_panel, &lv_font_hanken_black_40, MET_INK, 2, "");
+    lv_obj_set_style_pad_top(met_name, 12, 0);
+
+    lbl_cond = make_label(met_panel, &lv_font_overpass_27, MET_GOLD, 1, "--");
+    lv_obj_set_width(lbl_cond, 400);
+    lv_label_set_long_mode(lbl_cond, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(lbl_cond, LV_TEXT_ALIGN_CENTER, 0);
+
+    /* Network map, hidden until forecast data arrives. */
+    forecast_row = make_container(clock_root);
+    lv_obj_set_size(forecast_row, screen_size(), screen_size());
+    lv_obj_set_pos(forecast_row, 0, 0);
+    lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+
+    /* Conditions line: a 640 px chord with both end ticks, 29 px above the
+     * mock's y so the crossing lands at the midpoint between temperature
+     * stations 0 (cy - 30) and 1 (cy + 28) instead of straight through
+     * station 1. The board draws it at 380..394 with a station at 388, which
+     * contradicts its own caption; the square face crosses at 365..379
+     * between stations at 327 and 392. Moving the temperature line instead
+     * would push met_tick_b out to r 357, past the rim. The chord at dy -9 is
+     * 684 px, so the 640 px bar and its ticks still fit. */
+    met_cline[0] = make_bg_rect(forecast_row, cy - 320, cy - 9, 640, 14,
+                                MET_BLUE);
+    met_cline[1] = make_bg_rect(forecast_row, cy - 327, cy - 24, 14, 44,
+                                MET_BLUE);
+    met_cline[2] = make_bg_rect(forecast_row, cy + 313, cy - 24, 14, 44,
+                                MET_BLUE);
+
+    /* Five conditions stations, each one caption + value row. The legend is
+     * gone, so the stations centre on the panel instead of leaving its
+     * bottom-left corner free. */
+    static const int16_t c_dx[MET_CSTATIONS] = { -240, -120, 0, 120, 240 };
+    static const char *c_caps[MET_CSTATIONS] = { "HI", "LO", "RH", "DEW", "W" };
+    lv_obj_t *c_vals[MET_CSTATIONS];
+    for (int k = 0; k < MET_CSTATIONS; k++) {
+        met_cdots[k] = make_station_dot(forecast_row, cy + c_dx[k], cy - 2,
+                                        10, 4, MET_BLUE);
+        lv_obj_t *row = make_container(forecast_row);
+        lv_obj_set_size(row, 120, LV_SIZE_CONTENT);
+        lv_obj_set_pos(row, cy + c_dx[k] - 60, cy + 19);
+        lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_column(row, 6, 0);
+        reg_dim_lbl(make_label(row, &lv_font_overpass_27, MET_DIM, 1,
+                               c_caps[k]));
+        c_vals[k] = make_label(row, &lv_font_overpass_27, MET_INK, 0, "--");
+    }
+    met_hi_val    = c_vals[0];
+    met_lo_val    = c_vals[1];
+    lbl_humid_val = c_vals[2];
+    lbl_dew_val   = c_vals[3];
+    lbl_wind_val  = c_vals[4];
+
+    /* Temperature line: a vertical run right of centre, moved in from the
+     * square face's x 621 so the circle does not clip it to a stub. */
+    const int tx = cy + 133;
+    met_tick_a = make_bg_rect(forecast_row, tx - 15, cy - 67, 44, 14, MET_TEAL);
+    met_tick_b = make_bg_rect(forecast_row, tx - 15, cy + 283, 44, 14,
+                              MET_TEAL);
+    for (int i = 0; i < NET_ROUND_STATIONS; i++) {
+        met_segs[i] = make_bg_rect(forecast_row, tx, cy - 60 + i * 58, 14, 58,
+                                   MET_TEAL);
+    }
+    for (int i = 0; i < NET_ROUND_STATIONS; i++) {
+        int sy = cy - 30 + i * 58;
+        met_dots[i] = make_station_dot(forecast_row, tx + 7, sy, 10, 4,
+                                       MET_TEAL);
+
+        forecast_lbls[i] = make_label(forecast_row, &lv_font_overpass_27,
+                                      MET_DIM, 0, "--");
+        lv_obj_set_pos(forecast_lbls[i], tx - 120, sy - 19);
+        lv_obj_add_flag(forecast_lbls[i], LV_OBJ_FLAG_HIDDEN);
+
+        forecast_temp_lbls[i] = make_label(forecast_row, &lv_font_overpass_27,
+                                           MET_INK, 0, "--");
+        lv_obj_set_pos(forecast_temp_lbls[i], tx - 60, sy - 19);
+        lv_obj_add_flag(forecast_temp_lbls[i], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Peak interchange, moved to the hottest of the six by the hook. */
+    met_peak_ring = make_container(forecast_row);
+    lv_obj_set_size(met_peak_ring, 36, 36);
+    lv_obj_set_pos(met_peak_ring, tx - 11, cy - 48);
+    lv_obj_set_style_radius(met_peak_ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(met_peak_ring, 5, 0);
+    lv_obj_set_style_border_color(met_peak_ring, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_border_opa(met_peak_ring, LV_OPA_COVER, 0);
+
+    met_peak_core = make_bg_rect(forecast_row, tx + 1, cy - 36, 12, 12,
+                                 0xFFFFFF);
+    lv_obj_set_style_radius(met_peak_core, LV_RADIUS_CIRCLE, 0);
+
+    clock_round_restyle = network_restyle;
+}
+
 /* ══ Dispatch ════════════════════════════════════════════════════════ */
 
 void clock_round_build(uint8_t layout)
@@ -686,8 +873,12 @@ void clock_round_build(uint8_t layout)
     case 4:
         build_round_blueprint();
         break;
+    case 6:
+        build_round_network();
+        break;
     /* Layout 5 (Transit Line) is removed on round and falls to Classic;
-     * layout 6 joins this switch in sub-plan task E4. */
+     * layouts 2 and 3 never reach here (build_content keeps the inset
+     * Broadside and Evensong builders). */
     default:
         build_round_classic();
         break;

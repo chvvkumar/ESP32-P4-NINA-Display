@@ -1743,6 +1743,7 @@ static void build_layout_transit(void) {
 }
 #endif /* !CONFIG_NINA_FAMILY_ROUND */
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * One Night Network legend swatch chip (colored by apply_theme).
  */
@@ -1947,6 +1948,7 @@ static void build_layout_network(void) {
         }
     }
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /* ── Forecast styling for the new layouts ────────────────────────────── */
 
