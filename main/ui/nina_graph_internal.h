@@ -87,7 +87,27 @@ extern lv_point_precise_t thresh_line_pts[][2];
 
 /* Cross-file function declarations */
 void back_btn_cb(lv_event_t *e);
+void point_btn_cb(lv_event_t *e);
+void scale_btn_cb(lv_event_t *e);
 void rebuild_controls(void);
+/* Apply scale option @p idx: chart range, y labels and threshold lines, or a
+ * data re-request when the option is Auto. Shared by the square scale pills and
+ * the round y-axis tap-cycle. */
+void graph_apply_scale(int idx);
+/* Advance to the next scale option. Attached to the y-axis layer by the round
+ * builder only; the square builder does not attach it, so square behaviour is
+ * unchanged. */
+void y_scale_cycle_cb(lv_event_t *e);
+/* Round composition (inscribed board 10). Compiled only on the round family. */
+void graph_round_fit(void);
+void graph_round_rebuild_controls(void);
+
+/* Controls-builder hook. NULL on square; graph_round_fit() installs
+ * graph_round_rebuild_controls so rebuild_controls() delegates instead of
+ * carrying a second family conditional (addendum section 6, rule 1; same seam
+ * as plan E's clock_round_restyle). */
+typedef void (*graph_controls_builder_t)(void);
+extern graph_controls_builder_t graph_controls_builder;
 void rebuild_legend(void);
 void show_loading_state(void);
 void apply_chart_theme(void);

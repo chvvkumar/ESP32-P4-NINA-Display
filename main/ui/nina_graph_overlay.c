@@ -472,6 +472,13 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
     lv_obj_center(btn_back_lbl);
 
     lv_obj_add_event_cb(btn_back, back_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    /* Round composition: re-place what was just built. The chart, its four
+     * series, the pre-created threshold lines and every callback above are the
+     * shipped ones on both families. */
+#if CONFIG_NINA_FAMILY_ROUND
+    graph_round_fit();
+#endif
 }
 
 /* -- Public API ---------------------------------------------------------- */

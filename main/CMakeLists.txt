@@ -37,6 +37,7 @@ set(nina_round_srcs
     ui/nina_image_page_round.c
     ui/settings_hub_round.c
     ui/settings_wifi_round.c
+    ui/nina_graph_round.c
     ui/lv_font_playfair_200.c
 )
 set(nina_square_srcs)
