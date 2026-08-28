@@ -176,6 +176,7 @@ lv_obj_t *make_console_cell(lv_obj_t *grid, int idx, const char *cap,
                             const lv_font_t *val_font, lv_obj_t **out_val);
 lv_obj_t *make_blu_callout(int x, int y, const lv_font_t *font);
 uint32_t  bar_color_for_temp(float temp_f, bool red_night);
+uint32_t  met_band_color(int band, bool red_night);
 float     to_fahrenheit(float temp, bool is_metric);
 
 void reg_dim_lbl(lv_obj_t *o);

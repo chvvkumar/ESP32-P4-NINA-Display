@@ -549,7 +549,7 @@ lv_obj_t *make_bg_rect(lv_obj_t *parent, int x, int y, int w, int h,
  * onto teal / gold / orange / red; Red Night uses the same dark-to-bright
  * red ramp as the Classic bars.
  */
-static uint32_t met_band_color(int band, bool red_night) {
+uint32_t met_band_color(int band, bool red_night) {
     static const uint32_t ramp[4]    = { MET_TEAL, MET_GOLD, MET_ORANGE, MET_RED };
     static const uint32_t ramp_rn[4] = { 0x500000, 0x800000, 0xC00000, 0xFF0000 };
     if (band < 0) band = 0;
@@ -2963,6 +2963,10 @@ void clock_page_apply_theme(void) {
             lv_obj_set_style_bg_color(met_terminus,
                                       lv_color_hex(p.primary), 0);
         }
+        /* Colours only: the round Night Network builder relies on bg_opa 0
+         * and border_width 0, LVGL's defaults after lv_obj_remove_style_all(),
+         * to keep met_panel borderless there (C1); do not add an opacity or
+         * width write here. */
         lv_obj_t *boxes[2] = { met_panel, met_legend };
         for (int b = 0; b < 2; b++) {
             if (boxes[b]) {

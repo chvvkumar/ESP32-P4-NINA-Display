@@ -727,10 +727,16 @@ static void network_restyle(const weather_data_t *wd, const struct tm *tm_now,
     /* The peak is over the SIX hours this line draws, not the ten
      * restyle_forecast() scanned. */
     int i_pk = 0;
-    float t_min = wd->hourly_temps[0];
-    float t_max = wd->hourly_temps[0];
     for (int i = 1; i < NET_ROUND_STATIONS; i++) {
         if (wd->hourly_temps[i] > wd->hourly_temps[i_pk]) i_pk = i;
+    }
+
+    /* The tick's band must match the range restyle_forecast() used for
+     * met_segs[]/met_dots[] (all FORECAST_BARS hours), not the six this line
+     * draws, or the tick reads a different colour than the segment it caps. */
+    float t_min = wd->hourly_temps[0];
+    float t_max = wd->hourly_temps[0];
+    for (int i = 1; i < FORECAST_BARS; i++) {
         if (wd->hourly_temps[i] < t_min) t_min = wd->hourly_temps[i];
         if (wd->hourly_temps[i] > t_max) t_max = wd->hourly_temps[i];
     }
@@ -751,14 +757,8 @@ static void network_restyle(const weather_data_t *wd, const struct tm *tm_now,
     if (met_tick_b) {
         float f5 = (wd->hourly_temps[NET_ROUND_STATIONS - 1] - t_min) / t_range;
         int band = (int)(f5 * 4.0f);
-        if (band > 3) band = 3;
-        if (band < 0) band = 0;
-        static const uint32_t ramp[4]    = { MET_TEAL, MET_GOLD,
-                                             MET_ORANGE, MET_RED };
-        static const uint32_t ramp_rn[4] = { 0x500000, 0x800000,
-                                             0xC00000, 0xFF0000 };
         lv_obj_set_style_bg_color(met_tick_b,
-            lv_color_hex(red_night ? ramp_rn[band] : ramp[band]), 0);
+            lv_color_hex(met_band_color(band, red_night)), 0);
     }
 }
 
@@ -830,16 +830,20 @@ static void build_round_network(void)
 
     /* Five conditions stations, each one caption + value row. The legend is
      * gone, so the stations centre on the panel instead of leaving its
-     * bottom-left corner free. */
-    static const int16_t c_dx[MET_CSTATIONS] = { -240, -120, 0, 120, 240 };
+     * bottom-left corner free. Board 5's symmetric x table put DEW under the
+     * temperature line (x cy+133) and station 1's dot; deviation: HI, LO, RH,
+     * DEW sit left of the line at a 115 px pitch and W sits alone to its
+     * right, each row content-sized so its widest string ("DEW -10", "W NNW
+     * 12") never clips. */
+    static const int16_t c_dx[MET_CSTATIONS] = { -282, -167, -52, 62, 225 };
     static const char *c_caps[MET_CSTATIONS] = { "HI", "LO", "RH", "DEW", "W" };
     lv_obj_t *c_vals[MET_CSTATIONS];
     for (int k = 0; k < MET_CSTATIONS; k++) {
         met_cdots[k] = make_station_dot(forecast_row, cy + c_dx[k], cy - 2,
                                         10, 4, MET_BLUE);
         lv_obj_t *row = make_container(forecast_row);
-        lv_obj_set_size(row, 120, LV_SIZE_CONTENT);
-        lv_obj_set_pos(row, cy + c_dx[k] - 60, cy + 19);
+        lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_align(row, LV_ALIGN_TOP_MID, c_dx[k], cy + 19);
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END,
                               LV_FLEX_ALIGN_CENTER);
