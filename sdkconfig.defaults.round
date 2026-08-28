@@ -2,3 +2,6 @@
 # (720x720), both JD9365. The resolution is resolved at runtime from the NVS
 # board/panel key. Layered on top of sdkconfig.defaults; family choice only.
 CONFIG_NINA_FAMILY_ROUND=y
+
+# Rim text on the round layouts (main/ui/ui_arclabel.c); LVGL default is y, pinned so a menuconfig flip cannot break the round build
+CONFIG_LV_USE_ARCLABEL=y

@@ -1,8 +1,8 @@
 set(LV_DEMO_DIR ../managed_components/lvgl__lvgl/demos)
 file(GLOB_RECURSE LV_DEMOS_SOURCES ${LV_DEMO_DIR}/*.c)
 
-idf_component_register(
-    SRCS main.c tasks.c axi_qos.c power_mgmt.c jpeg_utils.c stb_image.c image_red_remap.c perf_monitor.c ota_github.c
+set(nina_srcs
+    main.c tasks.c axi_qos.c power_mgmt.c jpeg_utils.c stb_image.c image_red_remap.c perf_monitor.c ota_github.c
          http_fetch.c poll_task.c image_page_poll.c radar_sites.c time_parse.c wifi_join.c
          board_detect.c board_profile.c screen_geom.c
          nina_connection.c nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
@@ -18,6 +18,25 @@ idf_component_register(
          ui/nina_wait_overlay.c
          ui/nina_empty_state.c
          ${LV_DEMOS_SOURCES}
+)
+
+# Family source lists. A round-only source (a *_round.c builder, a round-only
+# lv_font_*.c) is compiled into the round binary and does not exist in the
+# square one; that is what keeps two page sets out of one 8 MB OTA slot.
+# CONFIG_* is available here: main/CMakeLists.txt already tests
+# CONFIG_NINA_FAMILY_ROUND below, in the family/name guard.
+set(nina_round_srcs
+    ui/ui_arclabel.c
+)
+set(nina_square_srcs)
+if(CONFIG_NINA_FAMILY_ROUND)
+    list(APPEND nina_srcs ${nina_round_srcs})
+else()
+    list(APPEND nina_srcs ${nina_square_srcs})
+endif()
+
+idf_component_register(
+    SRCS ${nina_srcs}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
     # The 21 fragment_*.html tabs are embedded ONLY as their .gz twins (see
     # WEB_GZ_ASSETS below): the plain copies cost ~200 KB of flash and every
