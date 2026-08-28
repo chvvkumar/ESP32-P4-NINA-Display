@@ -92,7 +92,7 @@ static lv_obj_t   *s_fr_yes       = NULL;
 static lv_timer_t *s_fr_timer     = NULL;  /* 3 s enable gate on the destructive button */
 
 /* Pages segmented map (buttonmatrix) */
-static const char *s_seg_map[] = {"MANUAL", "HOME PAGE", "CYCLE", ""};
+static const char *s_seg_map[] = {"MANUAL", SCREEN_ROUND ? "HOME" : "HOME PAGE", "CYCLE", ""};
 
 /* ── Forward declarations ────────────────────────────────────────────── */
 static void build_hub_screen(lv_obj_t *parent);
@@ -521,22 +521,35 @@ static void build_hub_screen(lv_obj_t *parent)
         }
     }
 
-    /* BRIGHTNESS */
-    snprintf(buf, sizeof(buf), "SCREEN %d%%  TEXT %d%%", cfg->brightness, cfg->color_brightness);
+    /* BRIGHTNESS. Round board 8's shortened status ("60% / 100%" style): the
+     * two-value line at 28 px only fits the narrower round A-row box next to
+     * the "%" digits, not next to "SCREEN"/"TEXT". Square is the shipped
+     * literal, unchanged. */
+    snprintf(buf, sizeof(buf), SCREEN_ROUND ? "%d%% / %d%%" : "SCREEN %d%%  TEXT %d%%",
+             cfg->brightness, cfg->color_brightness);
     settings_hub_make_tile(grid, "BRIGHTNESS", buf, hub_tile_brightness_cb, HUB_TILE_W, HUB_TILE_H);
 
-    /* WIFI — live SSID + RSSI when the station link is up */
+    /* WIFI: live SSID + RSSI when the station link is up. Round board 8
+     * drops the RSSI (the SSID alone already reaches the tile's dotted-name
+     * bound); the two formats take a different argument count, so this is an
+     * if, not a format-string ternary. Square path is the shipped call,
+     * unchanged. */
     wifi_ap_record_t ap = {0};
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        snprintf(buf, sizeof(buf), "%.32s  %d dBm", (const char *)ap.ssid, (int)ap.rssi);
+        if (SCREEN_ROUND) {
+            snprintf(buf, sizeof(buf), "%.32s", (const char *)ap.ssid);
+        } else {
+            snprintf(buf, sizeof(buf), "%.32s  %d dBm", (const char *)ap.ssid, (int)ap.rssi);
+        }
     } else {
         snprintf(buf, sizeof(buf), "Not connected");
     }
     settings_hub_make_tile(grid, "WIFI", buf, hub_tile_wifi_cb, HUB_TILE_W, HUB_TILE_H);
 
-    /* PAGES — nav mode summary */
+    /* PAGES: nav mode summary. Round board 8 drops "pages" off CYCLE and
+     * shortens the HOME PAGE label preview; square strings unchanged. */
     if (cfg->auto_rotate_enabled) {
-        snprintf(buf, sizeof(buf), "Cycle: %d pages",
+        snprintf(buf, sizeof(buf), SCREEN_ROUND ? "Cycle: %d" : "Cycle: %d pages",
                  hub_order2_count(cfg->auto_rotate_order2));
     } else if (s_pages_tab == 0) {
         /* MANUAL was chosen this hub session (both non-cycle tabs persist as
@@ -544,13 +557,18 @@ static void build_hub_screen(lv_obj_t *parent)
         snprintf(buf, sizeof(buf), "Manual");
     } else {
         const page_ref_entry_t *pe = page_ref_by_id((page_ref_t)cfg->active_page_override);
-        snprintf(buf, sizeof(buf), "Home: %.24s", pe ? pe->label : "Summary");
+        snprintf(buf, sizeof(buf), SCREEN_ROUND ? "Home: %.10s" : "Home: %.24s",
+                 pe ? pe->label : "Summary");
     }
     settings_hub_make_tile(grid, "PAGES", buf, hub_tile_pages_cb, HUB_TILE_W, HUB_TILE_H);
 
-    /* DEMO MODE — the tile is the toggle; the ON state must be unmistakable */
+    /* DEMO MODE: the tile is the toggle; the ON state must be unmistakable.
+     * Round board 8 names the tile "DEMO" in either state (the status line
+     * below already carries "OFF" / "Tap to exit", and the active header
+     * ring is the unmistakable cue); square keeps its two shipped literals. */
     lv_obj_t *tile_demo = settings_hub_make_tile(grid,
-                                                 cfg->demo_mode ? "DEMO MODE ON" : "DEMO MODE",
+                                                 SCREEN_ROUND ? "DEMO"
+                                                     : (cfg->demo_mode ? "DEMO MODE ON" : "DEMO MODE"),
                                                  cfg->demo_mode ? "Tap to exit" : "OFF",
                                                  hub_tile_demo_cb, HUB_TILE_W, HUB_TILE_H);
     if (cfg->demo_mode && current_theme) {
@@ -563,9 +581,10 @@ static void build_hub_screen(lv_obj_t *parent)
         }
     }
 
-    /* MORE */
-    settings_hub_make_tile(grid, "MORE", "rotate / reboot / info", hub_tile_more_cb,
-                           HUB_TILE_W, HUB_TILE_H);
+    /* MORE. Round drops "/ info" (board 8); square keeps the shipped literal. */
+    settings_hub_make_tile(grid, "MORE",
+                           SCREEN_ROUND ? "rotate / reboot" : "rotate / reboot / info",
+                           hub_tile_more_cb, HUB_TILE_W, HUB_TILE_H);
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -1029,7 +1048,13 @@ static void pages_home_row_cb(lv_event_t *e)
         lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->bento_border), 0);
         lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->progress_color), LV_STATE_PRESSED);
     }
-    lv_obj_t *lbl_back = ui_label(btn, LV_SYMBOL_LEFT " BACK", &lv_font_montserrat_24,
+    /* Built after settings_hub_round_fit() has already run for this screen
+     * (the picker is a tap-triggered overlay, not part of the Pages screen's
+     * own tree), so the round sweep can never reach this label: raise it here
+     * with the one ternary the addendum's rule 3 allows. Square is the
+     * shipped montserrat_24, unchanged. */
+    lv_obj_t *lbl_back = ui_label(btn, LV_SYMBOL_LEFT " BACK",
+                                  SCREEN_ROUND ? &lv_font_montserrat_28 : &lv_font_montserrat_24,
                                   UI_THEME_COLOR(text_color));
     lv_obj_center(lbl_back);
     lv_obj_add_event_cb(btn, home_pick_cancel_cb, LV_EVENT_CLICKED, NULL);

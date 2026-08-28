@@ -63,8 +63,13 @@ static void fit_tile(lv_obj_t *tile, int w, int dx, int dy)
 
     lv_obj_t *name = lv_obj_get_child(tile, 0);
     if (name) {
+        /* montserrat_36 is the shipped tile face on both families and fits
+         * every A/C-row name ("BRIGHTNESS" 239 px, "THEME" 132, "MORE" 114 in
+         * the 246 px box); using it instead of a round-only montserrat_34
+         * keeps that font object out of the round link entirely (about 53 KB
+         * of glyph bitmap and kerning tables it was the only reference to). */
         lv_obj_set_style_text_font(name,
-            (w >= HUBR_A_W) ? &lv_font_montserrat_34 : &lv_font_montserrat_28, 0);
+            (w >= HUBR_A_W) ? &lv_font_montserrat_36 : &lv_font_montserrat_28, 0);
         lv_obj_set_width(name, w - 24);
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
@@ -176,23 +181,30 @@ static void fit_theme_screen(lv_obj_t *screen)
     }
 }
 
-/* Raise every direct-child label still using an under-floor Montserrat to 28.
- * Compares font POINTERS, not line heights: lv_font_montserrat_24's line height
- * is already 29, so a height test would pass a 24 px face. Public, because the
- * WiFi fit passes in settings_wifi_round.c need the same sweep. */
+/* Raise every label still using an under-floor Montserrat to 28, recursively:
+ * the cycle chip labels and the More screen's info-row keys are grandchildren
+ * of the screen (chip inside the chip grid, key inside the row), so a
+ * direct-children-only walk never reaches them. Compares font POINTERS, not
+ * line heights: lv_font_montserrat_24's line height is already 29, so a
+ * height test would pass a 24 px face. Public, because the WiFi fit passes in
+ * settings_wifi_round.c need the same sweep. */
 void settings_hub_round_raise_small_labels(lv_obj_t *cont)
 {
     if (!cont) return;
     uint32_t n = lv_obj_get_child_count(cont);
     for (uint32_t i = 0; i < n; i++) {
         lv_obj_t *c = lv_obj_get_child(cont, i);
-        if (!lv_obj_check_type(c, &lv_label_class)) continue;
-        const lv_font_t *f = lv_obj_get_style_text_font(c, LV_PART_MAIN);
-        if (f == &lv_font_montserrat_24 || f == &lv_font_montserrat_20 ||
-            f == &lv_font_montserrat_18 || f == &lv_font_montserrat_16 ||
-            f == &lv_font_montserrat_14 || f == &lv_font_montserrat_12) {
-            lv_obj_set_style_text_font(c, &lv_font_montserrat_28, 0);
+        if (lv_obj_check_type(c, &lv_label_class)) {
+            const lv_font_t *f = lv_obj_get_style_text_font(c, LV_PART_MAIN);
+            if (f == &lv_font_montserrat_26 || f == &lv_font_montserrat_24 ||
+                f == &lv_font_montserrat_22 || f == &lv_font_montserrat_20 ||
+                f == &lv_font_montserrat_18 || f == &lv_font_montserrat_16 ||
+                f == &lv_font_montserrat_14 || f == &lv_font_montserrat_12) {
+                lv_obj_set_style_text_font(c, &lv_font_montserrat_28, 0);
+            }
+            continue;
         }
+        settings_hub_round_raise_small_labels(c);
     }
 }
 
@@ -215,13 +227,27 @@ static void fit_flex_screen(lv_obj_t *screen)
 
     settings_hub_round_header_font(hub_header_obj);
 
+    /* A grow child (the Pages screen's CYCLE chip grid) would otherwise get
+     * track_main_size - track_fix_main_size from LVGL's flex layout, which on
+     * this padded, scrolling column is a sliver (32 px at 720) that never
+     * shows a whole chip. Let the screen's own vertical scroll carry the
+     * content instead: zero the grow and size the child to its natural
+     * height. Brightness and More have no grow children, so this is a no-op
+     * there. */
+    uint32_t gn = lv_obj_get_child_count(screen);
+    for (uint32_t i = 0; i < gn; i++) {
+        lv_obj_t *c = lv_obj_get_child(screen, i);
+        if (lv_obj_get_style_flex_grow(c, LV_PART_MAIN) > 0) {
+            lv_obj_set_flex_grow(c, 0);
+            lv_obj_set_height(c, LV_SIZE_CONTENT);
+        }
+    }
+
     /* 27 px floor sweep. These screens are flex columns of shipped widgets and
      * three of them still carry lv_font_montserrat_24 text after the padding
      * pass: the brightness hint line, the More screen's "Everything else:"
-     * caption, and the "All 3 slots full" note (WiFi home, which routes here
-     * through fit_list). Walk the screen's direct children and raise any label
-     * still under the floor; a walk is cheaper and less brittle than three
-     * child-index lookups across three different builders. */
+     * caption, and the cycle chip labels and info-row keys the recursive walk
+     * now reaches. */
     settings_hub_round_raise_small_labels(screen);
 }
 

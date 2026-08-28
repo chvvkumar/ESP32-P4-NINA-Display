@@ -44,7 +44,7 @@ void settings_hub_round_fit(lv_obj_t *screen, hub_screen_t which);
  *  including the WiFi ones in settings_wifi_round.c. */
 void settings_hub_round_header_font(lv_obj_t *header);
 
-/** Raise every direct-child label of @p cont still using an under-floor
+/** Raise every label under @p cont, at any depth, still using an under-floor
  *  Montserrat face to lv_font_montserrat_28 (addendum section 5). Compares font
  *  pointers, not line heights. Shared with settings_wifi_round.c. */
 void settings_hub_round_raise_small_labels(lv_obj_t *cont);
