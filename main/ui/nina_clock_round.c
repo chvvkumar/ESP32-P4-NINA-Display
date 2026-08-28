@@ -34,6 +34,7 @@ LV_FONT_DECLARE(lv_font_playfair_200)      /* round Classic hero, digits + colon
 extern const lv_font_t lv_font_playfair_90;
 extern const lv_font_t lv_font_overpass_27;
 LV_FONT_DECLARE(lv_font_saira_thin_240)    /* round Console 92 hero */
+LV_FONT_DECLARE(lv_font_stencil_190)       /* round Blueprint hero */
 /* Full ASCII fallback: the Playfair cuts carry no minus sign. */
 LV_FONT_DECLARE(lv_font_saira_light_46)
 
@@ -438,6 +439,242 @@ static void build_round_console(void)
     clock_round_restyle = console_restyle;
 }
 
+/* ══ Face 4, Blueprint ═══════════════════════════════════════════════ */
+
+/* Ten radial forecast bars plus their fixed outward ticks. lv_line keeps a
+ * pointer to its points, so both stores are file static. */
+static lv_point_precise_t s_blu_ray_pts[FORECAST_BARS][2];
+static lv_point_precise_t s_blu_tick_pts[FORECAST_BARS][2];
+static lv_obj_t *s_blu_tick[FORECAST_BARS];
+
+/** Dial angle of forecast bar @p i: the 135 to 225 degree bottom sector. */
+static float blu_ray_deg(int i)
+{
+    return 135.0f + (float)i * 9.0f + 4.5f;
+}
+
+static void blueprint_restyle(const weather_data_t *wd, const struct tm *tm_now,
+                              bool red_night, bool is_metric)
+{
+    (void)tm_now;
+    (void)is_metric;
+
+    const int ri = ui_rim_radius() - 26;
+    uint32_t ink  = red_night ? current_theme->text_color  : BLU_HI;
+    uint32_t dim  = red_night ? current_theme->label_color : BLU_DIM;
+    uint32_t line = red_night ? current_theme->label_color : BLU_LINE;
+
+    for (int i = 0; i < FORECAST_BARS; i++) {
+        if (s_blu_tick[i]) {
+            lv_obj_set_style_line_color(s_blu_tick[i], lv_color_hex(line), 0);
+        }
+    }
+    if (!clk_blu_ray[0]) return;
+
+    if (!wd->valid) {
+        for (int i = 0; i < FORECAST_BARS; i++) {
+            lv_obj_add_flag(clk_blu_ray[i], LV_OBJ_FLAG_HIDDEN);
+        }
+        if (clk_blu_peak_tick) {
+            lv_obj_add_flag(clk_blu_peak_tick, LV_OBJ_FLAG_HIDDEN);
+        }
+        if (clk_blu_max_lbl) {
+            lv_obj_add_flag(clk_blu_max_lbl, LV_OBJ_FLAG_HIDDEN);
+        }
+        return;
+    }
+
+    float t_min = wd->hourly_temps[0];
+    float t_max = wd->hourly_temps[0];
+    int i_pk = 0;
+    for (int i = 1; i < FORECAST_BARS; i++) {
+        if (wd->hourly_temps[i] < t_min) t_min = wd->hourly_temps[i];
+        if (wd->hourly_temps[i] > t_max) t_max = wd->hourly_temps[i];
+        if (wd->hourly_temps[i] > wd->hourly_temps[i_pk]) i_pk = i;
+    }
+    float t_range = t_max - t_min;
+    if (t_range < 1.0f) t_range = 1.0f;
+
+    for (int i = 0; i < FORECAST_BARS; i++) {
+        float len = 22.0f + 46.0f * ((wd->hourly_temps[i] - t_min) / t_range);
+        round_pt(blu_ray_deg(i), (float)ri, &s_blu_ray_pts[i][0]);
+        round_pt(blu_ray_deg(i), (float)ri - len, &s_blu_ray_pts[i][1]);
+        lv_line_set_points(clk_blu_ray[i], s_blu_ray_pts[i], 2);
+        lv_obj_set_style_line_color(clk_blu_ray[i],
+            lv_color_hex(i == i_pk ? ink : dim), 0);
+        lv_obj_remove_flag(clk_blu_ray[i], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* MAX callout, hanging inward off the tallest bar's tip. This label is
+     * a round-only widget, so the hook owns its text as well as its place. */
+    const int cy = screen_center();
+    float len_pk = 22.0f + 46.0f *
+                   ((wd->hourly_temps[i_pk] - t_min) / t_range);
+    lv_point_precise_t tip;
+    round_pt(blu_ray_deg(i_pk), (float)ri - len_pk - 10.0f, &tip);
+    int px = (int)tip.x;
+    int py = (int)tip.y;
+
+    if (clk_blu_peak_tick) {
+        lv_obj_set_pos(clk_blu_peak_tick, px - 13, py);
+        lv_obj_set_style_bg_color(clk_blu_peak_tick, lv_color_hex(ink), 0);
+        lv_obj_remove_flag(clk_blu_peak_tick, LV_OBJ_FLAG_HIDDEN);
+    }
+    if (clk_blu_max_lbl) {
+        char mbuf[48];
+        snprintf(mbuf, sizeof(mbuf), "MAX %.0f\xc2\xb0",
+                 wd->hourly_temps[i_pk]);
+        lv_label_set_text(clk_blu_max_lbl, mbuf);
+        /* An edge bar (0 or 9) points sideways, so its tip is high enough that
+         * the label would land inside the 2 x 2 callout block, whose second
+         * row ends at about cy + 174. Clamp the label down to just under it;
+         * the tick stays on the tip. The clamped band (cy + 184 to cy + 223)
+         * is above the bar tips (r 248) and inside the rim. */
+        int ly = py - 46;
+        if (ly < cy + 184) ly = cy + 184;
+        lv_obj_set_pos(clk_blu_max_lbl, px - 70, ly);
+        lv_obj_set_style_text_color(clk_blu_max_lbl, lv_color_hex(ink), 0);
+        lv_obj_remove_flag(clk_blu_max_lbl, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+/**
+ * Blueprint: the two concentric sheet frames become two concentric circles,
+ * the registration crosshairs walk to the four cardinals, the header and the
+ * dimension chain keep their widgets on the inner circle's chords, the seven
+ * leader-dot callouts collapse to a 2 x 2 block, and the elevation chart
+ * becomes ten radial bars hanging inward from the inner frame over the 135 to
+ * 225 degree sector. inscribed_batch3.md board 3 plus radial_batch3.md
+ * board 3 item 5.
+ */
+static void build_round_blueprint(void)
+{
+    lv_obj_set_style_pad_all(clock_root, 0, 0);
+    lv_obj_set_style_pad_row(clock_root, 0, 0);
+    lv_obj_set_layout(clock_root, LV_LAYOUT_NONE);
+    lv_obj_set_style_bg_color(clock_root, lv_color_hex(BLU_BG), 0);
+
+    const int rs = ui_rim_radius();
+    const int ri = rs - 26;
+    const int cy = screen_center();
+
+    /* Two sheet frames, now circles: 684 and 632 px at 720. */
+    blu_frame_o = make_container(clock_root);
+    lv_obj_set_size(blu_frame_o, 2 * rs, 2 * rs);
+    lv_obj_center(blu_frame_o);
+    lv_obj_set_style_radius(blu_frame_o, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(blu_frame_o, 2, 0);
+    lv_obj_set_style_border_color(blu_frame_o, lv_color_hex(BLU_LINE), 0);
+    lv_obj_set_style_border_opa(blu_frame_o, LV_OPA_COVER, 0);
+
+    blu_frame_i = make_container(clock_root);
+    lv_obj_set_size(blu_frame_i, 2 * ri, 2 * ri);
+    lv_obj_center(blu_frame_i);
+    lv_obj_set_style_radius(blu_frame_i, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(blu_frame_i, 1, 0);
+    lv_obj_set_style_border_color(blu_frame_i, lv_color_hex(BLU_DIM), 0);
+    lv_obj_set_style_border_opa(blu_frame_i, LV_OPA_COVER, 0);
+
+    /* Registration crosshairs: sheet corners to the four cardinals. */
+    static const int8_t card_dx[4] = {  0,  1,  0, -1 };
+    static const int8_t card_dy[4] = { -1,  0,  1,  0 };
+    for (int i = 0; i < 4; i++) {
+        int px = cy + (int)card_dx[i] * rs;
+        int py = cy + (int)card_dy[i] * rs;
+        reg_ter_bg(make_bg_rect(clock_root, px, py - 8, 1, 17, BLU_LINE));
+        reg_ter_bg(make_bg_rect(clock_root, px - 8, py, 17, 1, BLU_LINE));
+    }
+
+    /* Header on the inner circle's chord at dy -206. The vertical budget is
+     * set by the real font, not by the mock's browser stand-in: stencil_190
+     * has a 157 px line box whose ink fills it, so a hero centred at -96 spans
+     * dy -174.5 .. -17.5, and overpass_27's cap ink at dy -206 spans
+     * -206 .. -187. That leaves 12 px between the header and the digits, and
+     * the chain group below moves down 12 px to keep its own clearance.
+     * Inner-frame half chord at dy -206: sqrt(316^2 - 206^2) = 239. */
+    int hx = cy - (int)sqrtf((float)(ri * ri - 206 * 206)) + 10;
+    lbl_date = make_label(clock_root, &lv_font_overpass_27, BLU_LINE, 3, "---");
+    lv_obj_align(lbl_date, LV_ALIGN_TOP_LEFT, hx, cy - 206);
+    lv_obj_t *rev = make_label(clock_root, &lv_font_overpass_27, BLU_DIM, 3,
+                               "REV C");
+    lv_obj_align(rev, LV_ALIGN_TOP_RIGHT, -hx, cy - 206);
+    reg_dim_lbl(rev);
+
+    /* Hero stencil time, centred. */
+    lbl_time = make_label(clock_root, &lv_font_stencil_190, BLU_HI, 2, "");
+    lv_obj_align(lbl_time, LV_ALIGN_CENTER, 0, -96);
+
+    lbl_ampm = make_label(clock_root, &lv_font_overpass_27, BLU_LINE, 2, "");
+    /* Clear of the hero ink, which is about 373 px wide (half 187). */
+    lv_obj_align(lbl_ampm, LV_ALIGN_TOP_MID, 224, cy - 170);
+    lv_obj_set_style_border_width(lbl_ampm, 1, 0);
+    lv_obj_set_style_border_color(lbl_ampm, lv_color_hex(BLU_LINE), 0);
+    lv_obj_set_style_border_opa(lbl_ampm, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_ver(lbl_ampm, 4, 0);
+    lv_obj_set_style_pad_hor(lbl_ampm, 8, 0);
+
+    /* Dimension chain: the same widgets at the same offsets relative to the
+     * chain line, re-centred on the panel and dropped 12 px so the extension
+     * rects clear the stencil ink at dy -17.5. */
+    reg_dim_bg(make_bg_rect(clock_root, cy - 197, cy - 12, 1, 26, BLU_DIM));
+    reg_dim_bg(make_bg_rect(clock_root, cy + 196, cy - 12, 1, 26, BLU_DIM));
+    reg_ter_bg(make_bg_rect(clock_root, cy - 186, cy + 22, 372, 1, BLU_LINE));
+
+    for (int a = 0; a < 2; a++) {
+        blu_arrow[a] = lv_line_create(clock_root);
+        lv_obj_clear_flag(blu_arrow[a], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_line_width(blu_arrow[a], 2, 0);
+        lv_obj_set_style_line_color(blu_arrow[a], lv_color_hex(BLU_LINE), 0);
+    }
+    lv_line_set_points(blu_arrow[0], blu_arr_l_pts, 3);
+    lv_obj_set_pos(blu_arrow[0], cy - 196, cy + 18);
+    lv_line_set_points(blu_arrow[1], blu_arr_r_pts, 3);
+    lv_obj_set_pos(blu_arrow[1], cy + 186, cy + 18);
+
+    blu_dimlbl = make_label(clock_root, &lv_font_overpass_27, BLU_LINE, 1,
+                            "---");
+    lv_obj_set_pos(blu_dimlbl, cy - 197, cy + 32);
+    lv_obj_set_width(blu_dimlbl, 394);
+    lv_obj_set_style_text_align(blu_dimlbl, LV_TEXT_ALIGN_CENTER, 0);
+    reg_ter_lbl(blu_dimlbl);
+
+    /* Four callouts in a 2 x 2 block. Hi/lo, dew and UV are dropped: their
+     * labels stay NULL and the page skips them. */
+    lbl_temp      = make_blu_callout(cy - 210, cy + 82, &lv_font_saira_light_46);
+    lbl_cond      = make_blu_callout(cy + 40,  cy + 82, &lv_font_overpass_27);
+    lv_obj_set_width(lbl_cond, 172);
+    lv_label_set_long_mode(lbl_cond, LV_LABEL_LONG_DOT);
+    lbl_humid_val = make_blu_callout(cy - 210, cy + 130, &lv_font_overpass_27);
+    lbl_wind_val  = make_blu_callout(cy + 40,  cy + 130, &lv_font_overpass_27);
+
+    /* Elevation chart: ten 18 px radial bars hanging inward from the inner
+     * frame, each with a fixed 6 px outward tick. Lengths and colours come
+     * from blueprint_restyle(). */
+    for (int i = 0; i < FORECAST_BARS; i++) {
+        clk_blu_ray[i] = round_ray(clock_root, 18, BLU_DIM);
+        round_pt(blu_ray_deg(i), (float)ri, &s_blu_ray_pts[i][0]);
+        round_pt(blu_ray_deg(i), (float)ri, &s_blu_ray_pts[i][1]);
+        lv_line_set_points(clk_blu_ray[i], s_blu_ray_pts[i], 2);
+        lv_obj_add_flag(clk_blu_ray[i], LV_OBJ_FLAG_HIDDEN);
+
+        round_pt(blu_ray_deg(i), (float)ri, &s_blu_tick_pts[i][0]);
+        round_pt(blu_ray_deg(i), (float)(ri + 6), &s_blu_tick_pts[i][1]);
+        s_blu_tick[i] = round_ray(clock_root, 1, BLU_LINE);
+        lv_line_set_points(s_blu_tick[i], s_blu_tick_pts[i], 2);
+    }
+
+    clk_blu_peak_tick = make_bg_rect(clock_root, 0, 0, 26, 1, BLU_HI);
+    lv_obj_add_flag(clk_blu_peak_tick, LV_OBJ_FLAG_HIDDEN);
+
+    clk_blu_max_lbl = make_label(clock_root, &lv_font_overpass_27, BLU_HI, 0,
+                                 "MAX --");
+    lv_obj_set_width(clk_blu_max_lbl, 140);
+    lv_obj_set_style_text_align(clk_blu_max_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_add_flag(clk_blu_max_lbl, LV_OBJ_FLAG_HIDDEN);
+
+    clock_round_restyle = blueprint_restyle;
+}
+
 /* ══ Dispatch ════════════════════════════════════════════════════════ */
 
 void clock_round_build(uint8_t layout)
@@ -446,8 +683,11 @@ void clock_round_build(uint8_t layout)
     case 1:
         build_round_console();
         break;
+    case 4:
+        build_round_blueprint();
+        break;
     /* Layout 5 (Transit Line) is removed on round and falls to Classic;
-     * layouts 4 and 6 join this switch in sub-plan tasks E3 and E4. */
+     * layout 6 joins this switch in sub-plan task E4. */
     default:
         build_round_classic();
         break;

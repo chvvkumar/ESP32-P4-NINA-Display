@@ -1464,6 +1464,7 @@ lv_obj_t *make_blu_callout(int x, int y, const lv_font_t *font) {
     return make_label(row, font, BLU_HI, 0, "--");
 }
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Layout 4 — Blueprint. Cyanotype drafting sheet: double frame with
  * registration crosshairs, stencil hero time with an arrowed dimension
@@ -1596,6 +1597,7 @@ static void build_layout_blueprint(void) {
     lv_obj_set_pos(blu_max_lbl, 50, 41);
     lv_obj_set_width(blu_max_lbl, 140);
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 #if !CONFIG_NINA_FAMILY_ROUND
 /**
