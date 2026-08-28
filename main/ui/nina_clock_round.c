@@ -545,14 +545,21 @@ static void blueprint_restyle(const weather_data_t *wd, const struct tm *tm_now,
         snprintf(mbuf, sizeof(mbuf), "MAX %.0f\xc2\xb0",
                  wd->hourly_temps[i_pk]);
         lv_label_set_text(clk_blu_max_lbl, mbuf);
-        /* An edge bar (0 or 9) points sideways, so its tip is high enough that
-         * the label would land inside the 2 x 2 callout block, whose second
-         * row ends at about cy + 174. Clamp the label down to just under it;
-         * the tick stays on the tip. The clamped band (cy + 184 to cy + 223)
-         * is above the bar tips (r 248) and inside the rim. */
+        /* Bars 2..7 hang the label 46 px above and 70 px left of the tip
+         * (half the 140 px box). The four edge bars (0, 1, 8, 9) point low
+         * enough that their own ray, or a neighbour's end cap, crosses that
+         * hanging slot, so those four park the label in a fixed centred slot
+         * below the dimension chain instead: cx - 70 .. cx + 70,
+         * cy + 184 .. cy + 223. No ray enters that box at 720 or 800 (the
+         * nearest, ray 1 / ray 8, stays past cx +/- 130 wherever it overlaps
+         * the box's y band). The peak tick always stays on the tip. */
+        int lx = px - 70;
         int ly = py - 46;
-        if (ly < cy + 184) ly = cy + 184;
-        lv_obj_set_pos(clk_blu_max_lbl, px - 70, ly);
+        if (i_pk < 2 || i_pk > 7) {
+            lx = cy - 70;
+            ly = cy + 184;
+        }
+        lv_obj_set_pos(clk_blu_max_lbl, lx, ly);
         lv_obj_set_style_text_color(clk_blu_max_lbl, lv_color_hex(ink), 0);
         lv_obj_remove_flag(clk_blu_max_lbl, LV_OBJ_FLAG_HIDDEN);
     }
@@ -569,6 +576,13 @@ static void blueprint_restyle(const weather_data_t *wd, const struct tm *tm_now,
  */
 static void build_round_blueprint(void)
 {
+    /* Stale from a prior Blueprint build; the loop below overwrites every
+     * slot before this build returns, but a rebuild-to-another-face leaves
+     * dangling handles until then, same hygiene as review_impl_E2 M-2. */
+    for (int i = 0; i < FORECAST_BARS; i++) {
+        s_blu_tick[i] = NULL;
+    }
+
     lv_obj_set_style_pad_all(clock_root, 0, 0);
     lv_obj_set_style_pad_row(clock_root, 0, 0);
     lv_obj_set_layout(clock_root, LV_LAYOUT_NONE);
@@ -605,19 +619,21 @@ static void build_round_blueprint(void)
         reg_ter_bg(make_bg_rect(clock_root, px - 8, py, 17, 1, BLU_LINE));
     }
 
-    /* Header on the inner circle's chord at dy -206. The vertical budget is
-     * set by the real font, not by the mock's browser stand-in: stencil_190
-     * has a 157 px line box whose ink fills it, so a hero centred at -96 spans
-     * dy -174.5 .. -17.5, and overpass_27's cap ink at dy -206 spans
-     * -206 .. -187. That leaves 12 px between the header and the digits, and
-     * the chain group below moves down 12 px to keep its own clearance.
-     * Inner-frame half chord at dy -206: sqrt(316^2 - 206^2) = 239. */
-    int hx = cy - (int)sqrtf((float)(ri * ri - 206 * 206)) + 10;
+    /* Header on the inner circle's chord at dy -216, lifted 10 px off the
+     * naive -206 chord so overpass_27's cap ink clears the hero digits.
+     * overpass_27 draws its cap ink 10 px below the label top and 19 px
+     * tall, so a label at dy -216 inks dy -206 .. -188. stencil_190 has a
+     * 157 px line box whose ink fills it, so the hero centred at -96 spans
+     * dy -175 .. -18. That leaves 12 px between the header ink and the
+     * digits, and the chain group below moves down 12 px to keep its own
+     * clearance. Inner-frame half chord at dy -216: sqrt(316^2 - 216^2) =
+     * 231 at 720 (280 at 800), giving hx 140 at 720 / 130 at 800. */
+    int hx = cy - (int)sqrtf((float)(ri * ri - 216 * 216)) + 10;
     lbl_date = make_label(clock_root, &lv_font_overpass_27, BLU_LINE, 3, "---");
-    lv_obj_align(lbl_date, LV_ALIGN_TOP_LEFT, hx, cy - 206);
+    lv_obj_align(lbl_date, LV_ALIGN_TOP_LEFT, hx, cy - 216);
     lv_obj_t *rev = make_label(clock_root, &lv_font_overpass_27, BLU_DIM, 3,
                                "REV C");
-    lv_obj_align(rev, LV_ALIGN_TOP_RIGHT, -hx, cy - 206);
+    lv_obj_align(rev, LV_ALIGN_TOP_RIGHT, -hx, cy - 216);
     reg_dim_lbl(rev);
 
     /* Hero stencil time, centred. */
@@ -625,7 +641,7 @@ static void build_round_blueprint(void)
     lv_obj_align(lbl_time, LV_ALIGN_CENTER, 0, -96);
 
     lbl_ampm = make_label(clock_root, &lv_font_overpass_27, BLU_LINE, 2, "");
-    /* Clear of the hero ink, which is about 373 px wide (half 187). */
+    /* Clear of the hero ink, which is about 384 px wide (half 192). */
     lv_obj_align(lbl_ampm, LV_ALIGN_TOP_MID, 224, cy - 170);
     lv_obj_set_style_border_width(lbl_ampm, 1, 0);
     lv_obj_set_style_border_color(lbl_ampm, lv_color_hex(BLU_LINE), 0);
