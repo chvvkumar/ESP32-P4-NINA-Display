@@ -1178,9 +1178,6 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             set_text_color_cached(sc->lbl_target, &sc->cached_target_color, tgt_color);
         }
 
-        /* The ring is this rig's progress, filter colour and sub count. */
-        if (sc->ring.cont) nina_subbar_update(&sc->ring, d, i, gb);
-
         /* Progress bar + percentage — monotonic-timer exposure model scaled to
          * 0-100 (ports update_exposure_arc from nina_dashboard_update.c). Smooth
          * progress between polls is driven by summary_bar_interp_cb; this block
@@ -1360,6 +1357,12 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                 }
             }
         }
+
+        /* The ring is this rig's progress, filter colour and sub count. Runs
+         * after the exposure-model block above so a same-cycle finished-edge
+         * snap lands before this update moves the fill on (I-1), matching the
+         * Dashboard's order in nina_dashboard_update.c. */
+        if (sc->ring.cont) nina_subbar_update(&sc->ring, d, i, gb);
 
         /* Progress bar color: filter color or theme progress */
         if (sc->bar_progress) {

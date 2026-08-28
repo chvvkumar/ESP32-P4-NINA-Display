@@ -20,7 +20,6 @@
 #include <string.h>
 
 #include "app_config.h"
-#include "display_defs.h"
 #include "themes.h"
 #include "ui_dial.h"
 #include "ui_helpers.h"
@@ -198,7 +197,7 @@ void nina_summary_round_create_card(summary_card_t *sc, lv_obj_t *parent, int sl
         app_config_apply_brightness(current_theme->rms_color, gb), &sc->rms_dot);
     sc->lbl_rms_val = sr_label(sc->card, SR_FONT_VALUE,
         app_config_apply_brightness(current_theme->rms_color, gb), "--");
-    lv_obj_set_pos(sc->lbl_rms_val, SR_BULL_INSET + SR_BULL_R + 12, SR_BULL_DY - 26);
+    lv_obj_set_pos(sc->lbl_rms_val, SR_BULL_INSET + SR_BULL_R + 12, SR_BULL_DY - 22);
 
     sc->hfr_bull = sr_bullseye(sc->card, 2 * half - SR_BULL_INSET - SR_BULL_R,
                                SR_BULL_DY - SR_BULL_R,
