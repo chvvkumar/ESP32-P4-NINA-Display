@@ -269,11 +269,16 @@ static lv_obj_t *s_row_dist[ADSB_BOARD_ROWS];
 static lv_obj_t *s_scope_contacts_ring;         /* within/tracked as a rim arc  */
 static lv_obj_t *s_scope_rim_label;             /* range label, an arclabel     */
 static lv_obj_t *s_scope_contacts_arclabel;     /* CONTACTS caption, arclabel   */
-/* s_row_dot[] (the per-contact distance dot) arrives with the round Board in
- * task D5, together with its only reader: it is per-contact coloured by
- * fill_board(), so apply_colors() never touches it and declaring it here would
- * be an unused static on both families. */
+/* s_row_dot[] is per-contact coloured by fill_board() (distance over range on
+ * the rail, ADSB_RAMP bucket for the colour), so apply_colors() never touches
+ * it. It is also the round Board's own family test: NULL on square. */
+static lv_obj_t *s_row_dot[ADSB_BOARD_ROWS];    /* distance dot on the rail     */
 static lv_obj_t *s_row_rail[ADSB_BOARD_ROWS];   /* 2 px distance rail           */
+/* Screen position of each round Board row's distance dot, in panel coordinates.
+ * Written by fill_board(), read by the Board mark loop in the same pass:
+ * lv_obj_get_x() would still be reporting the previous layout's coords. */
+static int16_t s_row_dot_cx[ADSB_BOARD_ROWS];
+static int16_t s_row_dot_cy[ADSB_BOARD_ROWS];
 static lv_obj_t *s_lbl_legend;                  /* one range legend at the rail */
 static lv_obj_t *s_card;                        /* lead-contact detail card */
 static lv_obj_t *s_card_title;
@@ -1240,10 +1245,16 @@ static void place_tag_box(int x, int y, int mark_idx, lv_area_t *out)
 static void place_tag(int slot, int x, int y, int mark_idx,
                       const char *l1, const char *l2)
 {
+    /* review_impl_D3 M-1: the seam promises that a family builder may leave any
+     * slot unbuilt, so the disc chrome null-checks too. Both families build the
+     * tags today, so this never fires. */
+    if (!s_tag_box[slot]) {
+        return;
+    }
     lv_area_t box;
     place_tag_box(x, y, mark_idx, &box);
-    lv_label_set_text(s_tag_l1[slot], l1);
-    lv_label_set_text(s_tag_l2[slot], l2);
+    set_lbl(s_tag_l1[slot], l1);
+    set_lbl(s_tag_l2[slot], l2);
     lv_obj_set_pos(s_tag_box[slot], box.x1, box.y1);
     show_obj(s_tag_box[slot], true);
 }
@@ -1320,14 +1331,17 @@ static void place_compass(void)
         /* Same bearing at the rim: the two crosshair chords. */
         s_axis_x[i] = (int16_t)(DISC_CX + (int)(s_disc_r * si));
         s_axis_y[i] = (int16_t)(DISC_CY - (int)(s_disc_r * co));
-        lv_label_set_text(s_lbl_card[i], names[i]);
         /* Keep the letter clear of the header and status scrims: a letter
          * that the rotation carries to the very top or bottom slides
-         * inward instead of vanishing under the strip text. */
+         * inward instead of vanishing under the strip text. The crosshair
+         * endpoints above are set either way (review_impl_D3 M-1). */
         int ly = y - 16;
         if (ly < s_geom.scrim_top + 2)                  ly = s_geom.scrim_top + 2;
         if (ly > screen_size() - s_geom.scrim_bot - 34) ly = screen_size() - s_geom.scrim_bot - 34;
-        lv_obj_set_pos(s_lbl_card[i], x - 12, ly);
+        if (s_lbl_card[i]) {
+            set_lbl(s_lbl_card[i], names[i]);
+            lv_obj_set_pos(s_lbl_card[i], x - 12, ly);
+        }
     }
     float tn = (-s_up_deg) * ADSB_DEG2RAD;
     s_ntick[0] = (int16_t)(DISC_CX + (int)(NTICK_OUT * sinf(tn)));
@@ -1362,11 +1376,16 @@ static void place_ring_label(int slot, int r, const char *text)
         s_ring_lbl_used[slot] = false;
         return;
     }
+    /* No number, no rectangle to reserve (review_impl_D3 M-1). */
+    if (!s_lbl_ring[slot]) {
+        s_ring_lbl_used[slot] = false;
+        return;
+    }
     /* Only the outermost number takes the family inset; the two inner ones
      * would otherwise crawl toward the centre on the Scope. */
     int inset = (slot == 2) ? s_geom.ring_inset : ADSB_RING_INSET_INNER;
     int d = (int)(0.707f * (float)(r - inset));
-    lv_label_set_text(s_lbl_ring[slot], text);
+    set_lbl(s_lbl_ring[slot], text);
     lv_obj_set_pos(s_lbl_ring[slot], DISC_CX - d - 20, DISC_CY - d - 14);
     show_obj(s_lbl_ring[slot], true);
     /* "50 NM" at 22 px is about 72 x 26; over-cover slightly for the margin.
@@ -1555,13 +1574,26 @@ static void fill_lead_lines(const adsb_ac_t *a)
     } else {
         snprintf(buf, sizeof(buf), "%s", id);
     }
-    set_lbl(s_lbl_gsub, buf);
-
     char dist[16];
     fmt_dist(dist, sizeof(dist), a->dist_nm);
+    int hdg = (int)((a->track_deg < 0.0f) ? 0.0f : a->track_deg + 0.5f);
+
+    if (!s_lbl_gsub2) {
+        /* One line only (round Board): route or ident, then the figures the
+         * second line used to carry, ASCII separators. */
+        /* 192, not 128: buf is a 128 byte array, so GCC's worst case for the
+         * whole format is 168 bytes and -Werror=format-truncation rejects the
+         * smaller destination even though the real line is about 70 chars. */
+        char one[192];
+        snprintf(one, sizeof(one), "%s  %s  %d ft  %03d", buf, dist,
+                 alt_hundreds(a) * 100, hdg);
+        set_lbl(s_lbl_gsub, one);
+        return;
+    }
+
+    set_lbl(s_lbl_gsub, buf);
     snprintf(buf, sizeof(buf), "%s  /  %03d %c  /  hdg %03d  /  %d kt",
-             dist, alt_hundreds(a), vrate_char(a->vrate_fpm),
-             (int)((a->track_deg < 0.0f) ? 0.0f : a->track_deg + 0.5f),
+             dist, alt_hundreds(a), vrate_char(a->vrate_fpm), hdg,
              (int)(a->gs_kt + 0.5f));
     set_lbl(s_lbl_gsub2, buf);
 }
@@ -1656,6 +1688,8 @@ static void fill_board(float range)
             show_obj(s_row_panel[i], false);
         }
         show_obj(s_card, false);
+        /* An empty sky must not leave a stale rail scale on screen. */
+        show_obj(s_lbl_legend, false);
         return;
     }
 
@@ -1672,7 +1706,10 @@ static void fill_board(float range)
 
     /* Rows are ranks 1..5 — the lead already has the whole block above. */
     for (int i = 0; i < ADSB_BOARD_ROWS; i++) {
-        const adsb_ac_t *a = by_rank(i + 1);
+        /* Round shows the lead as row 0 and marks it with the lead colours (the
+         * amber eyebrow is not built there). Square keeps ranks 1..5, because
+         * its lead already owns the whole block above the rows. */
+        const adsb_ac_t *a = by_rank(s_row_dot[0] ? i : (i + 1));
         if (!a) {
             show_obj(s_row_panel[i], false);
             continue;
@@ -1696,11 +1733,42 @@ static void fill_board(float range)
         fmt_dist(buf, sizeof(buf), a->dist_nm);
         set_lbl(s_row_dist[i], buf);
 
+        /* Round Board: the four dropped columns are one rail. The dot's
+         * position is distance over range and its colour is the same
+         * ADSB_RAMP bucket the square used for the altitude text, which is the
+         * only place altitude survives on this page. */
+        if (s_row_dot[i] && s_row_rail[i]) {
+            float f = (range > 1.0f) ? (a->dist_nm / range) : 0.0f;
+            if (f < 0.0f) f = 0.0f;
+            if (f > 1.0f) f = 1.0f;
+            int rail_w = lv_obj_get_style_width(s_row_rail[i], LV_PART_MAIN);
+            int rail_x = lv_obj_get_style_x(s_row_rail[i], LV_PART_MAIN);
+            int rail_y = lv_obj_get_style_y(s_row_rail[i], LV_PART_MAIN);
+            int dot_d  = lv_obj_get_style_width(s_row_dot[i], LV_PART_MAIN);
+            int dx = rail_x + (int)(f * (float)rail_w);
+            int dy = rail_y + 1;
+            lv_obj_set_pos(s_row_dot[i], dx - dot_d / 2, dy - dot_d / 2);
+            lv_obj_set_style_bg_color(s_row_dot[i],
+                                      lv_color_hex(a->emergency ? page_col(COL_EMERG)
+                                                                : page_col(alt_color(a))),
+                                      0);
+            s_row_dot_cx[i] = (int16_t)(lv_obj_get_style_x(s_row_panel[i], LV_PART_MAIN) + dx);
+            s_row_dot_cy[i] = (int16_t)(lv_obj_get_style_y(s_row_panel[i], LV_PART_MAIN) + dy);
+        }
+
         if (s_row_panel[i]) {
             lv_obj_set_style_opa(s_row_panel[i],
                                  (a->seen_pos_s > STALE_DIM_S) ? LV_OPA_40 : LV_OPA_COVER, 0);
         }
         show_obj(s_row_panel[i], true);
+    }
+
+    /* One legend at the rail's far end: the same range for all five dots. */
+    if (s_lbl_legend) {
+        char leg[16];
+        snprintf(leg, sizeof(leg), "%d NM", (int)(range + 0.5f));
+        set_lbl(s_lbl_legend, leg);
+        show_obj(s_lbl_legend, true);
     }
 }
 
@@ -1800,6 +1868,56 @@ static uint8_t shape_of_cat(const char *cat)
 }
 
 /**
+ * Round Board: one heading arrow per drawn row, just outside that row's
+ * distance dot. Drawn through the same disc_draw_cb() as the disc modes, which
+ * skips the rings in Board mode. Square leaves board_marks false and this
+ * function returns immediately.
+ *
+ * Runs after fill_board(), which is what fills s_row_dot_cx / s_row_dot_cy.
+ *
+ * s_up_deg is deliberately NOT applied: the Board carries no bearing and its
+ * 2026-08-18 retarget says the arrow is a true heading, not a relative one.
+ */
+static void fill_board_marks(void)
+{
+    if (!s_geom.board_marks) {
+        return;
+    }
+    for (int i = 0; i < ADSB_BOARD_ROWS && s_mark_n < ADSB_MAX_AC; i++) {
+        const adsb_ac_t *a = by_rank(s_row_dot[0] ? i : (i + 1));
+        if (!a || !s_row_panel[i] || !s_row_dot[i]) continue;
+        if (lv_obj_has_flag(s_row_panel[i], LV_OBJ_FLAG_HIDDEN)) continue;
+
+        /* Dot centre plus 22, with a 10 px nose: the row panel's right edge is
+         * 559 on the narrowest row and the rail ends at 528, so +30 with a
+         * 14 px nose ran past it. */
+        int px = s_row_dot_cx[i] + 22;
+        int py = s_row_dot_cy[i];
+
+        adsb_mark_t *m = &s_mark[s_mark_n];
+        memset(m, 0, sizeof(*m));
+        m->x = (int16_t)px;
+        m->y = (int16_t)py;
+        m->color = page_col(a->emergency ? COL_EMERG : alt_color(a));
+        m->opa = LV_OPA_COVER;
+
+        float hdg = (a->track_deg < 0.0f) ? 0.0f : a->track_deg;
+        float t = hdg * ADSB_DEG2RAD;
+        float st_ = sinf(t), ct = cosf(t);
+        static const float nose[3][2] = { { 0.0f, -10.0f }, { 6.0f, 7.0f },
+                                          { -6.0f, 7.0f } };
+        for (int k = 0; k < 3; k++) {
+            float rx = nose[k][0] * ct - nose[k][1] * st_;
+            float ry = nose[k][0] * st_ + nose[k][1] * ct;
+            m->tx[k] = (int16_t)(px + (int)rx);
+            m->ty[k] = (int16_t)(py + (int)ry);
+        }
+        m->flags |= MK_TRI;
+        s_mark_n++;
+    }
+}
+
+/**
  * Turn the held snapshot into screen coordinates and label text.
  *
  * Split out from nina_adsb_update() so the drag path can repaint at touch rate
@@ -1827,7 +1945,7 @@ static void recompute(void)
     } else {
         buf[0] = '\0';
     }
-    lv_label_set_text(s_lbl_mount, buf);
+    set_lbl(s_lbl_mount, buf);
 
     /* Connection tiers, shared with every other data page. */
     page_conn_t st = s_have
@@ -1841,8 +1959,8 @@ static void recompute(void)
         nina_empty_state_set_busy(s_empty, st == PAGE_CONN_CONNECTING);
         show_obj(s_backdrop, true);
         nina_empty_state_show(s_empty);
-        lv_label_set_text(s_lbl_strip, st == PAGE_CONN_CONNECTING
-                          ? "connecting" : "receiver unreachable");
+        set_lbl(s_lbl_strip, st == PAGE_CONN_CONNECTING
+                ? "connecting" : "receiver unreachable");
         return;
     }
     nina_empty_state_hide(s_empty);
@@ -1881,14 +1999,22 @@ static void recompute(void)
                  within, (int)(range + 0.5f), tracked,
                  (st == PAGE_CONN_STALE) ? "Reconnecting..." : "");
     }
-    lv_label_set_text(s_lbl_strip, buf);
+    set_lbl(s_lbl_strip, buf);
 
     if (s_mode == MODE_BOARD) {
         s_mark_n = 0;
         s_lead_n = 0;
         s_trun_n = 0;
         s_slbl_n = 0;
+        /* The FOV circles are a Sky Dome aid. They were harmless here while the
+         * draw host was hidden in Board mode; on round the host stays visible,
+         * so a stale ring from the last Sky visit would be drawn over the rows. */
+        s_fov_n = 0;
         fill_board(range);
+        fill_board_marks();
+        /* The disc-mode path invalidates at the end of the function; this one
+         * returns before it, and the arrows live on the host. */
+        lv_obj_invalidate(s_disc);
         return;
     }
 
@@ -2088,10 +2214,10 @@ static void apply_disc_colors(void)
     uint32_t card = scope ? page_col(COL_SCOPE_GREEN) : s_col_ink;
     uint32_t rlbl = page_col(scope ? COL_SCOPE_RING_LBL : COL_RING_LBL);
     for (int i = 0; i < 4; i++) {
-        lv_obj_set_style_text_color(s_lbl_card[i], lv_color_hex(card), 0);
+        set_col(s_lbl_card[i], card);
     }
     for (int i = 0; i < 3; i++) {
-        lv_obj_set_style_text_color(s_lbl_ring[i], lv_color_hex(rlbl), 0);
+        set_col(s_lbl_ring[i], rlbl);
     }
 }
 
@@ -2142,8 +2268,16 @@ static void apply_colors(void)
     }
     for (int i = 0; i < ADSB_BOARD_ROWS; i++) {
         if (s_row_panel[i]) {
-            lv_obj_set_style_bg_color(s_row_panel[i], lv_color_hex(page_col(COL_ROW_BG)), 0);
-            lv_obj_set_style_border_color(s_row_panel[i], lv_color_hex(page_col(COL_ROW_BRD)), 0);
+            /* Round shows the lead as row 0 and has no amber eyebrow, so the
+             * lead colours on that row are the only lead marker left. Square
+             * leaves s_row_dot[0] NULL and every row keeps the plain pair. */
+            bool lead_row = (s_row_dot[0] != NULL) && (i == 0);
+            lv_obj_set_style_bg_color(s_row_panel[i],
+                                      lv_color_hex(page_col(lead_row ? COL_LEAD_BG
+                                                                     : COL_ROW_BG)), 0);
+            lv_obj_set_style_border_color(s_row_panel[i],
+                                          lv_color_hex(page_col(lead_row ? COL_LEAD_BRD
+                                                                         : COL_ROW_BRD)), 0);
         }
         set_col(s_row_call[i], s_col_ink);
         set_col(s_row_route[i], page_col(COL_MUTED));
@@ -2275,7 +2409,7 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
             .sc_contacts_arclabel = &s_scope_contacts_arclabel,
             .board = &s_board, .lbl_glance = &s_lbl_glance, .lbl_gsub = &s_lbl_gsub,
             .row_panel = s_row_panel, .row_call = s_row_call,
-            .row_rail = s_row_rail,   /* .row_dot joins in task D5 */
+            .row_dot = s_row_dot, .row_rail = s_row_rail,
             .lbl_legend = &s_lbl_legend,
         };
         adsb_round_build(s_root, s_content, &slots, &s_geom);

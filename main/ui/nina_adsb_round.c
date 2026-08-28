@@ -223,6 +223,121 @@ static void build_scope(lv_obj_t *root, lv_obj_t *content, const adsb_slots_t *s
     g->scope_lbl_r = ADSBR_SC_LBL_R;
 }
 
+/* -- Board --------------------------------------------------------------- */
+
+/* Board, board 7. Rows are cut to the chord at their own narrow edge, so the
+ * stack tapers into a lens; the rail keeps ONE extent on every row so the five
+ * dots share one distance scale and can be compared down the column. */
+#define ADSBR_BD_LEAD_DY   (-174)
+#define ADSBR_BD_SUB_DY     (-82)
+#define ADSBR_BD_ROW_Y0     (-38)
+#define ADSBR_BD_ROW_DY       62
+#define ADSBR_BD_ROW_H        52
+#define ADSBR_BD_ROW_PAD      20   /* pulled off each side of the row's chord */
+#define ADSBR_BD_RAIL_X0      (-8) /* from the centre */
+#define ADSBR_BD_RAIL_X1     168
+#define ADSBR_BD_DOT_D        14
+/* The legend clears BOTH the last row and the rim. The last row ends at
+ * cx + 262 (Y0 -38 + 4 * 62 + H 52), so the planned 246 put the label's top
+ * 16 px inside it; 266 sits 4 px below it. The right edge comes back from
+ * cx + 158 to cx + 150 for the rim: at 720 the box's bottom-right corner is
+ * then at r 337 against Rs 342, where 158 would have been at 341. */
+#define ADSBR_BD_LEG_DY      266
+#define ADSBR_BD_LEG_X       150   /* right edge, from the centre */
+#define ADSBR_BD_LEG_W       150
+
+/** Half chord of the rim circle at the row's narrow edge, which is whichever
+ *  edge is farther from the equator. */
+static int row_half(int dy_top, int h)
+{
+    int a = (dy_top < 0) ? -dy_top : dy_top;
+    int b = dy_top + h;
+    if (b < 0) {
+        b = -b;
+    }
+    return ui_chord_half((b > a) ? b : a);
+}
+
+static void build_board(lv_obj_t *content, const adsb_slots_t *s, adsb_geom_t *g)
+{
+    int cx = screen_center();
+
+    lv_obj_t *board = lv_obj_create(content);
+    lv_obj_remove_style_all(board);
+    lv_obj_set_size(board, screen_size(), screen_size());
+    lv_obj_set_pos(board, 0, 0);
+    lv_obj_clear_flag(board, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    *s->board = board;
+
+    /* Lead block on the widest chord it spans. The amber eyebrow and the whole
+     * nine-field detail card are not built: every string in them is below the
+     * 27 px floor. The lead is marked by row 0's own COL_LEAD_BG / COL_LEAD_BRD
+     * instead, which the page paints in apply_colors(). */
+    int lead_x = cx - ui_chord_half(ADSBR_BD_LEAD_DY) + 22;
+    *s->lbl_glance = r_label(board, &lv_font_montserrat_64);
+    lv_obj_set_pos(*s->lbl_glance, lead_x, cx + ADSBR_BD_LEAD_DY);
+
+    *s->lbl_gsub = r_label(board, &lv_font_montserrat_28);
+    lv_obj_set_pos(*s->lbl_gsub, lead_x + 4, cx + ADSBR_BD_SUB_DY);
+    lv_label_set_long_mode(*s->lbl_gsub, LV_LABEL_LONG_DOT);
+    /* Width to the rim at the line's BOTTOM edge, not at its top: a 620 px run
+     * from x 92 reaches 712, and the rim at that line is at 692. */
+    lv_obj_set_width(*s->lbl_gsub,
+                     cx + ui_chord_half(ADSBR_BD_SUB_DY + 28) - 22 - (lead_x + 4));
+    lv_obj_set_height(*s->lbl_gsub, lv_font_get_line_height(&lv_font_montserrat_28));
+
+    for (int i = 0; i < ADSB_BOARD_ROWS; i++) {
+        int dy = ADSBR_BD_ROW_Y0 + i * ADSBR_BD_ROW_DY;
+        int w  = 2 * row_half(dy, ADSBR_BD_ROW_H) - 2 * ADSBR_BD_ROW_PAD;
+        int x  = cx - w / 2;
+
+        lv_obj_t *p = lv_obj_create(board);
+        lv_obj_remove_style_all(p);
+        lv_obj_set_size(p, w, ADSBR_BD_ROW_H);
+        lv_obj_set_pos(p, x, cx + dy);
+        lv_obj_set_style_bg_opa(p, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(p, 1, 0);
+        lv_obj_set_style_radius(p, 12, 0);
+        lv_obj_clear_flag(p, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+        s->row_panel[i] = p;
+
+        s->row_call[i] = r_label(p, &lv_font_montserrat_28);
+        lv_obj_set_pos(s->row_call[i], 18, 8);
+        lv_label_set_long_mode(s->row_call[i], LV_LABEL_LONG_DOT);
+        lv_obj_set_width(s->row_call[i], (cx + ADSBR_BD_RAIL_X0) - x - 30);
+        lv_obj_set_height(s->row_call[i],
+                          lv_font_get_line_height(&lv_font_montserrat_28));
+
+        /* The four dropped columns as one rail. Rail and dot are children of
+         * the row panel, so a row that hides takes them with it. */
+        lv_obj_t *rail = lv_obj_create(p);
+        lv_obj_remove_style_all(rail);
+        lv_obj_remove_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(rail, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(rail, ADSBR_BD_RAIL_X1 - ADSBR_BD_RAIL_X0, 2);
+        lv_obj_set_pos(rail, (cx + ADSBR_BD_RAIL_X0) - x, ADSBR_BD_ROW_H / 2 - 1);
+        lv_obj_set_style_bg_opa(rail, LV_OPA_COVER, 0);
+        s->row_rail[i] = rail;
+
+        lv_obj_t *dot = lv_obj_create(p);
+        lv_obj_remove_style_all(dot);
+        lv_obj_remove_flag(dot, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(dot, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_size(dot, ADSBR_BD_DOT_D, ADSBR_BD_DOT_D);
+        lv_obj_set_style_radius(dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_opa(dot, LV_OPA_COVER, 0);
+        s->row_dot[i] = dot;
+    }
+
+    /* One legend number carries the rail scale for all five rows, at the rail's
+     * far end and below the last row. */
+    *s->lbl_legend = r_num(board, &lv_font_montserrat_28,
+                           cx + ADSBR_BD_LEG_X - ADSBR_BD_LEG_W,
+                           cx + ADSBR_BD_LEG_DY, ADSBR_BD_LEG_W);
+
+    g->board_marks = true;
+}
+
 /* -- entry point --------------------------------------------------------- */
 
 void adsb_round_build(lv_obj_t *root, lv_obj_t *content,
@@ -253,11 +368,13 @@ void adsb_round_build(lv_obj_t *root, lv_obj_t *content,
      * host must stay after it, so their tag boxes and labels sit above the
      * contact glyphs exactly as on square.
      *
-     *   build_board()   <- task D5 inserts its call HERE, above the host
+     *   build_board()
      *   draw host
      *   build_sky()
      *   build_scope()
      */
+
+    build_board(content, s, g);
 
     lv_obj_t *disc = lv_obj_create(content);
     lv_obj_remove_style_all(disc);
