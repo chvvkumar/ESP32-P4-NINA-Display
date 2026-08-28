@@ -40,9 +40,18 @@ static const char *TAG = "spotify_ui";
 #define IDLE_TIMEOUT_MS_DEFAULT 5000
 #define DIM_OPACITY_ACTIVE  190       /* ~75% black overlay when controls shown */
 #define DIM_OPACITY_IDLE    0         /* No overlay when idle (just album art) */
-#define SIDE_MARGIN         60        /* Left/right margin for progress bar */
+/* Left and right margin for the progress bar and its two time labels. 60 on
+ * square, 165 at 720 round, 178 at 800 round: the bar and the labels are the
+ * only chord-width content on this page. */
+#define SIDE_MARGIN         (60 + screen_safe_inset())
 #define BTN_BOTTOM_MARGIN   48        /* Bottom margin for button row */
-#define PROGRESS_Y          500       /* Y position for progress bar */
+/* Y of the progress bar, and through it the whole control stack: the
+ * click-absorbing zone starts 16 px above and is 236 px tall, and the button
+ * row is aligned to that zone's bottom. 500 on square; on round the stack
+ * lifts by the safe inset so the zone ends no lower than the inscribed
+ * square: 395 at 720 gives a zone of 379..615, which is exactly the 615
+ * bottom edge, and 382 at 800 gives 366..602 against a 682 edge. */
+#define PROGRESS_Y          (500 - screen_safe_inset())
 #define REFR_PERIOD_IDLE_MS 5000      /* Slow LVGL refresh when showing static art */
 #define REFR_PERIOD_ACTIVE_MS 33      /* Normal ~30fps refresh when controls visible */
 
@@ -369,8 +378,11 @@ lv_obj_t *spotify_page_create(lv_obj_t *parent)
 {
     spotify_page = lv_obj_create(parent);
     lv_obj_set_size(spotify_page, screen_size(), screen_size());
-    /* Negate the parent's OUTER_PADDING so album art fills edge-to-edge */
-    lv_obj_set_pos(spotify_page, -OUTER_PADDING, -OUTER_PADDING);
+    /* Full bleed: the album art fills the panel edge to edge. Centring rather
+     * than negating a literal pad, so the root stays on the panel centre
+     * whatever main_cont's pad is. On square a 720 root centred in the 688
+     * content box lands at (-16,-16), exactly what the literal produced. */
+    lv_obj_center(spotify_page);
     lv_obj_set_style_pad_all(spotify_page, 0, 0);
     lv_obj_set_style_border_width(spotify_page, 0, 0);
     lv_obj_set_style_radius(spotify_page, 0, 0);
