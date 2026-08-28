@@ -139,6 +139,10 @@ typedef struct {
     /* temperatures ----------------------------------------------------- */
     octo_temp_el_t nozzle;
     octo_temp_el_t bed;
+    /* Round family only. One merged "215 / 60" reading for layouts that have
+     * chord for ONE temperature cell rather than two. When it is non-NULL the
+     * update path writes it; the two octo_temp_el_t elements stay unbuilt. */
+    lv_obj_t *lbl_temps;
 
     /* time ------------------------------------------------------------- */
     lv_obj_t *lbl_elapsed;
@@ -149,6 +153,12 @@ typedef struct {
     /* identity / state ------------------------------------------------- */
     lv_obj_t *lbl_state;        /* "PRINTING"                               */
     lv_obj_t *state_dot;        /* accent dot beside the state line         */
+    /* Round family only (NULL on every square layout). rim_crown is a fixed
+     * 40 degree arc at twelve o'clock painted with the state colour, and
+     * rim_state_arclabel carries the state TEXT on the top rim instead of
+     * lbl_state. The update path drives both only when they are non-NULL. */
+    lv_obj_t *rim_crown;
+    lv_obj_t *rim_state_arclabel;
     lv_obj_t *conn_chip;        /* link-down indicator; hidden when healthy  */
     lv_obj_t *conn_dot;
     lv_obj_t *lbl_conn;         /* "PRINTER OFFLINE"/error; hidden when OK   */

@@ -79,6 +79,11 @@ static lv_obj_t *s_backdrop  = NULL;  /* full-cover host for the empty state */
 static lv_obj_t *s_empty     = NULL;
 static octoprint_widgets_t s_w;
 
+/* Last string written to s_w.rim_state_arclabel. Cleared on every rebuild, so a
+ * fresh arclabel is always written once. Inert on square, where the handle is
+ * NULL and nothing reads this. */
+static char s_rim_state_shadow[32];
+
 /* Current opacity of s_content. Dimmed while the source is STALE (last values
  * kept on screen), full while it is OK. Tracked so the update path only
  * restyles on a transition -- a per-cycle lv_obj_set_style_opa() would
@@ -636,6 +641,10 @@ lv_obj_t *octo_w_state_line(lv_obj_t *parent, octoprint_widgets_t *w)
 
 /* ── Layout dispatch ──────────────────────────────────────────────────── */
 
+#if !CONFIG_NINA_FAMILY_ROUND
+/* Square only. The round arm in build_content() names the two round builders
+ * outright, so on the round build this table has no reader left and an
+ * unguarded copy warns as an unused static (spec addendum section 6 rule 2). */
 static const octoprint_layout_ops_t *const s_layouts[OCTO_LAYOUT_COUNT] = {
     &octoprint_layout_bento,
     &octoprint_layout_bento,   /* retired alias: slot 1 was "Instrument dial".
@@ -651,10 +660,12 @@ static const octoprint_layout_ops_t *const s_layouts[OCTO_LAYOUT_COUNT] = {
     &octoprint_layout_overlay,   /* slot 5: "Floating overlay" */
     &octoprint_layout_letterbox, /* slot 6: "Letterbox"        */
 };
+#endif
 
 static void build_content(void)
 {
     memset(&s_w, 0, sizeof(s_w));
+    s_rim_state_shadow[0] = '\0';
 
     uint8_t idx = app_config_get()->octoprint_layout;
     if (idx >= OCTO_LAYOUT_COUNT) {
@@ -671,12 +682,9 @@ static void build_content(void)
     }
     /* Key on 2, not on 0: slots 1, 3 and 4 are RETIRED ALIASES that render Grid
      * on square (see the s_layouts comment), and they must render Grid here too.
-     *
-     * s_layouts[2] is still the SQUARE Immersive builder. Sub-plan D2 replaces
-     * that half of the ternary with &octoprint_layout_glass_round once that file
-     * exists; keeping the square one for now means the round build renders a
-     * usable page at every commit in between. */
-    const octoprint_layout_ops_t *ops = (idx == 2) ? s_layouts[2]
+     * The round build reaches no square OctoPrint layout at all: 0, 1, 3 and 4
+     * render the round Grid, and 2, 5 and 6 the round Immersive. */
+    const octoprint_layout_ops_t *ops = (idx == 2) ? &octoprint_layout_glass_round
                                                    : &octoprint_layout_bento_round;
 #else
     const octoprint_layout_ops_t *ops = s_layouts[idx];
@@ -1416,12 +1424,49 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
     }
 
     /* -- identity / state -------------------------------------------------- */
-    set_txt(s_w.lbl_state, state_text(data));
+    const char *state_str = state_text(data);
+    set_txt(s_w.lbl_state, state_str);
+    if (s_w.rim_state_arclabel) {
+        /* lv_arclabel_set_text() reallocates and re-lays out the run on EVERY
+         * call, change or not, so the page keeps a shadow copy: the update path
+         * runs once per poll and G1 only sanctions arc text that changes about
+         * once a minute. s_rim_state_shadow is cleared in build_content(), so a
+         * layout or theme rebuild re-writes the fresh, empty arclabel. */
+        if (strcmp(s_rim_state_shadow, state_str) != 0) {
+            snprintf(s_rim_state_shadow, sizeof(s_rim_state_shadow), "%s", state_str);
+            lv_arclabel_set_text(s_w.rim_state_arclabel, s_rim_state_shadow);
+        }
+    }
+
+    /* Merged temperature cell (round Immersive only): "215 / 60" as the board
+     * draws it. Each half is formatted on its own, because a printer that
+     * reports one tool and not the other hands us a NAN for the missing side
+     * and "%.0f" would put "nan" on the panel. */
+    if (s_w.lbl_temps) {
+        char t[48];
+        char nz[16] = "--";
+        char bd[16] = "--";
+        if (!isnan(data->nozzle_actual)) {
+            snprintf(nz, sizeof(nz), "%.0f", (double)data->nozzle_actual);
+        }
+        if (!isnan(data->bed_actual)) {
+            snprintf(bd, sizeof(bd), "%.0f\xC2\xB0", (double)data->bed_actual);
+        }
+        snprintf(t, sizeof(t), "%s / %s", nz, bd);
+        set_txt(s_w.lbl_temps, t);
+    }
 
     bool closed = (strcasecmp(data->conn_state, "Closed") == 0);
+    uint32_t state_col = data->error ? col_alert()
+                                     : (data->printing ? col_accent() : col_label());
     if (s_w.state_dot) {
-        uint32_t c = data->error ? col_alert() : (data->printing ? col_accent() : col_label());
-        lv_obj_set_style_bg_color(s_w.state_dot, lv_color_hex(c), 0);
+        lv_obj_set_style_bg_color(s_w.state_dot, lv_color_hex(state_col), 0);
+    }
+    if (s_w.rim_crown) {
+        lv_obj_set_style_arc_color(s_w.rim_crown, lv_color_hex(state_col), LV_PART_MAIN);
+    }
+    if (s_w.rim_state_arclabel) {
+        lv_obj_set_style_text_color(s_w.rim_state_arclabel, lv_color_hex(state_col), 0);
     }
 
     /* /api/connection mirrors the printer state ("Printing"/"Operational") while
@@ -1549,6 +1594,11 @@ static void apply_styles(void)
                                    LV_PART_MAIN);
         lv_obj_set_style_arc_color(s_w.arc_completion, lv_color_hex(col_accent()),
                                    LV_PART_INDICATOR);
+    }
+    if (s_w.rim_crown) {
+        /* Resting colour only. The update path repaints it with the live state
+         * colour on the very next poll, exactly like state_dot. */
+        lv_obj_set_style_arc_color(s_w.rim_crown, lv_color_hex(col_label()), LV_PART_MAIN);
     }
     if (s_w.bar_progress) {
         /* Only the accent indicator. The MAIN track is painted by
