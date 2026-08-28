@@ -180,6 +180,40 @@ static void cancel_moon_crossfade(image_page_t *p)
     p->crossfade_active = false;
 }
 
+static void image_page_config_set_overlay(app_config_t *c, image_src_t src, bool v);
+
+/* Guideline C2 (spec addendum 2026-08-28 section 2): an image page shows no
+ * text by default and a tap toggles it, on BOTH panel families. Registered on
+ * all six sources, so the handler reads the source from the page it was given.
+ *
+ * The write goes through a PSRAM snapshot: app_config_t is 9436 bytes and this
+ * runs on the LVGL task, so a stack copy would overflow it.
+ * app_config_save_deferred() puts the value in RAM immediately and coalesces
+ * the ~350 ms flash write about 2 s after the last call, which is the same
+ * mechanism the ADS-B rotation drag uses (nina_adsb.c persist_nav_fields()).
+ *
+ * No display lock is taken: an LVGL event callback already runs on the LVGL
+ * task with the lock held. */
+static void overlay_tap_cb(lv_event_t *e)
+{
+    image_page_t *p = lv_event_get_user_data(e);
+    if (!p) return;
+
+    bool want = !image_page_config_overlay(app_config_get(), p->src);
+
+    app_config_t *c = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!c) {
+        ESP_LOGW(TAG, "no PSRAM for config snapshot; overlay toggle not saved");
+        return;
+    }
+    app_config_get_snapshot_into(c);
+    image_page_config_set_overlay(c, p->src, want);
+    app_config_save_deferred(c);
+    heap_caps_free(c);
+
+    image_page_set_overlay_visible(p, want);
+}
+
 /* Tap (short click) triggers the moon-cycle animation. Registered on the Moon
  * instance only, so no per-callback source test is needed. */
 static void moon_tap_cb(lv_event_t *e)
@@ -388,6 +422,14 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
     lv_obj_clear_flag(page_container, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_add_flag(page_container, LV_OBJ_FLAG_CLICKABLE);
+
+    /* Guideline C2: the text toggle is on every source. SHORT_CLICKED, not
+     * CLICKED, for the same reason the Moon tap uses it: CLICKED also fires at
+     * the end of the horizontal swipe that changes pages. The Moon instance
+     * registers moon_tap_cb on the same event below; LVGL runs both, in
+     * registration order, so a tap on the Moon page still triggers its
+     * animation as well as the toggle (addendum section 2 requires that). */
+    lv_obj_add_event_cb(page_container, overlay_tap_cb, LV_EVENT_SHORT_CLICKED, p);
 
     /* Tap + single-finger drag-to-rotate belong to the Moon instance only, so
      * the callbacks are registered ONLY there (the other three pages never see
@@ -1425,6 +1467,22 @@ bool image_page_config_overlay(const app_config_t *c, image_src_t src)
         case IMG_SRC_RADAR:  return c->radar_show_overlay;
         case IMG_SRC_CLOUDS: return c->clouds_show_overlay;
         default:             return true;
+    }
+}
+
+/* Write the same field image_page_config_overlay() reads. Used by the tap
+ * handler only, so it stays file-local: the web save path edits the fields
+ * directly on its own snapshot. */
+static void image_page_config_set_overlay(app_config_t *c, image_src_t src, bool v)
+{
+    switch (src) {
+        case IMG_SRC_GOES:   c->goes_show_overlay   = v; break;
+        case IMG_SRC_MOON:   c->moon_show_overlay   = v; break;
+        case IMG_SRC_SOLAR:  c->solar_show_overlay  = v; break;
+        case IMG_SRC_CUSTOM: c->custom_show_overlay = v; break;
+        case IMG_SRC_RADAR:  c->radar_show_overlay  = v; break;
+        case IMG_SRC_CLOUDS: c->clouds_show_overlay = v; break;
+        default: break;
     }
 }
 

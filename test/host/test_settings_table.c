@@ -466,6 +466,26 @@ int main(void)
         CHECK(cfg.radar_crop == 1, "radar_crop: a string is still ignored (value untouched)");
     }
 
+    /* ── 10. Guideline C2: an image page shows no text on a fresh config ──
+     * Addendum 2026-08-28 section 2: the six image pages (GOES, Moon, Solar,
+     * Custom, Radar, Clouds) start with their text hidden and a tap turns it
+     * on, on BOTH panel families. These are the fresh-config defaults only;
+     * a device that already stored a value keeps it, which is why the
+     * migrations were left alone. */
+    printf("10. image page overlays default to hidden (guideline C2)\n");
+    {
+        app_config_t cfg;
+        memset(&cfg, 0, sizeof(cfg));
+        settings_defaults_apply(&cfg);
+
+        CHECK(cfg.goes_show_overlay   == false, "goes_show_overlay defaults to hidden");
+        CHECK(cfg.moon_show_overlay   == false, "moon_show_overlay defaults to hidden");
+        CHECK(cfg.solar_show_overlay  == false, "solar_show_overlay defaults to hidden");
+        CHECK(cfg.custom_show_overlay == false, "custom_show_overlay defaults to hidden");
+        CHECK(cfg.radar_show_overlay  == false, "radar_show_overlay defaults to hidden");
+        CHECK(cfg.clouds_show_overlay == false, "clouds_show_overlay defaults to hidden");
+    }
+
     printf("\n%s: %d failure(s)\n", fails == 0 ? "PASS" : "FAIL", fails);
     return fails == 0 ? 0 : 1;
 }
