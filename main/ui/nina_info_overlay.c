@@ -11,6 +11,7 @@
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
 #include "nina_nav_arbiter.h"
+#include "ui_round.h"
 #include "esp_timer.h"
 #include <stdio.h>
 #include <string.h>
@@ -79,7 +80,11 @@ void nina_info_overlay_create(lv_obj_t *parent) {
     lv_obj_set_flex_flow(info_overlay, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(info_overlay, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(info_overlay, INFO_OUTER_PAD, 0);
+    /* INFO_OUTER_PAD (16) on square, the safe inset on round. The overlay is a
+     * full-panel object, so this pad is what carries the title bar, the
+     * content column and the floating back button inside the circle: LVGL
+     * aligns children against the parent's content box, which this shrinks. */
+    lv_obj_set_style_pad_all(info_overlay, ui_page_inset(), 0);
     lv_obj_set_style_pad_row(info_overlay, 10, 0);
     lv_obj_add_flag(info_overlay, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(info_overlay, LV_OBJ_FLAG_SCROLLABLE);

@@ -3,6 +3,7 @@
 #include "lv_font_warning_128.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "ui_round.h"
 #include "esp_heap_caps.h"
 #include <string.h>
 #include <stdio.h>
@@ -95,7 +96,11 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     lv_obj_center(info_cont);
     lv_obj_set_flex_flow(info_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(info_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(info_cont, 30, 0);
+    /* 30 on square (ui_page_inset() is 16, so the literal wins), the safe
+     * inset on round: 105 at 720, 118 at 800. Everything inside is centred
+     * with FLEX_ALIGN_CENTER on the cross axis, so the pad is the only thing
+     * that has to move. */
+    lv_obj_set_style_pad_all(info_cont, LV_MAX(30, ui_page_inset()), 0);
     lv_obj_set_style_pad_row(info_cont, 12, 0);
     lv_obj_clear_flag(info_cont, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -221,17 +226,23 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     lv_obj_set_style_text_align(lbl_hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_pad_top(lbl_hint, 8, 0);
 
+    /* 580 on square (ui_page_root_size() is 688, so the literal wins), the
+     * inscribed square on round: 510 at 720 and 564 at 800. The bar is
+     * centred at about mid height, where the chord is 684 at 720 and 760 at
+     * 800, so this clamp is about the root, not the chord. */
+    const int ota_bar_w = LV_MIN(580, ui_page_root_size());
+
     /* Bar container — holds glow + main bar overlapping */
     lv_obj_t *bar_wrap = lv_obj_create(progress_cont);
     lv_obj_remove_style_all(bar_wrap);
-    lv_obj_set_size(bar_wrap, 580, 28);
+    lv_obj_set_size(bar_wrap, ota_bar_w, 28);
     lv_obj_clear_flag(bar_wrap, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_pad_top(bar_wrap, 16, 0);
 
     /* Glow behind bar */
     bar_glow = lv_bar_create(bar_wrap);
     lv_obj_remove_style_all(bar_glow);
-    lv_obj_set_size(bar_glow, 580, 24);
+    lv_obj_set_size(bar_glow, ota_bar_w, 24);
     lv_bar_set_range(bar_glow, 0, 100);
     lv_bar_set_value(bar_glow, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_opa(bar_glow, LV_OPA_TRANSP, LV_PART_MAIN);
@@ -244,7 +255,7 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     /* Main bar */
     bar_progress = lv_bar_create(bar_wrap);
     lv_obj_remove_style_all(bar_progress);
-    lv_obj_set_size(bar_progress, 560, 12);
+    lv_obj_set_size(bar_progress, ota_bar_w - 20, 12);
     lv_bar_set_range(bar_progress, 0, 100);
     lv_bar_set_value(bar_progress, 0, LV_ANIM_OFF);
     lv_obj_set_style_bg_color(bar_progress, lv_color_hex(0x1a1a2e), LV_PART_MAIN);
@@ -305,7 +316,12 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     lv_obj_center(manual_cont);
     lv_obj_set_flex_flow(manual_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(manual_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_all(manual_cont, 30, 0);
+    /* Same row as info_cont's pad above: 30 on square, safe inset on round.
+     * manual_cont's stack is centred on both axes, so nothing depended on the
+     * old literal, but keeping the two containers' pads in lockstep means the
+     * step-8 verification grep for "pad_all(info_cont, 30" or "pad_all(*, 30"
+     * does not silently miss this sibling. */
+    lv_obj_set_style_pad_all(manual_cont, LV_MAX(30, ui_page_inset()), 0);
     lv_obj_set_style_pad_row(manual_cont, 16, 0);
     lv_obj_add_flag(manual_cont, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clear_flag(manual_cont, LV_OBJ_FLAG_SCROLLABLE);

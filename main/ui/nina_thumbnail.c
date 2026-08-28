@@ -256,7 +256,13 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     lv_obj_set_style_pad_hor(zoom_badge, 6, 0);
     lv_obj_set_style_pad_ver(zoom_badge, 3, 0);
     lv_obj_set_size(zoom_badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(zoom_badge, LV_ALIGN_TOP_LEFT, 16, 16);
+    /* The overlay is full bleed (the picture keeps the whole panel), so the
+     * badge takes its own inset: 16 on square (screen_safe_inset() is 0), and
+     * safe inset plus 16 on round, which is 121 at 720 and 134 at 800. The
+     * badge's top-left corner then sits sqrt(2) * 239 = 338 px from centre at
+     * 720 and sqrt(2) * 266 = 376 at 800, inside the rim in both cases. */
+    lv_obj_align(zoom_badge, LV_ALIGN_TOP_LEFT,
+                 screen_safe_inset() + 16, screen_safe_inset() + 16);
     lv_obj_add_flag(zoom_badge, LV_OBJ_FLAG_HIDDEN);
 
     zoom_badge_lbl = lv_label_create(zoom_badge);
@@ -274,7 +280,9 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     lv_obj_set_style_border_width(btn_back, 0, 0);
     lv_obj_set_style_shadow_width(btn_back, 0, 0);
     lv_obj_add_flag(btn_back, LV_OBJ_FLAG_FLOATING);
-    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT, -16, -16);
+    /* Same inset as the zoom badge, mirrored. On square this is -16, -16. */
+    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT,
+                 -(screen_safe_inset() + 16), -(screen_safe_inset() + 16));
 
     btn_back_lbl = lv_label_create(btn_back);
     lv_label_set_text(btn_back_lbl, LV_SYMBOL_LEFT);

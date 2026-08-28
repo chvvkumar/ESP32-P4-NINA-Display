@@ -1,6 +1,7 @@
 #include "nina_setup_screen.h"
 #include "app_config.h"
 #include "screen_geom.h"
+#include "ui_round.h"
 #include "themes.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -49,8 +50,11 @@ void nina_setup_screen_create(lv_obj_t *parent)
     lv_obj_set_size(s_setup_cont, screen_size(), screen_size());
     lv_obj_set_style_bg_color(s_setup_cont, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_setup_cont, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(s_setup_cont, 40, 0);
-    lv_obj_set_style_pad_top(s_setup_cont, 72, 0);
+    /* 40 and 72 on square (both larger than ui_page_inset()'s 16), the safe
+     * inset on round: 105 at 720, 118 at 800. Everything below is centred
+     * text at lv_pct widths, so the pads are the whole change. */
+    lv_obj_set_style_pad_all(s_setup_cont, LV_MAX(40, ui_page_inset()), 0);
+    lv_obj_set_style_pad_top(s_setup_cont, LV_MAX(72, ui_page_inset()), 0);
     lv_obj_set_style_pad_row(s_setup_cont, 12, 0);
     lv_obj_set_flex_flow(s_setup_cont, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(s_setup_cont, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
