@@ -111,17 +111,21 @@ static void build_sky(lv_obj_t *root, lv_obj_t *content, const adsb_slots_t *s)
     /* Two chord caps carrying the mount pointing and the status line, both
      * centred: the board drops the "ADS-B" title (the page says which page it
      * is) and lbl_title stays NULL. */
+    /* Both labels sit toward the disc, not the cap centre: the round glass
+     * chord is narrower near the panel edge, so pushing the ink one row in
+     * from the outer edge of each cap buys back the width the chord took
+     * away (review_impl_D3 I-1). */
     *s->hdr = r_cap(root, 0, ADSBR_CAP_H);
     *s->lbl_mount = r_label(*s->hdr, &lv_font_montserrat_28);
     lv_obj_set_width(*s->lbl_mount, screen_size());
     lv_obj_set_style_text_align(*s->lbl_mount, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(*s->lbl_mount, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_align(*s->lbl_mount, LV_ALIGN_BOTTOM_MID, 0, -4);
 
     *s->strip = r_cap(root, screen_size() - ADSBR_CAP_H, ADSBR_CAP_H);
     *s->lbl_strip = r_label(*s->strip, &lv_font_montserrat_28);
     lv_obj_set_width(*s->lbl_strip, screen_size());
     lv_obj_set_style_text_align(*s->lbl_strip, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(*s->lbl_strip, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_align(*s->lbl_strip, LV_ALIGN_TOP_MID, 0, 4);
 }
 
 /* -- Radar Scope --------------------------------------------------------- */
@@ -230,6 +234,8 @@ void adsb_round_build(lv_obj_t *root, lv_obj_t *content,
         .card_off_h = { ADSBR_SKY_CARD_H, ADSBR_SCOPE_CARD },
         .rim_w      = { 2, 3 },
         .ring_inset = ADSBR_RING_INSET,
+        .ring_lbl_w = 100,   /* the 28 px ring-number face needs more no-go
+                              * width than the square 22 px face's 84 */
         .tag_h      = ADSBR_TAG_H,
         .tag_font1  = &lv_font_montserrat_28,
         .tag_font2  = &lv_font_montserrat_28,
@@ -237,6 +243,7 @@ void adsb_round_build(lv_obj_t *root, lv_obj_t *content,
         .tag_l2_y   = 40,
         .scrim_top  = ADSBR_CAP_H,
         .scrim_bot  = ADSBR_CAP_H,
+        .short_caps = true,  /* the square sentence overflows the round chord */
     };
 
     /* CREATION ORDER IS LOAD BEARING. LVGL draws children in creation order, so

@@ -1369,9 +1369,12 @@ static void place_ring_label(int slot, int r, const char *text)
     lv_label_set_text(s_lbl_ring[slot], text);
     lv_obj_set_pos(s_lbl_ring[slot], DISC_CX - d - 20, DISC_CY - d - 14);
     show_obj(s_lbl_ring[slot], true);
-    /* "50 NM" at 22 px is about 72 x 26; over-cover slightly for the margin. */
+    /* "50 NM" at 22 px is about 72 x 26; over-cover slightly for the margin.
+     * ring_lbl_w is the family's face width (84 square, 100 round: the 28 px
+     * round face is wider than the 22 px square one). */
     s_ring_lbl_area[slot] = (lv_area_t){ DISC_CX - d - 24, DISC_CY - d - 18,
-                                         DISC_CX - d + 60, DISC_CY - d + 14 };
+                                         DISC_CX - d - 24 + s_geom.ring_lbl_w,
+                                         DISC_CY - d + 14 };
     s_ring_lbl_used[slot] = true;
 }
 
@@ -1816,7 +1819,10 @@ static void recompute(void)
     nina_pointing_t pt[MAX_NINA_INSTANCES];
     int np = nina_client_get_pointings(pt, MAX_NINA_INSTANCES);
     if (np > 0) {
-        snprintf(buf, sizeof(buf), "MOUNT AZ %03d EL %02d",
+        /* Round's chord caps cannot fit the square sentence (review_impl_D3
+         * I-1): drop the "MOUNT " word, the disc mode is already obvious. */
+        snprintf(buf, sizeof(buf), s_geom.short_caps ? "AZ %03d EL %02d"
+                                                      : "MOUNT AZ %03d EL %02d",
                  (int)(adsb_wrap360(pt[0].az_deg) + 0.5f), (int)(pt[0].alt_deg + 0.5f));
     } else {
         buf[0] = '\0';
@@ -1861,9 +1867,15 @@ static void recompute(void)
      * The Board no longer applies the elevation gate, so its strip counts by
      * range like the Scope; only Sky still talks about elevation. */
     if (s_mode == MODE_SKY) {
-        snprintf(buf, sizeof(buf), "%d above %d\xc2\xb0 / %d tracked   %s",
-                 above, (int)gate, tracked,
-                 (st == PAGE_CONN_STALE) ? "Reconnecting..." : "");
+        if (s_geom.short_caps) {
+            /* Round chord width: no elevation gate, no STALE suffix. The
+             * content layer already dims on STALE (review_impl_D3 I-1). */
+            snprintf(buf, sizeof(buf), "%d / %d seen", above, tracked);
+        } else {
+            snprintf(buf, sizeof(buf), "%d above %d\xc2\xb0 / %d tracked   %s",
+                     above, (int)gate, tracked,
+                     (st == PAGE_CONN_STALE) ? "Reconnecting..." : "");
+        }
     } else {
         snprintf(buf, sizeof(buf), "%d within %d nm / %d tracked   %s",
                  within, (int)(range + 0.5f), tracked,
@@ -2277,6 +2289,7 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
         .card_off_h = { 24, 24 },
         .rim_w      = { 2, 2 },
         .ring_inset = ADSB_RING_INSET_INNER,
+        .ring_lbl_w = 84,
         .tag_h      = 60,
         .tag_font1  = &lv_font_montserrat_24,
         .tag_font2  = &lv_font_montserrat_22,

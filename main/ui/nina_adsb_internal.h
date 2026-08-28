@@ -41,6 +41,10 @@ typedef struct {
     int16_t ring_inset;      /* pull-in of the OUTERMOST ring number (slot 2) from
                               * its ring. The two inner numbers always use
                               * ADSB_RING_INSET_INNER. */
+    int16_t ring_lbl_w;      /* width of a ring-number no-go rectangle, anchored
+                              * 24 px left of the label position (same for all
+                              * three slots). 84 covers the 22 px square face;
+                              * the 28 px round face needs 100. */
     int16_t tag_h;           /* tag block height used by the declutter pass */
     /* The two tag text lines, shared by the Sky tag boxes and the Scope contact
      * labels the draw callback paints, so the declutter footprint and the drawn
@@ -58,6 +62,8 @@ typedef struct {
     int16_t scrim_bot;
     int16_t scope_lbl_r;     /* Scope: push a contact label outward to at most this
                               * radius. 0 keeps the plain quadrant search. */
+    bool    short_caps;      /* Sky Dome mount/strip text uses the short forms that
+                              * fit the round chord instead of the square sentence. */
     bool    board_marks;     /* Board mode also draws s_mark glyphs (heading arrows) */
     uint8_t no_go_n;
     lv_area_t no_go[ADSB_NO_GO_MAX];
