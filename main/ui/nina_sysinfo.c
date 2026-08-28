@@ -8,6 +8,7 @@
 #include "nina_dashboard_internal.h"
 #include "app_config.h"
 #include "themes.h"
+#include "ui_round.h"
 
 #include "esp_system.h"
 #include "esp_chip_info.h"
@@ -142,7 +143,10 @@ static void net_debug_tap_cb(lv_event_t *e) {
 lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     si_page = lv_obj_create(parent);
     lv_obj_remove_style_all(si_page);
-    lv_obj_set_size(si_page, screen_size() - 2 * OUTER_PADDING, screen_size() - 2 * OUTER_PADDING);
+    /* 688 on square, 510 at 720 round, 564 at 800 round. See nina_summary.c
+     * for why the root is centred instead of left at the parent's origin. */
+    lv_obj_set_size(si_page, ui_page_root_size(), ui_page_root_size());
+    lv_obj_center(si_page);
     lv_obj_set_flex_flow(si_page, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(si_page, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_row(si_page, SI_GAP, 0);
@@ -286,6 +290,9 @@ lv_obj_t *sysinfo_page_create(lv_obj_t *parent) {
     lv_obj_set_style_shadow_width(btn_gear, 0, 0);
     lv_obj_add_flag(btn_gear, LV_OBJ_FLAG_FLOATING | LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(btn_gear, LV_OBJ_FLAG_SCROLLABLE);
+    /* Offset is measured from the page root, which is already inset on round.
+     * The button's painted corner lands at 340.7 px from centre at 720 and
+     * 378.9 at 800, inside the rim in both cases, so the literal stays. */
     lv_obj_align(btn_gear, LV_ALIGN_BOTTOM_RIGHT, -10, -10);
     lv_obj_t *gear_icon = ui_label(btn_gear, LV_SYMBOL_SETTINGS, &lv_font_montserrat_48, UI_THEME_COLOR(header_text_color));
     lv_obj_center(gear_icon);

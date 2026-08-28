@@ -37,6 +37,7 @@
 #include "nina_empty_state.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "ui_round.h"
 #include "page_conn.h"
 #include "jpeg_utils.h"
 #include "bsp/esp-bsp.h"   /* bsp_display_lock / bsp_display_unlock */
@@ -52,9 +53,8 @@
 
 static const char *TAG = "octo_ui";
 
-#define OCTO_PAD   16   /* outer padding, matches OUTER_PADDING */
 #define OCTO_GAP   12   /* inter-card gap (mockup v1) */
-#define OCTO_W     (screen_size() - 2 * OCTO_PAD)
+#define OCTO_W     ui_page_root_size()   /* 688 on square, 510 or 564 on round */
 
 /* ── Shared styles ────────────────────────────────────────────────────── */
 
@@ -685,10 +685,14 @@ static void build_content(void)
      * held copy and re-flags a rescale just before this runs). */
     s_img_cover = ops->image_cover;
 
+    /* A full-bleed layout takes the whole panel, an inset one the inscribed
+     * square (688 on square, 510 at 720 round, 564 at 800 round). Centring
+     * replaces the explicit offset: on square a 720 root centred in
+     * main_cont's 688 content box lands at -16,-16 and a 688 root at 0,0,
+     * which is exactly what the two branches produced. */
     int size = ops->full_bleed ? screen_size() : OCTO_W;
-    int off  = ops->full_bleed ? -OCTO_PAD : 0;
     lv_obj_set_size(s_root, size, size);
-    lv_obj_set_pos(s_root, off, off);
+    lv_obj_center(s_root);
 
     s_content = octo_w_row(s_root, false, OCTO_GAP);
     lv_obj_set_size(s_content, LV_PCT(100), LV_PCT(100));

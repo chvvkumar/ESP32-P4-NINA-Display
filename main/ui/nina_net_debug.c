@@ -17,6 +17,7 @@
 #include "app_config.h"
 #include "themes.h"
 #include "ui_helpers.h"
+#include "ui_round.h"
 #include "esp_timer.h"
 #include "esp_attr.h"
 #include <stdio.h>
@@ -311,7 +312,10 @@ void nina_net_debug_show(void) {
     lv_obj_remove_style_all(nd_root);
     lv_obj_set_size(nd_root, screen_size(), screen_size());
     lv_obj_set_style_bg_opa(nd_root, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(nd_root, INFO_OUTER_PAD, 0);
+    /* INFO_OUTER_PAD (16) on square, the safe inset on round: the root is a
+     * full-panel child of lv_layer_top(), so the pad is what puts its rows
+     * inside the circle. Every row is LV_PCT sized (:325-376) and follows. */
+    lv_obj_set_style_pad_all(nd_root, ui_page_inset(), 0);
     lv_obj_set_style_pad_row(nd_root, 8, 0);
     lv_obj_set_flex_flow(nd_root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(nd_root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);

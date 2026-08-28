@@ -18,6 +18,7 @@
 #include "nina_nav_arbiter.h"
 #include "app_config.h"
 #include "themes.h"
+#include "ui_round.h"
 #include "nina_empty_state.h"
 #include "time_parse.h"
 
@@ -733,8 +734,14 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
 
     sum_page = lv_obj_create(parent);
     lv_obj_remove_style_all(sum_page);
-    lv_obj_set_size(sum_page, screen_size() - 2 * OUTER_PADDING,
-                              screen_size() - 2 * OUTER_PADDING);
+    /* 688 on square (screen_size() 720 minus 2 * 16), the inscribed square on
+     * round: 510 at 720 and 564 at 800. Centred rather than left at the
+     * parent's top-left corner, so the placement does not depend on
+     * main_cont's pad (16, or the safe inset while the round inset aid is
+     * compiled in). On square the root exactly fills main_cont's content box,
+     * so centring resolves to the same (16,16) it has today. */
+    lv_obj_set_size(sum_page, ui_page_root_size(), ui_page_root_size());
+    lv_obj_center(sum_page);
     lv_obj_set_flex_flow(sum_page, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(sum_page, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
