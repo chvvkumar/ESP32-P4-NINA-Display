@@ -25,6 +25,15 @@
 
 /**
  * @brief Build the Image-forward widget tree.
+ *
+ * This entry point and the two below it are DEFINED PER FAMILY: the square
+ * bodies live in nina_layout_image.c behind #if !CONFIG_NINA_FAMILY_ROUND, the
+ * round ones (radial board 2) in nina_layout_image_round.c, which only the
+ * round build compiles (nina_round_srcs). There is no runtime dispatch; the
+ * linker takes the family's definitions. The retained-capture store and the
+ * three hooks at the end of this section stay in nina_layout_image.c, which is
+ * compiled on both families.
+ *
  * @param p           Page state; store widget pointers in p->alt
  * @param parent      The page root created by the spine (p->page)
  * @param page_index  NINA instance index, 0..MAX_NINA_INSTANCES-1
@@ -70,6 +79,24 @@ bool nina_layout_image_needs_capture(int instance);
  * it themselves. LVGL lock held by caller (same writer set as set_capture()).
  */
 void nina_layout_image_note_capture_request(int instance, bool asked);
+
+/**
+ * @brief Drop a retained capture that was remapped for the other Red Night state.
+ *
+ * Both family builders call this from their apply_theme; the capture store and
+ * the remap rule stay in nina_layout_image.c, which is compiled in both.
+ * LVGL lock held by caller.
+ */
+void nina_layout_image_note_theme_switch(int instance);
+
+/**
+ * @brief Re-attach a still-retained capture after a page rebuild.
+ *
+ * A rebuild that kept the frame (theme or URL edit rather than a page leave)
+ * shows it again instead of an empty background. No-op with no retained frame.
+ * LVGL lock held by caller.
+ */
+void nina_layout_image_reattach_capture(int instance);
 
 /* -- Layout 0 -- Dashboard, round family only ----------------------------- */
 
