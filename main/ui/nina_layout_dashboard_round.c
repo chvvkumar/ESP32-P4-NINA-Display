@@ -52,8 +52,11 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define DR_BULL_DX          88
 #define DR_BULL_R           44
 #define DR_BULL_DOT         14
-#define DR_VALUE_DY         196
-#define DR_FLIP_DY          266
+/* Review C12 M-5: the builder aligns these labels' CENTRE at the offset, but
+ * the mockup's CSS `top` values (556, 626) name the box TOP; the 44 px line
+ * height of Montserrat 40 needs the difference added back in. */
+#define DR_VALUE_DY         218
+#define DR_FLIP_DY          283
 
 /* Spine gaps. The 96 px Hanken face reports line_height 69, not the 108 px box
  * the mockup draws, so the column runs about 95 px short of radial.html unless
@@ -67,9 +70,9 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define DR_GAP_ELAPSED      30
 #define DR_GAP_FILTER       65
 
-/* Bullseye bearings, degrees clockwise from twelve o'clock (radial.html). */
-#define DR_BEARING_RMS      305
-#define DR_BEARING_HFR      125
+/* Bullseye bearings: DR_BEARING_RMS / DR_BEARING_HFR now live in
+ * nina_dashboard_internal.h (review C12 M-1), single owner shared with
+ * nina_dashboard_update.c. */
 
 #define DR_TRACK_COLOR      0x161616
 #define DR_RING_BORDER      0x262a30
@@ -284,9 +287,9 @@ void nina_layout_dashboard_round_create(dashboard_page_t *p, lv_obj_t *parent,
     nina_dashboard_bind_tap(p->alt.row_vals, NINA_TAP_EXPOSURE);
     p->alt.lbl_elapsed = dr_label(p->alt.row_vals, DR_FONT_ELAPSED,
         app_config_apply_brightness(current_theme->text_color, gb), "0");
-    lv_obj_t *unit = dr_label(p->alt.row_vals, DR_FONT_UNIT,
+    p->alt.lbl_unit = dr_label(p->alt.row_vals, DR_FONT_UNIT,
         app_config_apply_brightness(current_theme->label_color, gb), "s");
-    lv_obj_set_style_translate_y(unit,
+    lv_obj_set_style_translate_y(p->alt.lbl_unit,
         DR_FONT_UNIT->base_line - DR_FONT_ELAPSED->base_line, 0);
     lv_obj_add_flag(p->alt.row_vals, LV_OBJ_FLAG_HIDDEN);
 

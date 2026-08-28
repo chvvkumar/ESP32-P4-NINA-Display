@@ -23,6 +23,15 @@
 #define UI_DIAL_FLIP_SPAN_MIN 240
 
 /**
+ * Park angle (degrees clockwise from twelve o'clock) for the longest
+ * countdowns the tick still shows. Radial board 1's safety crown is a 40
+ * degree gap centred on twelve o'clock (+/-20); a tick let all the way to 360
+ * would sit inside that gap, reading as "flip in progress" instead of "flip
+ * is a long way off" (review C12 I-2). 360 - 20 - 2 keeps two degrees clear.
+ */
+#define UI_DIAL_TICK_PARK_DEG  338
+
+/**
  * @brief Fixed arc segment centred on the parent's centre.
  * @param r_mid  centre-line radius in px
  * @param width  stroke width in px
@@ -53,18 +62,23 @@ static inline lv_obj_t *ui_dial_arc(lv_obj_t *parent, int r_mid, int width,
  * @brief Put a countdown tick where @p minutes falls on a @p span_min dial.
  *
  * Zero minutes is twelve o'clock; the tick travels counter-clockwise as the
- * countdown grows and parks at the far end of the window beyond it. A negative
- * @p minutes hides the tick.
+ * countdown grows. A countdown longer than the window (@p minutes exceeding
+ * @p span_min), or negative, hides the tick outright rather than drawing it
+ * at the window edge: that edge sits right next to the crown, and a tick a
+ * full lap away is a stale/unknown reading, not a due-soon one. Within the
+ * window the tick still stops UI_DIAL_TICK_PARK_DEG short of a full lap, so
+ * the top of the range parks just outside the crown instead of wrapping into
+ * it (review C12 I-2).
  */
 static inline void ui_dial_set_tick(lv_obj_t *tick, int minutes, int span_min)
 {
     if (!tick) return;
-    if (minutes < 0 || span_min <= 0) {
+    if (minutes < 0 || minutes > span_min || span_min <= 0) {
         lv_obj_add_flag(tick, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    if (minutes > span_min) minutes = span_min;
     int deg_ccw = (minutes * 360) / span_min;
+    if (deg_ccw > UI_DIAL_TICK_PARK_DEG) deg_ccw = UI_DIAL_TICK_PARK_DEG;
     lv_arc_set_rotation(tick, (270 + 360 - deg_ccw) % 360);
     lv_obj_remove_flag(tick, LV_OBJ_FLAG_HIDDEN);
 }

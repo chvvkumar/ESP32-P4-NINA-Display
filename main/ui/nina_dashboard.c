@@ -605,6 +605,14 @@ static void apply_theme_to_page(dashboard_page_t *p) {
         lv_obj_set_style_text_color(p->alt.lbl_elapsed,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
     }
+    if (p->alt.lbl_unit) {
+        lv_obj_set_style_text_color(p->alt.lbl_unit,
+            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    }
+    if (p->ring_flip_tick) {
+        lv_obj_set_style_arc_color(p->ring_flip_tick,
+            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), LV_PART_MAIN);
+    }
     if (p->rms_dot) {
         lv_obj_set_style_bg_color(p->rms_dot,
             lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);

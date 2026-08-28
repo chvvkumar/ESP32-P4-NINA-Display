@@ -83,6 +83,14 @@
 #define ARC_TRANSITION_MS   300
 #define ARC_GAP_GRACE_S     60
 
+/* Round dashboard board (radial board 1) bullseye bearings, degrees clockwise
+ * from twelve o'clock (radial.html). Single owner shared by the builder
+ * (nina_layout_dashboard_round.c) and the update path
+ * (nina_dashboard_update.c), which used to carry these as duplicated literals
+ * (review C12 M-1). */
+#define DR_BEARING_RMS      305
+#define DR_BEARING_HFR      125
+
 void arc_interp_timer_cb(lv_timer_t *timer);
 
 typedef struct {
@@ -96,14 +104,18 @@ typedef struct {
      * pieces (stale label/overlay, empty_state_cont, exposure clock) exist. */
     uint8_t layout;
 
-    /* Segmented sub-bar hero — layout 1 only. */
+    /* Segmented sub-bar hero — layout 1, and round layout 0's rim sub ring
+     * (nina_layout_dashboard_round.c). */
     nina_subbar_t subbar;
 
     /* Layout-specific widget pointers. Owned by the layout module that created
-     * the page (nina_layout_image.c); the spine only
-     * zeroes it. Add fields here rather than as loose dashboard_page_t members. */
+     * the page: nina_layout_image.c (layout 1, Image-forward) or
+     * nina_layout_dashboard_round.c (round layout 0's centre spine), which
+     * reuse lbl_target / row_vals / lbl_elapsed / lbl_unit / inst below; the
+     * spine only zeroes it. Add fields here rather than as loose
+     * dashboard_page_t members. */
     struct {
-        lv_obj_t *lbl_target;       /* target name */
+        lv_obj_t *lbl_target;       /* target name (layout 1 and round layout 0) */
 
         /* Layout 1 — Image-forward (nina_layout_image.c) */
         lv_obj_t *cap_img;          /* full-bleed capture background */
@@ -112,14 +124,17 @@ typedef struct {
         lv_obj_t *row_seq;          /* row 1: identity | shield | step */
         lv_obj_t *lbl_safety;
         lv_obj_t *lbl_seq_step;
-        lv_obj_t *row_vals;         /* bottom value row (one 64 px baseline) */
+        lv_obj_t *row_vals;         /* bottom value row (one 64 px baseline); also
+                                      * round layout 0's elapsed+unit row */
         lv_obj_t *grp_left;         /* RMS + counter, tap = RMS graph */
         lv_obj_t *lbl_rms;          /* TOTAL RMS, hanken 48, threshold colour */
         lv_obj_t *lbl_count;        /* "done / target", hanken 28 */
-        lv_obj_t *lbl_elapsed;      /* "247s", hanken 64, written by the tick only */
+        lv_obj_t *lbl_elapsed;      /* "247s", hanken 64, written by the tick only;
+                                      * also round layout 0's elapsed digits */
         lv_obj_t *lbl_filter;       /* filter name, montserrat 24, filter colour */
+        lv_obj_t *lbl_unit;         /* elapsed unit "s" — round layout 0 only */
         int       inst;             /* owning NINA instance index */
-        /* end Layout 1 */
+        /* end layout-specific block */
     } alt;
 
     // Header
