@@ -28,6 +28,7 @@
 
 #include "nina_octoprint_internal.h"
 #include "ui_arclabel.h"
+#include "ui_dial.h"
 #include "ui_round.h"
 
 /* Rim ring and crown. Radii are ui_rim_radius() minus an absolute offset, so
@@ -126,20 +127,13 @@ static void build_rim(lv_obj_t *layer, octoprint_widgets_t *w)
     lv_obj_center(arc);
 
     /* Crown: a fixed span at twelve o'clock, painted with the state colour by
-     * the update path. Built as an arc so the stroke joins the ring cleanly. */
-    lv_obj_t *crown = lv_arc_create(layer);
-    lv_obj_set_size(crown, 2 * r + GR_CROWN_W, 2 * r + GR_CROWN_W);
-    lv_obj_center(crown);
-    lv_arc_set_rotation(crown, 270 - GR_CROWN_DEG / 2);
-    lv_arc_set_bg_angles(crown, 0, GR_CROWN_DEG);
-    lv_arc_set_range(crown, 0, 1);
-    lv_arc_set_value(crown, 1);
-    lv_obj_remove_style(crown, NULL, LV_PART_KNOB);
-    lv_obj_remove_style(crown, NULL, LV_PART_INDICATOR);
-    lv_obj_remove_flag(crown, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_remove_flag(crown, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_style_arc_width(crown, GR_CROWN_W, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(crown, LV_OPA_COVER, LV_PART_MAIN);
+     * the update path. ui_dial_arc() is the same fixed-arc-segment helper the
+     * NINA dashboard's safety crown and countdown tick use; unlike the
+     * hand-rolled version this replaces, it sets arc_rounded false, so the
+     * crown's flat ends stop overlapping the ring's rounded ones by a few px
+     * at 250 and 290 degrees (review_impl_D12.md M-3). */
+    lv_obj_t *crown = ui_dial_arc(layer, r, GR_CROWN_W,
+                                  -GR_CROWN_DEG / 2, GR_CROWN_DEG / 2);
     w->rim_crown = crown;
 
     /* G1: the state is caption-class text and changes far less than once a
@@ -245,6 +239,11 @@ static void build_error_slot(lv_obj_t *layer, octoprint_widgets_t *w)
     if (w->lbl_error) {
         /* octo_w_chip() builds it at Montserrat 12, under the round floor. */
         lv_obj_set_style_text_font(w->lbl_error, &lv_font_montserrat_28, 0);
+        /* error_text can run to 63 chars; clip it to the strip's own chord
+         * instead of letting an unclipped LV_SIZE_CONTENT label run past the
+         * panel (review_impl_D12.md M-2). */
+        lv_obj_set_width(w->lbl_error, GR_CELL_CHORD);
+        lv_label_set_long_mode(w->lbl_error, LV_LABEL_LONG_DOT);
     }
 }
 

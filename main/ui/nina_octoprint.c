@@ -1462,11 +1462,18 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
     if (s_w.state_dot) {
         lv_obj_set_style_bg_color(s_w.state_dot, lv_color_hex(state_col), 0);
     }
+    /* Round Immersive only: rim_crown/rim_state_arclabel are the page's one
+     * status element (no conn chip built there), so a closed serial link or a
+     * stale source turns them alert colored instead of leaving the crown grey
+     * while only the fault strip carries the news. state_dot has its own
+     * conn/fault chip beside it on every other layout, so it is untouched
+     * (review_impl_D12.md I-1). */
+    uint32_t crown_col = (s_w.rim_crown && (closed || stale)) ? col_alert() : state_col;
     if (s_w.rim_crown) {
-        lv_obj_set_style_arc_color(s_w.rim_crown, lv_color_hex(state_col), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(s_w.rim_crown, lv_color_hex(crown_col), LV_PART_MAIN);
     }
     if (s_w.rim_state_arclabel) {
-        lv_obj_set_style_text_color(s_w.rim_state_arclabel, lv_color_hex(state_col), 0);
+        lv_obj_set_style_text_color(s_w.rim_state_arclabel, lv_color_hex(crown_col), 0);
     }
 
     /* /api/connection mirrors the printer state ("Printing"/"Operational") while
@@ -1509,10 +1516,12 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
             fault_text = "Printer error";
         }
         /* The strip would only repeat the visible connection element (Bento
-         * places both in one header row), so suppress it when the texts match.
-         * When they differ -- a real error alongside a conn line -- both show,
-         * exactly as before. */
-        if (conn_show && strcmp(fault_text, conn_text) == 0) {
+         * places both in one header row), so suppress it when the texts match
+         * AND that element was actually built -- round layouts have no
+         * lbl_conn, so a closed link must still speak through the strip there
+         * (review_impl_D12.md I-1). When conn_text differs -- a real error
+         * alongside a conn line -- both show, exactly as before. */
+        if (conn_show && s_w.lbl_conn && strcmp(fault_text, conn_text) == 0) {
             fault = false;
         } else {
             set_txt(s_w.lbl_error, fault_text);

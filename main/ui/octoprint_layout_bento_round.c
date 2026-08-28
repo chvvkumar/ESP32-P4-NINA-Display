@@ -106,10 +106,10 @@ static void build_state_band(lv_obj_t *page, octoprint_widgets_t *w)
 }
 
 /**
- * Fault slot, born hidden. It gets its own row on the page, in the 16 px of
- * clear space above band B, rather than sharing band A's 48 px card with the
- * centred state line: the strip is absolutely placed, so when it shows it must
- * not land on the state text. Unplated, like the square header's, and at 28 px,
+ * Fault slot, born hidden. It gets its own row on the page, above band A, at
+ * y centre - 296, rather than sharing band A's 48 px card with the centred
+ * state line: the strip is absolutely placed, so when it shows it must not
+ * land on the state text. Unplated, like the square header's, and at 28 px,
  * because octo_w_chip() builds its label at Montserrat 12 and the round floor
  * is 27.
  */
@@ -131,6 +131,11 @@ static void build_fault_slot(lv_obj_t *page, octoprint_widgets_t *w)
                           LV_FLEX_ALIGN_CENTER);
     if (w->lbl_error) {
         lv_obj_set_style_text_font(w->lbl_error, &lv_font_montserrat_28, 0);
+        /* error_text can run to 63 chars; clip it to the strip's own chord
+         * instead of letting an unclipped LV_SIZE_CONTENT label run past the
+         * rim (review_impl_D12.md M-2). */
+        lv_obj_set_width(w->lbl_error, wdt);
+        lv_label_set_long_mode(w->lbl_error, LV_LABEL_LONG_DOT);
     }
     /* No dot: the state line stays the page's one accent element. */
     if (w->error_dot) {
