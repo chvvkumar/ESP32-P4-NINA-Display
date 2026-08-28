@@ -12,12 +12,14 @@
  */
 
 #include "nina_summary.h"
+#include "nina_summary_internal.h"
 #include "nina_dashboard_internal.h"
 #include "nina_dashboard.h"
 #include "nina_connection.h"
 #include "nina_nav_arbiter.h"
 #include "app_config.h"
 #include "themes.h"
+#include "ui_dial.h"
 #include "ui_round.h"
 #include "nina_empty_state.h"
 #include "time_parse.h"
@@ -159,65 +161,8 @@ static const card_layout_preset_t layout_presets[3] = {
     },
 };
 
-/* ── Per-card widget references ────────────────────────────────────── */
-typedef struct {
-    lv_obj_t *card;
-    lv_obj_t *lbl_name;
-    lv_obj_t *lbl_filter;
-    lv_obj_t *filter_box;
-    lv_obj_t *lbl_target;
-    lv_obj_t *bar_progress;
-    lv_obj_t *lbl_pct;          /* progress percentage label */
-    lv_obj_t *seq_row;          /* sequence info row (visible in 1-2 card mode) */
-    lv_obj_t *lbl_seq_title;    /* "SEQUENCE" label */
-    lv_obj_t *lbl_seq_name;
-    lv_obj_t *lbl_exp_title;    /* "EXPOSURES" label */
-    lv_obj_t *lbl_exp_val;      /* exposure count "X / Y" */
-    lv_obj_t *lbl_step_title;   /* "STEP" label */
-    lv_obj_t *lbl_seq_step;
-    lv_obj_t *stats_row;
-    lv_obj_t *lbl_rms_label;
-    lv_obj_t *lbl_rms_val;
-    lv_obj_t *lbl_hfr_label;
-    lv_obj_t *lbl_hfr_val;
-    lv_obj_t *lbl_flip_label;
-    lv_obj_t *lbl_flip_val;
-    lv_obj_t *detail_row;       /* exposure detail line (visible in 1-card mode) */
-    lv_obj_t *lbl_detail;
-    lv_obj_t *lbl_safety;       /* safety monitor icon (floating, bottom-left) */
-    int instance_index;         /* which NINA instance this card represents */
-    /* Bar exposure-model state (mirrors dashboard_page_t's arc fields) */
-    bool bar_completing;        /* true while snap-to-full animation is in flight */
-    int64_t exp_anchor_us;      /* monotonic esp_timer anchor (us); 0 = no active exposure */
-    float   exp_anchor_elapsed; /* elapsed seconds at the anchor moment */
-    bool    cached_is_exposing; /* last-seen is_exposing (edge detection) */
-    float   cached_total;       /* cached exposure_total (seconds) */
-    int64_t cached_end_epoch;   /* cached exposure_end_epoch (Unix seconds) */
-    int64_t gap_start_epoch;    /* inter-exposure gap grace start (Unix seconds) */
-    /* NINA-domain clock pair copied from nina_client_t while the data lock is
-     * held (summary update path); read lock-free by summary_bar_interp_cb.
-     * cached_nina_epoch == 0 -> unknown, fall back to time(NULL). */
-    int64_t cached_nina_epoch;   /* NINA-PC UTC epoch at capture (HTTP Date) */
-    int64_t cached_nina_mono_us; /* esp_timer_get_time() at capture */
-    /* Cached style values — only call lv_obj_set_style_* when changed to avoid
-     * unnecessary LVGL invalidations that trigger expensive full redraws. */
-    uint32_t cached_name_color;
-    uint32_t cached_filter_text_color;
-    uint32_t cached_filter_bg_color;
-    lv_opa_t cached_filter_bg_opa;
-    uint32_t cached_target_color;
-    uint32_t cached_bar_ind_color;
-    uint32_t cached_bar_bg_color;
-    uint32_t cached_pct_color;
-    uint32_t cached_seq_name_color;
-    uint32_t cached_exp_val_color;
-    uint32_t cached_seq_step_color;
-    uint32_t cached_rms_color;
-    uint32_t cached_hfr_color;
-    uint32_t cached_flip_color;
-    uint32_t cached_detail_color;
-    uint32_t cached_safety_color;
-} summary_card_t;
+/* summary_card_t lives in nina_summary_internal.h since task C4, so the
+ * round card builder can fill the same struct. */
 
 /* ── Module state ──────────────────────────────────────────────────── */
 static lv_obj_t *sum_page = NULL;
@@ -233,8 +178,9 @@ static void bar_start_exposure_anim(summary_card_t *sc);
  * card is hidden/skipped for unavailability so a stale anchor cannot keep the
  * interp timer driving a hidden bar. */
 static void bar_reset_exposure_state(summary_card_t *sc) {
-    if (!sc->bar_progress) return;
-    lv_anim_delete(sc->bar_progress, bar_anim_exec);
+    /* The anchor bookkeeping runs whatever widgets the card has: the round
+     * card has no bar, but its ring is driven from the same anchor. */
+    if (sc->bar_progress) lv_anim_delete(sc->bar_progress, bar_anim_exec);
     sc->bar_completing     = false;
     sc->exp_anchor_us      = 0;
     sc->exp_anchor_elapsed = 0;
@@ -244,8 +190,8 @@ static void bar_reset_exposure_state(summary_card_t *sc) {
     sc->gap_start_epoch    = 0;
     sc->cached_nina_epoch  = 0;
     sc->cached_nina_mono_us = 0;
-    set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
-    set_label_if_changed(sc->lbl_pct, "");
+    if (sc->bar_progress) set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
+    if (sc->lbl_pct)      set_label_if_changed(sc->lbl_pct, "");
 }
 
 /* Scaled copy of arc_start_exposure_anim (nina_dashboard_update.c). Drives one
@@ -282,7 +228,7 @@ static void summary_bar_interp_cb(lv_timer_t *timer) {
     (void)timer;
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         summary_card_t *sc = &cards[i];
-        if (!sc->bar_progress || sc->bar_completing) continue;
+        if (sc->bar_completing) continue;
         if (sc->exp_anchor_us == 0 || sc->cached_total <= 0) continue;
         if (!sc->cached_is_exposing) continue;
 
@@ -307,9 +253,23 @@ static void summary_bar_interp_cb(lv_timer_t *timer) {
         int64_t remaining_wall_ms = (sc->cached_end_epoch - now_nina) * 1000;
         float elapsed_wall = sc->cached_total - (float)remaining_wall_ms / 1000.0f;
 
+        bool reanchored = false;
         if (elapsed_wall < elapsed - 1.0f) {
             sc->exp_anchor_us = esp_timer_get_time();
             sc->exp_anchor_elapsed = (elapsed_wall > 0.0f) ? elapsed_wall : 0.0f;
+            elapsed = sc->exp_anchor_elapsed;
+            reanchored = true;
+        }
+
+        /* The round card's ring is driven by the same anchor as the square
+         * card's bar, from this one timer. */
+        if (sc->ring.cont) {
+            nina_subbar_set_progress(&sc->ring, elapsed / sc->cached_total);
+        }
+
+        if (!sc->bar_progress) continue;
+
+        if (reanchored) {
             bar_start_exposure_anim(sc);
             continue;
         }
@@ -330,8 +290,9 @@ static void summary_bar_interp_cb(lv_timer_t *timer) {
 /* Empty state widget (shared component — Plan 01) */
 static lv_obj_t *empty_cont = NULL;
 
-/* Glass card style — semi-transparent with subtle border */
-static lv_style_t style_glass_card;
+/* Glass card style: semi-transparent with subtle border. Not static since
+ * task C4, so the round card builder can add it (nina_summary_internal.h). */
+lv_style_t style_glass_card;
 static bool styles_initialized = false;
 
 /* ── Helpers ───────────────────────────────────────────────────────── */
@@ -346,6 +307,13 @@ static void summary_card_click_cb(lv_event_t *e) {
         nina_dashboard_show_page_animated(page, 0, 0);
         nav_arbiter_submit_user(page, esp_timer_get_time() / 1000);
     }
+}
+
+void summary_bind_card_tap(lv_obj_t *card, int instance_index) {
+    if (!card) return;
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(card, summary_card_click_cb, LV_EVENT_CLICKED,
+                        (void *)(intptr_t)instance_index);
 }
 
 static uint32_t darken_color_summary(uint32_t color, int pct) {
@@ -445,6 +413,10 @@ static void apply_glass_theme(void) {
     }
 }
 
+#if !CONFIG_NINA_FAMILY_ROUND
+/* The square card builder and its stat-column helper. The round family builds
+ * its cards in nina_summary_round.c, where neither has a caller. */
+
 /**
  * @brief Build a single stat column (label above, value below).
  */
@@ -521,9 +493,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     lv_obj_set_style_pad_row(sc->card, 6, 0);
 
     /* Make card clickable for navigation */
-    lv_obj_add_flag(sc->card, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(sc->card, summary_card_click_cb, LV_EVENT_CLICKED,
-                        (void *)(intptr_t)instance_index);
+    summary_bind_card_tap(sc->card, instance_index);
 
     /* ── Instance name (full width, truncated with dots) ── */
     sc->lbl_name = lv_label_create(sc->card);
@@ -705,6 +675,7 @@ static void create_card(summary_card_t *sc, lv_obj_t *parent, int instance_index
     ui_set_theme_text_color(sc->lbl_detail, UI_THEME_COLOR(text_color));
 
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /**
  * @brief Create the empty-state container (shown when no instances connected).
@@ -734,6 +705,29 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
 
     sum_page = lv_obj_create(parent);
     lv_obj_remove_style_all(sum_page);
+
+    /* Build one card per fixed-identity slot (full reserved band width).
+     * card_count is always MAX_NINA_INSTANCES so cards[i] == instance i. */
+    card_count = MAX_NINA_INSTANCES;
+
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Radial board 3: the rings reach past the inset square, so the root is
+     * full bleed and negates whatever pad the parent carries (16, or the safe
+     * inset while the phase 1 inset aid is on), the same way the full-bleed
+     * dashboard pages do it. The cards are placed absolutely, so the root runs
+     * no layout. */
+    {
+        const int parent_pad = lv_obj_get_style_pad_left(parent, 0);
+        lv_obj_set_size(sum_page, screen_size(), screen_size());
+        lv_obj_set_pos(sum_page, -parent_pad, -parent_pad);
+        lv_obj_set_layout(sum_page, LV_LAYOUT_NONE);
+        lv_obj_clear_flag(sum_page, LV_OBJ_FLAG_SCROLLABLE);
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            nina_summary_round_create_card(&cards[i], sum_page, i);
+            lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
+#else
     /* 688 on square (screen_size() 720 minus 2 * 16), the inscribed square on
      * round: 510 at 720 and 564 at 800. Centred rather than left at the
      * parent's top-left corner, so the placement does not depend on
@@ -748,16 +742,13 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
     lv_obj_set_style_pad_row(sum_page, CARD_GAP, 0);
     lv_obj_clear_flag(sum_page, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Build one card per fixed-identity slot (full reserved band width).
-     * card_count is always MAX_NINA_INSTANCES so cards[i] == instance i. */
-    card_count = MAX_NINA_INSTANCES;
-
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         create_card(&cards[i], sum_page, i);
         /* All cards start hidden; summary_page_rebuild / summary_page_update
          * control visibility based on nina_slot_available[] and connectivity. */
         lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
     }
+#endif
 
     /* Single shared interpolation timer driving all cards' progress bars
      * (mirrors the per-page arc timer in nina_dashboard.c). Paused whenever the
@@ -807,9 +798,13 @@ void summary_page_rebuild(void) {
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         if (!nina_slot_available[i]) {
             lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+            /* The round card's rings go with it. */
+            if (cards[i].ring.cont)      lv_obj_add_flag(cards[i].ring.cont, LV_OBJ_FLAG_HIDDEN);
+            if (cards[i].ring_crown)     lv_obj_add_flag(cards[i].ring_crown, LV_OBJ_FLAG_HIDDEN);
+            if (cards[i].ring_flip_tick) lv_obj_add_flag(cards[i].ring_flip_tick, LV_OBJ_FLAG_HIDDEN);
             /* Drop the exposure anchor so a re-enabled card starts clean and no
              * stale anchor keeps the interp timer driving a hidden bar. */
-            lv_anim_delete(cards[i].bar_progress, bar_anim_exec);
+            if (cards[i].bar_progress) lv_anim_delete(cards[i].bar_progress, bar_anim_exec);
             cards[i].bar_completing     = false;
             cards[i].exp_anchor_us      = 0;
             cards[i].exp_anchor_elapsed = 0;
@@ -829,6 +824,10 @@ void summary_page_rebuild(void) {
 /* ── Layout Update ─────────────────────────────────────────────────── */
 
 static void update_card_layout(summary_card_t *sc, int visible_count) {
+    /* The three font and padding tiers exist for the square card's widget set.
+     * The round card carries none of them: it is cut to its chord and its
+     * numbers are rings. */
+    if (!sc->bar_progress) return;
     int idx = (visible_count <= 1) ? 0 : (visible_count == 2) ? 1 : 2;
     const card_layout_preset_t *p = &layout_presets[idx];
 
@@ -987,7 +986,14 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
     /* Empty state: show message when nothing is visible */
     if (visible == 0) {
         for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
-            lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
+            summary_card_t *sc = &cards[i];
+            lv_obj_add_flag(sc->card, LV_OBJ_FLAG_HIDDEN);
+            /* This path returns before the per-card loop, so the round card's
+             * rings have to be taken down here too: an offline rig is no card
+             * and no ring, and the empty state must not sit inside one. */
+            if (sc->ring.cont)      lv_obj_add_flag(sc->ring.cont, LV_OBJ_FLAG_HIDDEN);
+            if (sc->ring_crown)     lv_obj_add_flag(sc->ring_crown, LV_OBJ_FLAG_HIDDEN);
+            if (sc->ring_flip_tick) lv_obj_add_flag(sc->ring_flip_tick, LV_OBJ_FLAG_HIDDEN);
         }
         nina_empty_state_show(empty_cont);
         prev_visible_count = 0;
@@ -1084,8 +1090,14 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             /* Card is hidden this cycle — drop any stale exposure anchor so the
              * interp timer doesn't keep driving an off-screen bar. */
             bar_reset_exposure_state(sc);
+            /* An offline rig is a ring that is simply not there. */
+            if (sc->ring.cont)      lv_obj_add_flag(sc->ring.cont, LV_OBJ_FLAG_HIDDEN);
+            if (sc->ring_crown)     lv_obj_add_flag(sc->ring_crown, LV_OBJ_FLAG_HIDDEN);
+            if (sc->ring_flip_tick) lv_obj_add_flag(sc->ring_flip_tick, LV_OBJ_FLAG_HIDDEN);
             continue;
         }
+        if (sc->ring.cont)  lv_obj_remove_flag(sc->ring.cont, LV_OBJ_FLAG_HIDDEN);
+        if (sc->ring_crown) lv_obj_remove_flag(sc->ring_crown, LV_OBJ_FLAG_HIDDEN);
 
         /* Trylock failed this cycle — the instance may be mid-commit, so leave
          * the card's previous data-bearing contents intact rather than reading
@@ -1112,39 +1124,45 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             set_label_if_changed(sc->lbl_name, host[0] ? host : "N.I.N.A.");
         }
 
-        /* Name color: theme header color (always connected at this point) */
+        /* Name color: theme header color (always connected at this point).
+         * The radial card draws the identity dim and the target bright, so the
+         * hierarchy reads on a 326 px chord; ring.cont is the round marker. */
         if (current_theme) {
             uint32_t name_color = app_config_apply_brightness(
-                current_theme->header_text_color, gb);
+                sc->ring.cont ? current_theme->label_color
+                              : current_theme->header_text_color, gb);
             set_text_color_cached(sc->lbl_name, &sc->cached_name_color, name_color);
         }
 
-        /* Filter */
-        if (d->current_filter[0]) {
-            set_label_if_changed(sc->lbl_filter, d->current_filter);
-            uint32_t fc = theme_is_red_night(current_theme)
-                ? 0 : app_config_get_filter_color(d->current_filter, i);
-            if (fc != 0) {
-                uint32_t dimmed_fc = app_config_apply_brightness(fc, gb);
-                set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color, dimmed_fc);
-                set_bg_color_cached(sc->filter_box, &sc->cached_filter_bg_color, dimmed_fc, 0);
-                set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_20, 0);
-            } else if (current_theme) {
-                set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color,
-                    app_config_apply_brightness(current_theme->filter_text_color, gb));
+        /* Filter badge. The round card has none: its ring carries the filter
+         * as the colour of every block. */
+        if (sc->lbl_filter && sc->filter_box) {
+            if (d->current_filter[0]) {
+                set_label_if_changed(sc->lbl_filter, d->current_filter);
+                uint32_t fc = theme_is_red_night(current_theme)
+                    ? 0 : app_config_get_filter_color(d->current_filter, i);
+                if (fc != 0) {
+                    uint32_t dimmed_fc = app_config_apply_brightness(fc, gb);
+                    set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color, dimmed_fc);
+                    set_bg_color_cached(sc->filter_box, &sc->cached_filter_bg_color, dimmed_fc, 0);
+                    set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_20, 0);
+                } else if (current_theme) {
+                    set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color,
+                        app_config_apply_brightness(current_theme->filter_text_color, gb));
+                    set_bg_color_cached(sc->filter_box, &sc->cached_filter_bg_color,
+                        app_config_apply_brightness(current_theme->bento_border, gb), 0);
+                    set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_50, 0);
+                }
+            } else {
+                set_label_if_changed(sc->lbl_filter, "--");
+                if (current_theme) {
+                    set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color,
+                        app_config_apply_brightness(current_theme->label_color, gb));
+                }
                 set_bg_color_cached(sc->filter_box, &sc->cached_filter_bg_color,
-                    app_config_apply_brightness(current_theme->bento_border, gb), 0);
+                    current_theme ? current_theme->bento_bg : 0x000000, 0);
                 set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_50, 0);
             }
-        } else {
-            set_label_if_changed(sc->lbl_filter, "--");
-            if (current_theme) {
-                set_text_color_cached(sc->lbl_filter, &sc->cached_filter_text_color,
-                    app_config_apply_brightness(current_theme->label_color, gb));
-            }
-            set_bg_color_cached(sc->filter_box, &sc->cached_filter_bg_color,
-                current_theme ? current_theme->bento_bg : 0x000000, 0);
-            set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_50, 0);
         }
 
         /* Target name */
@@ -1159,6 +1177,9 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                 current_theme->target_name_color, gb);
             set_text_color_cached(sc->lbl_target, &sc->cached_target_color, tgt_color);
         }
+
+        /* The ring is this rig's progress, filter colour and sub count. */
+        if (sc->ring.cont) nina_subbar_update(&sc->ring, d, i, gb);
 
         /* Progress bar + percentage — monotonic-timer exposure model scaled to
          * 0-100 (ports update_exposure_arc from nina_dashboard_update.c). Smooth
@@ -1188,20 +1209,27 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
 
             if (finished_edge) {
                 /* Snap the bar to full for a polished completion; the gap logic
-                 * below then holds/fades it before the next sub. */
-                lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                 * below then holds/fades it before the next sub. The ring gets
+                 * the same snap, since the interp timer stops advancing it
+                 * while bar_completing is set. */
                 sc->bar_completing = true;
                 sc->exp_anchor_us = 0;
-                int cur_fill = lv_bar_get_value(sc->bar_progress);
-                lv_anim_t a;
-                lv_anim_init(&a);
-                lv_anim_set_var(&a, sc->bar_progress);
-                lv_anim_set_values(&a, cur_fill, BAR_RANGE);
-                lv_anim_set_time(&a, BAR_TRANSITION_MS);
-                lv_anim_set_exec_cb(&a, bar_anim_exec);
-                lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-                lv_anim_start(&a);
-                SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", 100);
+                if (sc->ring.cont) nina_subbar_set_progress(&sc->ring, 1.0f);
+                if (sc->bar_progress) {
+                    /* lv_anim_delete(NULL, cb) would delete EVERY card's bar
+                     * animation, so this guard is load bearing. */
+                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                    int cur_fill = lv_bar_get_value(sc->bar_progress);
+                    lv_anim_t a;
+                    lv_anim_init(&a);
+                    lv_anim_set_var(&a, sc->bar_progress);
+                    lv_anim_set_values(&a, cur_fill, BAR_RANGE);
+                    lv_anim_set_time(&a, BAR_TRANSITION_MS);
+                    lv_anim_set_exec_cb(&a, bar_anim_exec);
+                    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                    lv_anim_start(&a);
+                }
+                if (sc->lbl_pct) SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", 100);
             }
 
             if (d->exposure_total > 0 && d->exposure_end_epoch > 0 && d->is_exposing) {
@@ -1235,14 +1263,16 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     sc->exp_anchor_elapsed = seed;
                     sc->bar_completing = false;
 
-                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
-                    int seed_val = (int)((seed * (float)BAR_RANGE) / d->exposure_total);
-                    if (seed_val < 0) seed_val = 0;
-                    if (seed_val > BAR_RANGE - 1) seed_val = BAR_RANGE - 1;
-                    lv_bar_set_value(sc->bar_progress, seed_val, LV_ANIM_OFF);
-                    SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", seed_val);
+                    if (sc->bar_progress) {
+                        lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                        int seed_val = (int)((seed * (float)BAR_RANGE) / d->exposure_total);
+                        if (seed_val < 0) seed_val = 0;
+                        if (seed_val > BAR_RANGE - 1) seed_val = BAR_RANGE - 1;
+                        lv_bar_set_value(sc->bar_progress, seed_val, LV_ANIM_OFF);
+                        if (sc->lbl_pct) SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", seed_val);
 
-                    bar_start_exposure_anim(sc);
+                        bar_start_exposure_anim(sc);
+                    }
                 } else if (total_changed) {
                     /* Same ongoing sub, exposure_total corrected. Re-anchor and
                      * smoothly animate the one-time correction; do NOT call
@@ -1256,20 +1286,22 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     sc->exp_anchor_us = esp_timer_get_time();
                     sc->exp_anchor_elapsed = seed;
 
-                    int target_val = (int)((seed * (float)BAR_RANGE) / d->exposure_total);
-                    if (target_val < 0) target_val = 0;
-                    if (target_val > BAR_RANGE - 1) target_val = BAR_RANGE - 1;
-                    int cur_val = lv_bar_get_value(sc->bar_progress);
+                    if (sc->bar_progress) {
+                        int target_val = (int)((seed * (float)BAR_RANGE) / d->exposure_total);
+                        if (target_val < 0) target_val = 0;
+                        if (target_val > BAR_RANGE - 1) target_val = BAR_RANGE - 1;
+                        int cur_val = lv_bar_get_value(sc->bar_progress);
 
-                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
-                    lv_anim_t a;
-                    lv_anim_init(&a);
-                    lv_anim_set_var(&a, sc->bar_progress);
-                    lv_anim_set_values(&a, cur_val, target_val);
-                    lv_anim_set_time(&a, BAR_TRANSITION_MS);
-                    lv_anim_set_exec_cb(&a, bar_anim_exec);
-                    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-                    lv_anim_start(&a);
+                        lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                        lv_anim_t a;
+                        lv_anim_init(&a);
+                        lv_anim_set_var(&a, sc->bar_progress);
+                        lv_anim_set_values(&a, cur_val, target_val);
+                        lv_anim_set_time(&a, BAR_TRANSITION_MS);
+                        lv_anim_set_exec_cb(&a, bar_anim_exec);
+                        lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                        lv_anim_start(&a);
+                    }
                 }
                 /* Normal progress updates are handled by summary_bar_interp_cb. */
             } else {
@@ -1298,18 +1330,20 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                         sc->bar_completing = false;
                         sc->cached_nina_epoch = 0;
                         sc->cached_nina_mono_us = 0;
-                        lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                        if (sc->ring.cont) nina_subbar_set_progress(&sc->ring, 0.0f);
+                        if (sc->bar_progress) {
+                            lv_anim_delete(sc->bar_progress, bar_anim_exec);
 
-                        lv_anim_t a;
-                        lv_anim_init(&a);
-                        lv_anim_set_var(&a, sc->bar_progress);
-                        lv_anim_set_values(&a, lv_bar_get_value(sc->bar_progress), 0);
-                        lv_anim_set_time(&a, 500);
-                        lv_anim_set_exec_cb(&a, bar_anim_exec);
-                        lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-                        lv_anim_start(&a);
-
-                        set_label_if_changed(sc->lbl_pct, "");
+                            lv_anim_t a;
+                            lv_anim_init(&a);
+                            lv_anim_set_var(&a, sc->bar_progress);
+                            lv_anim_set_values(&a, lv_bar_get_value(sc->bar_progress), 0);
+                            lv_anim_set_time(&a, 500);
+                            lv_anim_set_exec_cb(&a, bar_anim_exec);
+                            lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+                            lv_anim_start(&a);
+                        }
+                        if (sc->lbl_pct) set_label_if_changed(sc->lbl_pct, "");
                     }
                     /* else: within grace — hold, do nothing. */
                 } else {
@@ -1317,15 +1351,18 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     sc->gap_start_epoch = 0;
                     sc->exp_anchor_us = 0;
                     sc->exp_anchor_elapsed = 0;
-                    lv_anim_delete(sc->bar_progress, bar_anim_exec);
-                    set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
-                    set_label_if_changed(sc->lbl_pct, "");
+                    if (sc->ring.cont) nina_subbar_set_progress(&sc->ring, 0.0f);
+                    if (sc->bar_progress) {
+                        lv_anim_delete(sc->bar_progress, bar_anim_exec);
+                        set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
+                    }
+                    if (sc->lbl_pct) set_label_if_changed(sc->lbl_pct, "");
                 }
             }
         }
 
         /* Progress bar color: filter color or theme progress */
-        {
+        if (sc->bar_progress) {
             uint32_t bar_col = 0;
             if (!theme_is_red_night(current_theme) && d->current_filter[0]) {
                 bar_col = app_config_get_filter_color(d->current_filter, i);
@@ -1344,13 +1381,13 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
         }
 
         /* Percentage label color */
-        if (current_theme) {
+        if (sc->lbl_pct && current_theme) {
             set_text_color_cached(sc->lbl_pct, &sc->cached_pct_color,
                 app_config_apply_brightness(current_theme->text_color, gb));
         }
 
         /* Sequence info (visible in 1-2 card mode) */
-        if (visible <= 2 && !lv_obj_has_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN)) {
+        if (sc->seq_row && visible <= 2 && !lv_obj_has_flag(sc->seq_row, LV_OBJ_FLAG_HIDDEN)) {
             if (d->container_name[0]) {
                 set_label_if_changed(sc->lbl_seq_name, d->container_name);
             } else {
@@ -1415,51 +1452,83 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             }
         }
 
-        /* HFR */
-        if (d->hfr > 0.001f) {
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%.2f", d->hfr);
-            set_label_if_changed(sc->lbl_hfr_val, buf);
-            uint32_t hfr_col = theme_is_red_night(current_theme)
-                ? 0 : app_config_get_hfr_color(d->hfr, i);
-            if (hfr_col != 0) {
-                set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
-                    app_config_apply_brightness(hfr_col, gb));
-            } else if (current_theme) {
-                set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
-                    app_config_apply_brightness(current_theme->hfr_color, gb));
-            }
-        } else {
-            set_label_if_changed(sc->lbl_hfr_val, "--");
-            if (current_theme) {
-                set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
-                    app_config_apply_brightness(current_theme->text_color, gb));
+        /* Bullseye dot: distance from centre is the value against its
+         * configured tolerance (ok_max), clamped by ui_dial_place_dot so an
+         * out-of-tolerance value stays on the card. */
+        if (sc->rms_dot && sc->rms_bull) {
+            threshold_config_t t;
+            app_config_get_rms_threshold_config(i, &t);
+            float lim = (t.ok_max > 0.01f) ? t.ok_max : 1.0f;
+            float ratio = (d->guider.rms_total > 0.0f) ? d->guider.rms_total / lim : 0.0f;
+            ui_dial_place_dot(sc->rms_dot, sc->rms_bull, ratio, SR_BEARING_RMS);
+        }
+
+        /* HFR. The round card shows it as a bullseye only, with no figure. */
+        if (sc->lbl_hfr_val) {
+            if (d->hfr > 0.001f) {
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%.2f", d->hfr);
+                set_label_if_changed(sc->lbl_hfr_val, buf);
+                uint32_t hfr_col = theme_is_red_night(current_theme)
+                    ? 0 : app_config_get_hfr_color(d->hfr, i);
+                if (hfr_col != 0) {
+                    set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
+                        app_config_apply_brightness(hfr_col, gb));
+                } else if (current_theme) {
+                    set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
+                        app_config_apply_brightness(current_theme->hfr_color, gb));
+                }
+            } else {
+                set_label_if_changed(sc->lbl_hfr_val, "--");
+                if (current_theme) {
+                    set_text_color_cached(sc->lbl_hfr_val, &sc->cached_hfr_color,
+                        app_config_apply_brightness(current_theme->text_color, gb));
+                }
             }
         }
 
-        /* Time to flip — format "HH:MM:SS" as "Xh XXm" */
-        if (d->meridian_flip[0] && strcmp(d->meridian_flip, "--") != 0
-            && strcmp(d->meridian_flip, "FLIPPING") != 0) {
-            int hh = 0, mm = 0;
-            if (sscanf(d->meridian_flip, "%d:%d", &hh, &mm) >= 2) {
-                char buf[16];
-                snprintf(buf, sizeof(buf), "%dh %02dm", hh, mm);
-                set_label_if_changed(sc->lbl_flip_val, buf);
-            } else {
-                set_label_if_changed(sc->lbl_flip_val, d->meridian_flip);
-            }
-        } else if (d->meridian_flip[0]) {
-            set_label_if_changed(sc->lbl_flip_val, d->meridian_flip);
-        } else {
-            set_label_if_changed(sc->lbl_flip_val, "--");
+        if (sc->hfr_dot && sc->hfr_bull) {
+            threshold_config_t t;
+            app_config_get_hfr_threshold_config(i, &t);
+            float lim = (t.ok_max > 0.01f) ? t.ok_max : 3.5f;
+            float ratio = (d->hfr > 0.0f) ? d->hfr / lim : 0.0f;
+            ui_dial_place_dot(sc->hfr_dot, sc->hfr_bull, ratio, SR_BEARING_HFR);
         }
-        if (current_theme) {
-            set_text_color_cached(sc->lbl_flip_val, &sc->cached_flip_color,
-                app_config_apply_brightness(current_theme->text_color, gb));
+
+        /* Time to flip, "HH:MM:SS" formatted as "Xh XXm". The round card has no
+         * figure: the parsed minutes go to the tick on its rim ring. */
+        {
+            int flip_mins = -1;
+            if (d->meridian_flip[0] && strcmp(d->meridian_flip, "--") != 0
+                && strcmp(d->meridian_flip, "FLIPPING") != 0) {
+                int hh = 0, mm = 0;
+                if (sscanf(d->meridian_flip, "%d:%d", &hh, &mm) >= 2) {
+                    flip_mins = hh * 60 + mm;
+                    if (sc->lbl_flip_val) {
+                        char buf[16];
+                        snprintf(buf, sizeof(buf), "%dh %02dm", hh, mm);
+                        set_label_if_changed(sc->lbl_flip_val, buf);
+                    }
+                } else if (sc->lbl_flip_val) {
+                    set_label_if_changed(sc->lbl_flip_val, d->meridian_flip);
+                }
+            } else if (d->meridian_flip[0]) {
+                if (strcmp(d->meridian_flip, "FLIPPING") == 0) flip_mins = 0;
+                if (sc->lbl_flip_val) set_label_if_changed(sc->lbl_flip_val, d->meridian_flip);
+            } else if (sc->lbl_flip_val) {
+                set_label_if_changed(sc->lbl_flip_val, "--");
+            }
+            if (sc->lbl_flip_val && current_theme) {
+                set_text_color_cached(sc->lbl_flip_val, &sc->cached_flip_color,
+                    app_config_apply_brightness(current_theme->text_color, gb));
+            }
+            if (sc->ring_flip_tick) {
+                ui_dial_set_tick(sc->ring_flip_tick, flip_mins, UI_DIAL_FLIP_SPAN_MIN);
+            }
         }
 
         /* Exposure detail line (1-card mode only) */
-        if (visible <= 1 &&
+        if (sc->detail_row && visible <= 1 &&
             !lv_obj_has_flag(sc->detail_row, LV_OBJ_FLAG_HIDDEN)) {
             char detail[128] = "";
             int len = 0;
@@ -1528,6 +1597,27 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     theme_is_red_night(current_theme) ? current_theme->label_color : 0x999999);
             }
         }
+
+        /* Safety crown. A sibling of the block above, never inside it: the
+         * round card draws the crown INSTEAD of lbl_safety, so a crown paint
+         * nested in that branch would never run. */
+        if (sc->ring_crown && current_theme) {
+            uint32_t crown;
+            if (!d->safety_connected)   crown = theme_is_red_night(current_theme)
+                                                ? current_theme->label_color : 0x999999;
+            else if (d->safety_is_safe) crown = theme_is_red_night(current_theme)
+                                                ? 0x7f1d1d : 0x4CAF50;
+            else                        crown = theme_is_red_night(current_theme)
+                                                ? 0xff0000 : 0xF44336;
+            crown = app_config_apply_brightness(crown, gb);
+            /* Every lv_obj_set_style_* call invalidates whether or not the
+             * value changed, and an invalidation is a full-frame redraw here. */
+            if (sc->cached_safety_color != crown) {
+                sc->cached_safety_color = crown;
+                lv_obj_set_style_arc_color(sc->ring_crown, lv_color_hex(crown),
+                                           LV_PART_MAIN);
+            }
+        }
     }
 }
 
@@ -1584,6 +1674,23 @@ void summary_page_apply_theme(void) {
         if (sc->bar_progress) {
             lv_obj_set_style_bg_color(sc->bar_progress,
                 lv_color_hex(current_theme->bento_border), 0);
+        }
+
+        /* Round shape handles (radial board 3). All NULL on square. The crown
+         * repaints on the next poll, from the cache cleared above. */
+        if (sc->ring.cont) nina_subbar_apply_theme(&sc->ring);
+        if (sc->ring_flip_tick) {
+            lv_obj_set_style_arc_color(sc->ring_flip_tick,
+                lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)),
+                LV_PART_MAIN);
+        }
+        if (sc->rms_dot) {
+            lv_obj_set_style_bg_color(sc->rms_dot,
+                lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
+        }
+        if (sc->hfr_dot) {
+            lv_obj_set_style_bg_color(sc->hfr_dot,
+                lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
         }
     }
 
