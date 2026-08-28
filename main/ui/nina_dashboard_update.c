@@ -199,7 +199,7 @@ void arc_interp_timer_cb(lv_timer_t *timer) {
      * linear fill animation pointed at a now-stale end time. On the square
      * bento layout p->layout is always 0 (arc dashboard, the only square
      * layout), so this is the same arc_interp_tick() body running in the same
-     * place it always has — the reordering changes nothing there. */
+     * place it always has: the reordering changes nothing there. */
     arc_interp_tick(p);
     /* subbar_interp_tick() returns immediately when there is no block row, so
      * this is a no-op on the square bento layout and drives the round board's
@@ -209,7 +209,7 @@ void arc_interp_timer_cb(lv_timer_t *timer) {
 
 /* Layout 0 only: the exposure arc's monotonic-anchor correction and long
  * linear fill animation. Split out of arc_interp_timer_cb so the timer can
- * run this before subbar_interp_tick() — see the call site. */
+ * run this before subbar_interp_tick(): see the call site. */
 static void arc_interp_tick(dashboard_page_t *p) {
     if (p->layout != 0) return;
     if (!p->arc_exposure || p->arc_completing) return;
