@@ -1041,6 +1041,7 @@ static void apply_mode(void)
     lv_obj_t *corners[] = {
         s_sc_cap_contacts, s_sc_within, s_sc_cap_range, s_sc_range,
         s_sc_call, s_sc_ident, s_sc_alt, s_sc_dist, s_sc_rate, s_sc_cue,
+        s_scope_contacts_ring, s_scope_rim_label, s_scope_contacts_arclabel,
     };
     for (size_t i = 0; i < sizeof(corners) / sizeof(corners[0]); i++) {
         show_obj(corners[i], scope);
@@ -1267,8 +1268,32 @@ static void place_scope_labels(int max)
             if (!best || s->rank < best->rank) best = s;
         }
         if (!best) break;
+        int ax = best->gx, ay = best->gy;
+        if (s_geom.scope_lbl_r > 0) {
+            /* Ride outward along the contact's own bearing, stopped short of
+             * the bezel: this is the round Scope's declutter rule and the one
+             * place a label never sits on a contact. */
+            int dx = ax - DISC_CX, dy = ay - DISC_CY;
+            float len = sqrtf((float)(dx * dx + dy * dy));
+            if (len > 1.0f) {
+                float want = len + 48.0f;
+                if (want > (float)s_geom.scope_lbl_r) {
+                    want = (float)s_geom.scope_lbl_r;
+                }
+                if (want > len) {
+                    ax = DISC_CX + (int)((float)dx * want / len);
+                    ay = DISC_CY + (int)((float)dy * want / len);
+                }
+            }
+        }
         lv_area_t box;
-        place_tag_box(best->gx, best->gy, best->mark, &box);
+        place_tag_box(ax, ay, best->mark, &box);
+        if ((ax != best->gx || ay != best->gy) && s_lead_n > 0) {
+            /* place_tag_box() anchored the leader on the pushed point; the line
+             * has to reach the contact itself or it floats. */
+            s_lead[s_lead_n - 1].x1 = (int16_t)best->gx;
+            s_lead[s_lead_n - 1].y1 = (int16_t)best->gy;
+        }
         best->x = (int16_t)box.x1;
         best->y = (int16_t)box.y1;
         best->placed = true;
@@ -1320,6 +1345,23 @@ static void place_compass(void)
  */
 static void place_ring_label(int slot, int r, const char *text)
 {
+    if (slot == 2 && s_mode == MODE_SCOPE && s_scope_rim_label) {
+        /* The rim IS max range on the round Scope, so the number rides the rim
+         * instead of the diagonal and reserves no rectangle.
+         *
+         * place_rings() runs from every recompute(), which runs per touch-move
+         * during a drag, and lv_arclabel_set_text() reallocates and re-lays out
+         * the run on every call. Shadow the string and write only on a change:
+         * the range only moves on a config change. */
+        static char rim_shadow[16];
+        if (strcmp(rim_shadow, text) != 0) {
+            snprintf(rim_shadow, sizeof(rim_shadow), "%s", text);
+            lv_arclabel_set_text(s_scope_rim_label, rim_shadow);
+        }
+        show_obj(s_lbl_ring[slot], false);
+        s_ring_lbl_used[slot] = false;
+        return;
+    }
     /* Only the outermost number takes the family inset; the two inner ones
      * would otherwise crawl toward the centre on the Scope. */
     int inset = (slot == 2) ? s_geom.ring_inset : ADSB_RING_INSET_INNER;
@@ -1675,6 +1717,11 @@ static void fill_scope_corners(int within, int tracked, float range, page_conn_t
     if (tracked > 999) tracked = 999;
     snprintf(buf, sizeof(buf), "%d / %d", within, tracked);
     set_lbl(s_sc_within, buf);
+    if (s_scope_contacts_ring) {
+        int v = (tracked > 0) ? (within * 1000 / tracked) : 0;
+        if (v > 1000) v = 1000;
+        lv_arc_set_value(s_scope_contacts_ring, v);
+    }
 
     int rng = (int)(range + 0.5f);
     if (rng > 999) rng = 999;
@@ -1719,15 +1766,22 @@ static void fill_scope_corners(int within, int tracked, float range, page_conn_t
     if (gs > 999) gs = 999;
     int trk = (nearest->track_deg < 0.0f) ? 0 : (int)(nearest->track_deg + 0.5f);
     if (trk > 359) trk = 359;
-    char line[48];
-    snprintf(line, sizeof(line), "%d ft  %d kt  %03d\xc2\xb0", alt, gs, trk);
-    set_lbl(s_sc_alt, line);
-
     float d = nearest->dist_nm;
     if (d < 0.0f)   d = 0.0f;
     if (d > 999.9f) d = 999.9f;
-    snprintf(buf, sizeof(buf), "%.1f NM", (double)d);
-    set_lbl(s_sc_dist, buf);
+
+    char line[64];
+    if (s_sc_dist) {
+        snprintf(line, sizeof(line), "%d ft  %d kt  %03d\xc2\xb0", alt, gs, trk);
+        set_lbl(s_sc_alt, line);
+        snprintf(buf, sizeof(buf), "%.1f NM", (double)d);
+        set_lbl(s_sc_dist, buf);
+    } else {
+        /* One merged figures line: two lines of it run past the bezel on the
+         * lower-left chord, so the track drops and the distance joins. */
+        snprintf(line, sizeof(line), "%d ft  %d kt  %.1f NM", alt, gs, (double)d);
+        set_lbl(s_sc_alt, line);
+    }
 }
 
 /** Silhouette class from the readsb emitter category: A7 rotorcraft, A1/A2
@@ -2415,6 +2469,12 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
                       screen_size() - CORNER_PAD - CORNER_W_R, 646, CORNER_W_R);
     lv_obj_clear_flag(s_sc_cue, LV_OBJ_FLAG_CLICKABLE);
 #endif
+
+    /* The Scope caption never changes, so it is laid out once here rather than
+     * re-run through lv_arclabel_set_text() on every poll. NULL on square. */
+    if (s_scope_contacts_arclabel) {
+        lv_arclabel_set_text(s_scope_contacts_arclabel, "CONTACTS");
+    }
 
     /* One owner for the draw callback, whichever family built the host. */
     lv_obj_add_event_cb(s_disc, disc_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
