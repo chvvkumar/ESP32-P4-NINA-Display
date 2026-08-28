@@ -21,6 +21,7 @@
 
 #include "app_config.h"
 #include "themes.h"
+#include "ui_dial.h"
 #include "ui_helpers.h"
 
 #define SB_GAP_TIGHT      3
@@ -37,7 +38,6 @@ static void sb_rebuild_blocks(nina_subbar_t *sb, int target);
 static void sb_paint_blocks(nina_subbar_t *sb, int done, uint32_t color);
 static void sb_place_fill(nina_subbar_t *sb, int idx, uint32_t color);
 static void sb_block_geom(const nina_subbar_t *sb, int i, int *a0, int *a1);
-static lv_obj_t *sb_arc(nina_subbar_t *sb, int a0, int a1);
 static void sb_style_block(const nina_subbar_t *sb, lv_obj_t *b, uint32_t color, lv_opa_t opa);
 static void sb_ring_fill_angles(nina_subbar_t *sb, float frac);
 
@@ -69,24 +69,6 @@ static void sb_block_geom(const nina_subbar_t *sb, int i, int *a0, int *a1) {
     *a0 = (int)(start + 0.5f);
     *a1 = (int)(start + pitch - gap + 0.5f);
     if (*a1 <= *a0) *a1 = *a0 + 1;
-}
-
-/* One fixed arc segment on the ring, drawn with LV_PART_MAIN only. */
-static lv_obj_t *sb_arc(nina_subbar_t *sb, int a0, int a1) {
-    lv_obj_t *a = lv_arc_create(sb->cont);
-    int side = 2 * sb->ring_radius + sb->ring_width;
-    lv_obj_set_size(a, side, side);
-    lv_obj_center(a);
-    lv_obj_remove_style(a, NULL, LV_PART_KNOB);
-    lv_obj_remove_flag(a, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_remove_flag(a, LV_OBJ_FLAG_SCROLLABLE);
-    lv_arc_set_rotation(a, (270 + a0) % 360);
-    lv_arc_set_bg_angles(a, 0, a1 - a0);
-    lv_obj_set_style_bg_opa(a, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_arc_width(a, sb->ring_width, LV_PART_MAIN);
-    lv_obj_set_style_arc_rounded(a, false, LV_PART_MAIN);
-    lv_obj_set_style_arc_opa(a, LV_OPA_TRANSP, LV_PART_INDICATOR);
-    return a;
 }
 
 /* The one place a block's colour reaches pixels, in either mode. */
@@ -152,7 +134,7 @@ static void sb_rebuild_blocks(nina_subbar_t *sb, int target) {
         if (sb->ring) {
             int a0, a1;
             sb_block_geom(sb, i, &a0, &a1);
-            b = sb_arc(sb, a0, a1);
+            b = ui_dial_arc(sb->cont, sb->ring_radius, sb->ring_width, a0, a1);
         } else {
             b = lv_obj_create(sb->cont);
             lv_obj_remove_style_all(b);
@@ -207,7 +189,8 @@ static void sb_place_fill(nina_subbar_t *sb, int idx, uint32_t color) {
     }
     if (sb->ring) {
         if (!sb->fill) {
-            sb->fill = sb_arc(sb, 0, 1);
+            sb->fill = ui_dial_arc(sb->cont, sb->ring_radius,
+                                   sb->ring_width, 0, 1);
             lv_obj_set_style_arc_opa(sb->fill, SB_FILL_OPA, LV_PART_MAIN);
             sb->active_idx = idx;
             sb->ring_frac  = 0.0f;

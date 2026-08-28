@@ -155,6 +155,19 @@ typedef struct {
     lv_obj_t *lbl_flip_title;
     lv_obj_t *lbl_flip_value;
 
+    /* Round shape handles (radial board 1). NULL on the square family and on
+     * any layout that draws a number instead of a shape; every consumer in
+     * nina_dashboard_update.c null-checks them. ring_exposure aliases
+     * arc_exposure when the exposure arc IS the rim ring, which is how the
+     * stale cue knows it has a ring to dim. */
+    lv_obj_t *rms_bull;
+    lv_obj_t *rms_dot;
+    lv_obj_t *hfr_bull;
+    lv_obj_t *hfr_dot;
+    lv_obj_t *ring_exposure;
+    lv_obj_t *ring_crown;
+    lv_obj_t *ring_flip_tick;
+
     // Power Row
     lv_obj_t *box_pwr[MAX_POWER_WIDGETS];
     lv_obj_t *lbl_pwr_title[MAX_POWER_WIDGETS];

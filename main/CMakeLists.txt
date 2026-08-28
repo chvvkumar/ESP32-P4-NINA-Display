@@ -27,6 +27,7 @@ set(nina_srcs
 # CONFIG_NINA_FAMILY_ROUND below, in the family/name guard.
 set(nina_round_srcs
     ui/ui_arclabel.c
+    ui/nina_layout_dashboard_round.c
 )
 set(nina_square_srcs)
 if(CONFIG_NINA_FAMILY_ROUND)
