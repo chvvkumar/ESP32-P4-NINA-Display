@@ -33,6 +33,7 @@
 LV_FONT_DECLARE(lv_font_playfair_200)      /* round Classic hero, digits + colon */
 extern const lv_font_t lv_font_playfair_90;
 extern const lv_font_t lv_font_overpass_27;
+LV_FONT_DECLARE(lv_font_saira_thin_240)    /* round Console 92 hero */
 /* Full ASCII fallback: the Playfair cuts carry no minus sign. */
 LV_FONT_DECLARE(lv_font_saira_light_46)
 
@@ -271,13 +272,182 @@ static void build_round_classic(void)
     clock_round_restyle = classic_restyle;
 }
 
+/* ══ Face 1, Console 92 ══════════════════════════════════════════════ */
+
+/* The four rim stubs are lv_line: their points must outlive the call. */
+static lv_point_precise_t s_con_stub_pts[4][2];
+static lv_obj_t *s_con_stub[4];
+
+static void console_restyle(const weather_data_t *wd, const struct tm *tm_now,
+                            bool red_night, bool is_metric)
+{
+    (void)wd;
+    (void)tm_now;
+    (void)is_metric;
+
+    uint32_t dim = red_night ? current_theme->label_color : CON_DIM;
+    for (int i = 0; i < 4; i++) {
+        if (clk_con_tick[i]) {
+            lv_obj_set_style_arc_color(clk_con_tick[i], lv_color_hex(dim),
+                                       LV_PART_MAIN);
+        }
+        if (s_con_stub[i]) {
+            lv_obj_set_style_line_color(s_con_stub[i], lv_color_hex(dim), 0);
+        }
+    }
+}
+
+/**
+ * Console 92: the four corner brackets walk radially out to the rim and
+ * become tick arcs with a radial stub, the hero drops to a chord wide enough
+ * for the 240 px condensed digits, the ATMOSPHERICS rule becomes a chord with
+ * its knock-out intact, the four readout cells keep their dividers and tick
+ * rulers at the equator, and the forecast strip tightens to a 34 px pitch.
+ * inscribed_batch3.md board 2.
+ */
+static void build_round_console(void)
+{
+    lv_obj_set_style_pad_all(clock_root, 0, 0);
+    lv_obj_set_style_pad_row(clock_root, 0, 0);
+    lv_obj_set_layout(clock_root, LV_LAYOUT_NONE);
+    lv_obj_set_style_bg_color(clock_root, lv_color_hex(CON_BG), 0);
+
+    const int rs = ui_rim_radius();
+    const int cy = screen_center();
+
+    /* Rim ticks at the four diagonals: a 34 degree arc plus a radial stub. */
+    static const int16_t tick_deg[4] = { 45, 135, 225, 315 };
+    for (int i = 0; i < 4; i++) {
+        s_con_stub[i] = NULL;
+        lv_obj_t *a = round_arc(clock_root, rs - 5, 2, CON_DIM);
+        lv_arc_set_bg_angles(a, dial_to_lv(tick_deg[i] - 17),
+                                dial_to_lv(tick_deg[i] + 17));
+        clk_con_tick[i] = a;
+
+        round_pt((float)tick_deg[i], (float)(rs - 6), &s_con_stub_pts[i][0]);
+        round_pt((float)tick_deg[i], (float)(rs - 24), &s_con_stub_pts[i][1]);
+        s_con_stub[i] = round_ray(clock_root, 2, CON_DIM);
+        lv_line_set_points(s_con_stub[i], s_con_stub_pts[i], 2);
+    }
+
+    /* Hero time + PM chip + date. */
+    lbl_time = make_label(clock_root, &lv_font_saira_thin_240, CON_AMBER, 0, "");
+    lv_obj_align(lbl_time, LV_ALIGN_TOP_MID, 0, cy - 210);
+
+    lbl_ampm = make_label(clock_root, &lv_font_overpass_27, CON_AMBER, 3, "");
+    /* saira_thin_240's ink fills its 169 px line box, so the hero ends at
+     * cy - 41; the chip sits clear of it, not 3 px into it as the square does. */
+    lv_obj_align(lbl_ampm, LV_ALIGN_TOP_MID, 141, cy - 36);
+    lv_obj_set_style_border_width(lbl_ampm, 1, 0);
+    lv_obj_set_style_border_color(lbl_ampm, lv_color_hex(CON_LINE), 0);
+    lv_obj_set_style_border_opa(lbl_ampm, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_top(lbl_ampm, 6, 0);
+    lv_obj_set_style_pad_bottom(lbl_ampm, 5, 0);
+    lv_obj_set_style_pad_left(lbl_ampm, 10, 0);
+    lv_obj_set_style_pad_right(lbl_ampm, 8, 0);
+
+    lbl_date = make_label(clock_root, &lv_font_overpass_27, CON_CREAM, 2, "---");
+    lv_obj_align(lbl_date, LV_ALIGN_TOP_MID, 0, cy + 6);
+
+    /* Engraved rule, now a chord, with the knocked-out caption over it. */
+    lv_obj_t *atmo_rule = make_rule(clock_root);
+    lv_obj_set_size(atmo_rule, ui_chord_at_y(cy + 68), 1);
+    lv_obj_align(atmo_rule, LV_ALIGN_TOP_MID, 0, cy + 68);
+    lv_obj_set_style_bg_color(atmo_rule, lv_color_hex(CON_LINE), 0);
+
+    /* The knock-out bed behind the caption is the page colour over a hairline,
+     * not a panel framing text: ledger ruling F(9) allows it under C1, and
+     * inscribed board 2 draws it. */
+    console_atmo = make_label(clock_root, &lv_font_overpass_27, CON_DIM, 3,
+                              "ATMOSPHERICS");
+    lv_obj_set_style_bg_color(console_atmo, lv_color_hex(CON_BG), 0);
+    lv_obj_set_style_bg_opa(console_atmo, LV_OPA_COVER, 0);
+    lv_obj_set_style_pad_hor(console_atmo, 14, 0);
+    lv_obj_align(console_atmo, LV_ALIGN_TOP_MID, 0, cy + 50);
+
+    /* Four readout cells on the equator. The sub rows the square face fills
+     * (H/L, DEW, UV) are left empty: their labels stay NULL and the page
+     * skips them. */
+    lv_obj_t *grid = make_container(clock_root);
+    /* Cell content at 27 px captions: 4 pad + 39 cap + 8 + 44 val + 8 + 6
+     * ruler = 109 px. 110 keeps the box off the forecast row below it. */
+    lv_obj_set_size(grid, 554, 110);
+    lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, cy + 92);
+    lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+
+    /* "HUMID", not "HUMIDITY": overpass_27 is monospace at 16.6 px advance and
+     * make_console_cell adds 2 px letter space, so eight glyphs need 147 px in
+     * a 554 / 4 = 138 px cell and LVGL would clip it. The radial board uses
+     * the same short word. The grid cannot grow: the chord at its bottom
+     * (dy 202) is 551 px. */
+    static const char *caps[4] = { "TEMP", "SKY", "HUMID", "WIND" };
+    lv_obj_t *vals[4];
+    for (int i = 0; i < 4; i++) {
+        make_console_cell(grid, i, caps[i], &lv_font_saira_light_46, &vals[i]);
+        /* 27 px floor: the shipped cell caption is overpass_16. */
+        lv_obj_set_style_text_font(console_caps[i], &lv_font_overpass_27, 0);
+        lv_obj_set_width(console_rulers[i], 84);
+    }
+    lbl_temp      = vals[0];
+    lbl_cond_big  = vals[1];
+    lbl_humid_val = vals[2];
+    lbl_wind_val  = vals[3];
+    lv_obj_set_width(lbl_cond_big, 130);
+    lv_label_set_long_mode(lbl_cond_big, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(lbl_cond_big, LV_TEXT_ALIGN_CENTER, 0);
+
+    /* Forecast strip on a chord baseline: ten 22 px bars at a 34 px pitch.
+     * The hour and temperature labels are created and left HIDDEN so the
+     * page's write path needs no branch. */
+    forecast_row = make_container(clock_root);
+    lv_obj_set_size(forecast_row, 328, CON_BAR_MAX + 24);
+    lv_obj_align(forecast_row, LV_ALIGN_TOP_MID, 0, cy + 208);
+    lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                          LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+
+    for (int i = 0; i < FORECAST_BARS; i++) {
+        lv_obj_t *bcol = make_container(forecast_row);
+        lv_obj_set_size(bcol, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(bcol, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(bcol, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_CENTER,
+                              LV_FLEX_ALIGN_CENTER);
+        lv_obj_set_style_pad_row(bcol, 4, 0);
+
+        forecast_temp_lbls[i] = make_label(bcol, &lv_font_overpass_27,
+                                           CON_DIM, 0, "--");
+        lv_obj_add_flag(forecast_temp_lbls[i], LV_OBJ_FLAG_HIDDEN);
+
+        lv_obj_t *bar = lv_obj_create(bcol);
+        lv_obj_remove_style_all(bar);
+        lv_obj_set_size(bar, 22, CON_BAR_MIN);
+        lv_obj_set_style_bg_color(bar, lv_color_hex(CON_DIM), 0);
+        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(bar, LV_OBJ_FLAG_CLICKABLE);
+        forecast_bars[i] = bar;
+
+        forecast_lbls[i] = make_label(bcol, &lv_font_overpass_27,
+                                      CON_DIM, 0, "--");
+        lv_obj_add_flag(forecast_lbls[i], LV_OBJ_FLAG_HIDDEN);
+    }
+
+    clock_round_restyle = console_restyle;
+}
+
 /* ══ Dispatch ════════════════════════════════════════════════════════ */
 
 void clock_round_build(uint8_t layout)
 {
     switch (layout) {
+    case 1:
+        build_round_console();
+        break;
     /* Layout 5 (Transit Line) is removed on round and falls to Classic;
-     * layouts 1, 4 and 6 join this switch in sub-plan tasks E2, E3 and E4. */
+     * layouts 4 and 6 join this switch in sub-plan tasks E3 and E4. */
     default:
         build_round_classic();
         break;

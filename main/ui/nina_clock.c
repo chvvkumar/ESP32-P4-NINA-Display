@@ -936,6 +936,7 @@ static void build_layout_classic(void) {
 }
 #endif /* !CONFIG_NINA_FAMILY_ROUND */
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Create a 2px corner bracket for the Console 92 frame.
  * @p sides is an OR of LV_BORDER_SIDE_* values.
@@ -951,6 +952,7 @@ static lv_obj_t *make_console_corner(lv_obj_t *parent, int x, int y,
     lv_obj_set_style_border_opa(c, LV_OPA_COVER, 0);
     return c;
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /**
  * Create a small tick ruler (96x6, ticks every 12px over a baseline) for
@@ -1008,6 +1010,7 @@ lv_obj_t *make_console_cell(lv_obj_t *grid, int idx, const char *cap,
     return sub;
 }
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Layout 1 — Console 92. Amber observatory console: corner brackets,
  * header captions, hero condensed time with a PM chip, engraved
@@ -1159,6 +1162,7 @@ static void build_layout_console(void) {
         lv_obj_set_style_text_align(forecast_lbls[i], LV_TEXT_ALIGN_CENTER, 0);
     }
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /**
  * Create a caption + value metric pair (overpass_27) for the Broadside
