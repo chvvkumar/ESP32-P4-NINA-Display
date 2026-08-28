@@ -438,9 +438,11 @@ lv_obj_t *make_rule(lv_obj_t *parent) {
 }
 
 /**
- * Convert temperature to Fahrenheit for bar color thresholds.
+ * Convert temperature to Fahrenheit for bar color thresholds. Shared with
+ * the round builders (nina_clock_internal.h) so they do not re-derive the
+ * same single-precision arithmetic inline.
  */
-static float to_fahrenheit(float temp, bool is_metric) {
+float to_fahrenheit(float temp, bool is_metric) {
     if (is_metric) return temp * 9.0f / 5.0f + 32.0f;
     return temp;
 }
@@ -2272,10 +2274,14 @@ static void build_content(void) {
 #if CONFIG_NINA_FAMILY_ROUND
     /* Round: Broadside (2) and Evensong (3) are inset cases and keep the
      * shared builders below; every other face has a round composition in
-     * ui/nina_clock_round.c. "Transit Line" (5) has no round composition and
-     * resolves to Classic inside clock_round_build() (spec addendum section
-     * 7); the stored config value is NOT rewritten and the web UI keeps
-     * offering it. */
+     * ui/nina_clock_round.c. "Transit Line" (5) has no round composition;
+     * it is rewritten to Classic (0) here, before the dispatch, so every
+     * page path (strings, palette, restyle) sees Classic (spec addendum
+     * section 7). The stored config value is NOT rewritten and the web UI
+     * keeps offering it. */
+    if (s_layout == 5) {
+        s_layout = 0;
+    }
     if (s_layout == 2) {
         build_layout_broadside();
     } else if (s_layout == 3) {

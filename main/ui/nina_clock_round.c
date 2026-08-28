@@ -148,14 +148,19 @@ static void classic_restyle(const weather_data_t *wd, const struct tm *tm_now,
 
     int16_t start_deg[FORECAST_BARS];
     int16_t span_deg[FORECAST_BARS];
+    uint8_t src_idx[FORECAST_BARS];
     int n = clock_dial_blocks(wd->hourly_hours, FORECAST_BARS,
-                              start_deg, span_deg);
+                              start_deg, span_deg, src_idx);
 
-    float t_min = wd->hourly_temps[0];
-    float t_max = wd->hourly_temps[0];
-    for (int i = 1; i < FORECAST_BARS; i++) {
-        if (wd->hourly_temps[i] < t_min) t_min = wd->hourly_temps[i];
-        if (wd->hourly_temps[i] > t_max) t_max = wd->hourly_temps[i];
+    /* Range over the entries actually drawn (src_idx[0..n-1]), not every
+     * FORECAST_BARS slot: a skipped/stale grid entry (OpenWeatherMap) would
+     * otherwise pull the range wider than the blocks on the dial. */
+    float t_min = wd->hourly_temps[n > 0 ? src_idx[0] : 0];
+    float t_max = t_min;
+    for (int i = 1; i < n; i++) {
+        float t = wd->hourly_temps[src_idx[i]];
+        if (t < t_min) t_min = t;
+        if (t > t_max) t_max = t;
     }
     float t_range = t_max - t_min;
     if (t_range < 1.0f) t_range = 1.0f;
@@ -165,10 +170,13 @@ static void classic_restyle(const weather_data_t *wd, const struct tm *tm_now,
             lv_obj_add_flag(clk_fc_arc[i], LV_OBJ_FLAG_HIDDEN);
             continue;
         }
-        float frac = (wd->hourly_temps[i] - t_min) / t_range;
+        /* Block i's source entry is src_idx[i], not i: clock_dial_blocks()
+         * skips a stale/duplicate slot, so the two indices diverge after the
+         * first skip. */
+        float temp = wd->hourly_temps[src_idx[i]];
+        float frac = (temp - t_min) / t_range;
         int w = 8 + (int)(frac * 14.0f + 0.5f);          /* 8..22 px */
-        float tf = is_metric ? wd->hourly_temps[i] * 9.0f / 5.0f + 32.0f
-                             : wd->hourly_temps[i];
+        float tf = to_fahrenheit(temp, is_metric);
         lv_obj_set_style_arc_width(clk_fc_arc[i], w, LV_PART_MAIN);
         lv_obj_set_style_arc_color(clk_fc_arc[i],
             lv_color_hex(bar_color_for_temp(tf, red_night)), LV_PART_MAIN);
@@ -265,12 +273,16 @@ static void build_round_classic(void)
     /* Two rim rows inside the minute ring. Text comes from
      * clock_page_update(); this only creates and colours them. */
     clk_arc_cond = ui_arclabel_bottom(clock_root, &lv_font_overpass_27, rs - 60);
-    lv_obj_set_style_text_color(clk_arc_cond, lv_color_hex(CLK_CONDITION), 0);
-    lv_arclabel_set_text(clk_arc_cond, "--");
+    if (clk_arc_cond) {
+        lv_obj_set_style_text_color(clk_arc_cond, lv_color_hex(CLK_CONDITION), 0);
+        lv_arclabel_set_text(clk_arc_cond, "--");
+    }
 
     clk_arc_stats = ui_arclabel_bottom(clock_root, &lv_font_overpass_27, rs - 92);
-    lv_obj_set_style_text_color(clk_arc_stats, lv_color_hex(CLK_SECONDARY), 0);
-    lv_arclabel_set_text(clk_arc_stats, "--");
+    if (clk_arc_stats) {
+        lv_obj_set_style_text_color(clk_arc_stats, lv_color_hex(CLK_SECONDARY), 0);
+        lv_arclabel_set_text(clk_arc_stats, "--");
+    }
 
     clock_round_restyle = classic_restyle;
 }
@@ -321,7 +333,6 @@ static void build_round_console(void)
     /* Rim ticks at the four diagonals: a 34 degree arc plus a radial stub. */
     static const int16_t tick_deg[4] = { 45, 135, 225, 315 };
     for (int i = 0; i < 4; i++) {
-        s_con_stub[i] = NULL;
         lv_obj_t *a = round_arc(clock_root, rs - 5, 2, CON_DIM);
         lv_arc_set_bg_angles(a, dial_to_lv(tick_deg[i] - 17),
                                 dial_to_lv(tick_deg[i] + 17));
@@ -339,8 +350,10 @@ static void build_round_console(void)
 
     lbl_ampm = make_label(clock_root, &lv_font_overpass_27, CON_AMBER, 3, "");
     /* saira_thin_240's ink fills its 169 px line box, so the hero ends at
-     * cy - 41; the chip sits clear of it, not 3 px into it as the square does. */
-    lv_obj_align(lbl_ampm, LV_ALIGN_TOP_MID, 141, cy - 36);
+     * cy - 41; the chip sits clear of it, not 3 px into it as the square does.
+     * x 180, not 141: the page's longest date string ("THU AUG 28 2026", 15
+     * chars) spans to cx + 140, and 141 put the chip's left edge inside it. */
+    lv_obj_align(lbl_ampm, LV_ALIGN_TOP_MID, 180, cy - 36);
     lv_obj_set_style_border_width(lbl_ampm, 1, 0);
     lv_obj_set_style_border_color(lbl_ampm, lv_color_hex(CON_LINE), 0);
     lv_obj_set_style_border_opa(lbl_ampm, LV_OPA_COVER, 0);
@@ -373,7 +386,9 @@ static void build_round_console(void)
      * skips them. */
     lv_obj_t *grid = make_container(clock_root);
     /* Cell content at 27 px captions: 4 pad + 39 cap + 8 + 44 val + 8 + 6
-     * ruler = 109 px. 110 keeps the box off the forecast row below it. */
+     * ruler = 109 px, plus an empty 8 px flex gap for the unused sub row
+     * (make_console_cell's H/L, DEW, UV row, left empty on round). 110 keeps
+     * the box off the forecast row below it; the overflow is clipped. */
     lv_obj_set_size(grid, 554, 110);
     lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, cy + 92);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW);
@@ -391,7 +406,10 @@ static void build_round_console(void)
         make_console_cell(grid, i, caps[i], &lv_font_saira_light_46, &vals[i]);
         /* 27 px floor: the shipped cell caption is overpass_16. */
         lv_obj_set_style_text_font(console_caps[i], &lv_font_overpass_27, 0);
-        lv_obj_set_width(console_rulers[i], 84);
+        /* 85, not 84: make_console_ruler() draws its eighth tick at x 84,
+         * which an 84 px wide clipping container cuts off (last visible
+         * column is x 83). */
+        lv_obj_set_width(console_rulers[i], 85);
     }
     lbl_temp      = vals[0];
     lbl_cond_big  = vals[1];

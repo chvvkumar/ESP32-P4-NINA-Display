@@ -51,12 +51,18 @@ static inline int clock_dial_delta(uint8_t base, uint8_t h)
  * @param n          number of entries in @p hours
  * @param start_deg  out: block start in dial degrees, at least @p n entries
  * @param span_deg   out: block span in dial degrees, at least @p n entries
+ * @param src_idx    out: source index into @p hours for each block, at least
+ *                   @p n entries. A stale or duplicate slot is skipped, so
+ *                   block i's source entry is not always i; a caller that
+ *                   indexes a parallel array (temperatures) by the source
+ *                   entry, not by the block number, must use this.
  * @return number of blocks written, 0..n
  */
 static inline int clock_dial_blocks(const uint8_t *hours, int n,
-                                    int16_t *start_deg, int16_t *span_deg)
+                                    int16_t *start_deg, int16_t *span_deg,
+                                    uint8_t *src_idx)
 {
-    if (!hours || !start_deg || !span_deg || n <= 0) return 0;
+    if (!hours || !start_deg || !span_deg || !src_idx || n <= 0) return 0;
 
     /* A provider whose forecast leg failed leaves the whole array at zero
      * while the current-conditions leg still reports valid. "0 degrees at
@@ -88,6 +94,7 @@ static inline int clock_dial_blocks(const uint8_t *hours, int n,
 
         start_deg[cnt] = (int16_t)(((int)hours[i] % 12) * CLOCK_DIAL_DEG_PER_H);
         span_deg[cnt] = (int16_t)(step * CLOCK_DIAL_DEG_PER_H);
+        src_idx[cnt] = (uint8_t)i;
         cnt++;
         prev_off = off;
     }
