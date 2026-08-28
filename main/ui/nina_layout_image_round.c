@@ -41,22 +41,29 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define IFR_R_STEP_OFF    86    /* step arclabel, one line further in */
 
 /* Value row. IFR_ROW_DY is the TEXT BASELINE offset from the panel centre, not
- * the row's top: the digits sit on that chord, which is what keeps the row's
- * outer glyphs inside the rim. At 720 the chord there is 582 px, so the row is
- * 566 px wide; at 800 it is 668 and the row 652. The labels are content sized
- * rather than sample sized (review C important I-5): 514 px of fixed boxes does
- * not fit a 566 px chord, and the cost is that the closing quote and the "s"
- * walk by a digit width when the digit count changes. */
+ * the row's top: the digits sit on that chord. That chord alone is not enough
+ * to keep the row clear of the ledge ring, whose 14 px stroke centred at
+ * Rs - 12 reaches inward to Rs - 19: IFR_ROW_PAD trims the row further, to
+ * the ring's inner edge with 4 px to spare (review C3 important I-1; the
+ * original 8 px pad left the outer glyphs overlapping the ring by 13-14 px).
+ * ui_chord_half(180) is 290 at 720 and 334 at 800, so the chord is 580 / 668
+ * and the row, after the pad, is 528 / 616. The labels are content sized
+ * rather than sample sized (review C important I-5): a worst case of RMS
+ * 99.99" (182 px) + counter 999 / 999 (122 px) + elapsed 9999s (174 px) is
+ * 478 px, so 528 has margin; a filter name wider than about 170 px at
+ * Montserrat 24 would crowd the centre column (the shipped square row has the
+ * same exposure). The cost is that the closing quote and the "s" walk by a
+ * digit width when the digit count changes. */
 #define IFR_ROW_DY       180
-#define IFR_ROW_PAD        8    /* keep the row's own ends off the chord */
+#define IFR_ROW_PAD       26    /* keep the row's ends inside the ledge ring's
+                                  * inner edge (Rs - 19) with 4 px to spare */
 
 #define IFR_CROWN_IDLE    0x2a2a2a
 #define IFR_TARGET_FG     0xf2f2f4
 
 #define IFR_FONT_TARGET   (&lv_font_montserrat_40)
 #define IFR_FONT_STEP     (&lv_font_montserrat_28)
-#define IFR_FONT_RMS      (&lv_font_hanken_bold_64)
-#define IFR_FONT_ELAPSED  (&lv_font_hanken_bold_64)
+#define IFR_FONT_ELAPSED  (&lv_font_hanken_bold_64)   /* also the RMS value's font */
 #define IFR_FONT_COUNT    (&lv_font_hanken_bold_28)
 #define IFR_FONT_FILTER   (&lv_font_montserrat_24)
 
@@ -73,7 +80,7 @@ static bool      ifr_red(void);
 static uint32_t  ifr_dim(uint32_t color, int gb);
 static uint32_t  ifr_filter_color(const char *filter, int inst, int gb);
 static lv_obj_t *ifr_label(lv_obj_t *parent, const lv_font_t *font, const char *text);
-static lv_obj_t *ifr_value_label(lv_obj_t *parent, const lv_font_t *font);
+static lv_obj_t *ifr_value_label(lv_obj_t *parent);
 static void      ifr_set_text(lv_obj_t *lbl, const char *text);
 static void      ifr_set_arc_text(lv_obj_t *al, char *shadow, size_t n, const char *text);
 static void      ifr_set_arc_color(lv_obj_t *arc, uint32_t color);
@@ -107,13 +114,12 @@ static lv_obj_t *ifr_label(lv_obj_t *parent, const lv_font_t *font, const char *
     return l;
 }
 
-/* Value-row label. LVGL has no baseline, so every label is bottom aligned by
- * the row (flex cross END) and nudged by the difference between its font's
- * base_line and the 64 px font's, which puts all baselines on one line. */
-static lv_obj_t *ifr_value_label(lv_obj_t *parent, const lv_font_t *font) {
-    lv_obj_t *l = ifr_label(parent, font, "--");
-    lv_obj_set_style_translate_y(l, font->base_line - IFR_FONT_ELAPSED->base_line, 0);
-    return l;
+/* Value-row label, always in the 64 px elapsed font. LVGL has no baseline, so
+ * the row bottom-aligns its children (flex cross END); both callers use the
+ * same font, so there is no other baseline to nudge onto (review C3 minor
+ * M-3: the previous per-font translate_y was always zero here). */
+static lv_obj_t *ifr_value_label(lv_obj_t *parent) {
+    return ifr_label(parent, IFR_FONT_ELAPSED, "--");
 }
 
 static void ifr_set_text(lv_obj_t *lbl, const char *text) {
@@ -221,7 +227,7 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
                           LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
 
     /* Left: TOTAL RMS on the elapsed baseline. */
-    p->alt.lbl_rms = ifr_value_label(p->alt.row_vals, IFR_FONT_RMS);
+    p->alt.lbl_rms = ifr_value_label(p->alt.row_vals);
     nina_dashboard_bind_tap(p->alt.lbl_rms, NINA_TAP_RMS);
 
     /* Centre: counter over filter name. The page dots are hidden on this
@@ -244,7 +250,7 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     nina_dashboard_bind_tap(p->alt.lbl_filter, NINA_TAP_FILTER);
 
     /* Right: elapsed seconds. */
-    p->alt.lbl_elapsed = ifr_value_label(p->alt.row_vals, IFR_FONT_ELAPSED);
+    p->alt.lbl_elapsed = ifr_value_label(p->alt.row_vals);
     lv_label_set_text(p->alt.lbl_elapsed, "--s");
 
     /* A rebuild that kept the retained frame re-attaches it. */
