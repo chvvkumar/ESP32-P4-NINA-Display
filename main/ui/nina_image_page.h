@@ -91,6 +91,25 @@ typedef struct image_page {
     lv_obj_t *root, *img_front, *img_back, *overlay_bar, *lbl_region, *lbl_timestamp;
     lv_obj_t *loading;                 /* animated pages: pulsing placeholder until the loop has a few frames; else NULL */
     lv_obj_t *lbl_moon_age, *lbl_moon_next, *lbl_moon_rise, *lbl_moon_set;   /* Moon instance only, else NULL */
+    /* Round-only shape handles: the Moon page draws illumination as a rim arc
+     * instead of a percentage, and the C2 tap hides it with the captions. The
+     * page repaints both from the theme (moon_arc_apply_theme). NULL on square
+     * and on the five non-Moon sources; every use is guarded. */
+    lv_obj_t *moon_illum_arc;
+    lv_obj_t *moon_illum_tick;
+    /* Last text written to lbl_region [0] and lbl_timestamp [1]. lv_arclabel
+     * has no text getter and its setter reallocates and invalidates on every
+     * call, while the ring playback rewrites lbl_region every 400 ms with
+     * unchanged text, so the dedupe compares against this shadow instead of
+     * reading the widget. 64 bytes covers every caption source in the file
+     * (label_copy[48], err_copy[48], ts[32], name[24], pct[16]). */
+    char caption_shadow[2][64];
+    /* On-screen picture geometry. 0 = scale the decoded picture to the panel
+     * width and centre it vertically, which is what every source does on
+     * square. The round Moon builder sets 432 / -12 so the disc leaves a black
+     * annulus for the label chords. Absolute pixels at both round widths. */
+    int fit_px;
+    int fit_dy;
     lv_image_dsc_t dsc_a, dsc_b;
     bool      dsc_a_borrowed, dsc_b_borrowed, front_is_a, crossfade_active, force_redraw;
     int64_t   displayed_stamp_ms;      /* stamp of the frame currently on screen; 0 = none */
@@ -239,6 +258,12 @@ void image_page_evict_if_over_cap(void);
 
 /* ── LVGL page (display lock held by the caller) ── */
 lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent);
+/* On-screen width the decoded picture is scaled to, and the vertical offset of
+ * its centre from the panel centre. The PPA fit and the software fallback in
+ * nina_image_page.c and the Moon poller in image_page_poll.c all size their
+ * work from these, so the picture is never scaled back up to the panel. */
+int image_page_fit_px(const image_page_t *p);
+int image_page_fit_dy(const image_page_t *p);
 void image_page_render_frame(image_page_t *p);      /* push p->frame if newer than displayed (or forced) */
 void image_page_force_redraw(image_page_t *p);
 bool image_page_has_image(image_page_t *p);
