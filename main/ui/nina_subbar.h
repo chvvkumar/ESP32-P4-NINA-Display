@@ -49,6 +49,17 @@ typedef struct {
     uint32_t cached_block_color;
     int      instance_idx;   /* owning NINA instance, for per-instance filter colours */
 
+    /* Ring mode (round layouts): the blocks are lv_arc segments on one circle
+     * instead of a flex row of lv_obj. Zero in the flex-row form, which is
+     * what the square family builds. Angles are degrees clockwise from twelve
+     * o'clock; ring_gap is left free at twelve for the caller's safety crown. */
+    bool  ring;
+    int   ring_radius;       /* block centre-line radius in px */
+    int   ring_width;        /* stroke in px */
+    float ring_span;         /* 360 - ring_gap */
+    float ring_gap;          /* reserved gap at twelve o'clock, degrees */
+    float ring_frac;         /* last in-flight fraction, so a repaint keeps it */
+
     nina_subbar_elapsed_cb_t elapsed_cb;
     void                    *elapsed_ud;
 } nina_subbar_t;
@@ -59,6 +70,26 @@ typedef struct {
  * @param block_h  Block height in px (12 on Image-forward)
  */
 void nina_subbar_create(nina_subbar_t *sb, lv_obj_t *parent, int block_h);
+
+/**
+ * @brief Build the ring form of the block row: N lv_arc segments on one circle.
+ *
+ * Same block count, colour rule, done / in-flight / remaining decision and
+ * in-flight fill as the flex row; the geometry differs, and the wider gap after
+ * every NINA_SUBBAR_GROUP_EVERY block is a flex-row property (the ring spaces
+ * its blocks uniformly). The container is 2*radius+width square and centred on
+ * @p parent, so @p parent must be the full-panel page root.
+ *
+ * @param sb       Caller-owned state, zeroed by this call
+ * @param radius   Block centre-line radius in px (ui_rim_radius() - k)
+ * @param width    Stroke width in px
+ * @param gap_deg  Angular gap left free at twelve o'clock for a safety crown
+ */
+void nina_subbar_create_ring(nina_subbar_t *sb, lv_obj_t *parent,
+                             int radius, int width, int gap_deg);
+
+/** @brief Push -1 to the elapsed callback (the layout's idle reset). */
+void nina_subbar_reset_elapsed(nina_subbar_t *sb);
 
 /**
  * @brief Push poll data into the block row.
