@@ -54,12 +54,13 @@ typedef struct {
     const lv_font_t *tag_font2;
     int16_t tag_l1_y;        /* line 1 offset inside the tag block */
     int16_t tag_l2_y;
-    /* Vertical reserve for tag placement and the cardinal clamp. On round these
-     * are the two 72 px chord caps; on the round Scope the caps are not drawn
-     * but the reserve still applies, which costs nothing because no Scope text
-     * sits there. */
-    int16_t scrim_top;
-    int16_t scrim_bot;
+    /* Vertical reserve for tag placement and the cardinal clamp, per disc mode
+     * ([0] Sky, [1] Scope, indexed the same way as card_off_v/h). On round
+     * these are the two 72 px chord caps on Sky; the round Scope draws no caps
+     * so its reserve is 0. Square keeps the same 44 px header/strip reserve on
+     * both modes. */
+    int16_t scrim_top[2];
+    int16_t scrim_bot[2];
     int16_t scope_lbl_r;     /* Scope: push a contact label outward to at most this
                               * radius. 0 keeps the plain quadrant search. */
     bool    short_caps;      /* Sky Dome mount/strip text uses the short forms that

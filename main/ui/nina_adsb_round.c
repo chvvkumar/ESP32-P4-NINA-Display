@@ -34,7 +34,7 @@ LV_FONT_DECLARE(lv_font_montserrat_64);
 #define ADSBR_TAG_H         76   /* two 28 px lines: the 27 px floor grew it */
 
 /* Radar Scope, board 9. Chord blocks, as offsets from the panel centre
- * (720: 116 / 148 / 552 / 596). The rim carries within/tracked as a 7 px arc
+ * (720: 164 / 552 / 596). The rim carries within/tracked as a 7 px arc
  * over the 3 px ring, and the range label and CONTACTS caption are arclabels on
  * the two quiet diagonals. */
 #define ADSBR_SC_RING_W       7
@@ -151,7 +151,7 @@ static void build_scope(lv_obj_t *root, lv_obj_t *content, const adsb_slots_t *s
      * o'clock, swept by within / tracked. The page drives it with
      * lv_arc_set_value over the same 0..1000 range the progress widgets use. */
     lv_obj_t *ring = lv_arc_create(content);
-    lv_obj_set_size(ring, 2 * rs + ADSBR_SC_RING_W, 2 * rs + ADSBR_SC_RING_W);
+    lv_obj_set_size(ring, 2 * rs + ADSBR_SC_RING_W + 1, 2 * rs + ADSBR_SC_RING_W + 1);
     lv_obj_center(ring);
     lv_arc_set_rotation(ring, 270);
     lv_arc_set_bg_angles(ring, 0, 360);
@@ -216,7 +216,7 @@ static void build_scope(lv_obj_t *root, lv_obj_t *content, const adsb_slots_t *s
     g->no_go[0] = (lv_area_t){ cx, cx + ADSBR_SC_VAL_DY - 4,
                                cx + ADSBR_SC_BLK_W, cx + ADSBR_SC_VAL_DY + 48 };
     g->no_go[1] = (lv_area_t){ cx - 226, cx + ADSBR_SC_CALL_DY,
-                               cx - 226 + ADSBR_SC_FIG_W, cx + ADSBR_SC_FIG_DY + 36 };
+                               cx - 192 + ADSBR_SC_FIG_W, cx + ADSBR_SC_FIG_DY + 36 };
     g->no_go[2] = (lv_area_t){ cx + 68,  cx + ADSBR_SC_CALL_DY - 40,
                                cx + 68 + ADSBR_SC_RATE_W, cx + ADSBR_SC_CALL_DY + 36 };
     g->no_go_n  = 3;
@@ -356,8 +356,8 @@ void adsb_round_build(lv_obj_t *root, lv_obj_t *content,
         .tag_font2  = &lv_font_montserrat_28,
         .tag_l1_y   = 2,
         .tag_l2_y   = 40,
-        .scrim_top  = ADSBR_CAP_H,
-        .scrim_bot  = ADSBR_CAP_H,
+        .scrim_top  = { ADSBR_CAP_H, 0 },
+        .scrim_bot  = { ADSBR_CAP_H, 0 },
         .short_caps = true,  /* the square sentence overflows the round chord */
     };
 

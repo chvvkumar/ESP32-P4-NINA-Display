@@ -1092,11 +1092,12 @@ static bool boxes_hit(const lv_area_t *a, const lv_area_t *b)
 /** Keep a TAG_W x TAG_H block inside the disc, clear of both scrims. */
 static void clamp_tag(int *ax, int *ay)
 {
+    int idx = (s_mode == MODE_SCOPE) ? 1 : 0;
     if (*ax < 6)                          *ax = 6;
     if (*ax > screen_size() - TAG_W - 6)  *ax = screen_size() - TAG_W - 6;
-    if (*ay < s_geom.scrim_top + 4)       *ay = s_geom.scrim_top + 4;
-    if (*ay > screen_size() - s_geom.scrim_bot - s_geom.tag_h - 4) {
-        *ay = screen_size() - s_geom.scrim_bot - s_geom.tag_h - 4;
+    if (*ay < s_geom.scrim_top[idx] + 4)  *ay = s_geom.scrim_top[idx] + 4;
+    if (*ay > screen_size() - s_geom.scrim_bot[idx] - s_geom.tag_h - 4) {
+        *ay = screen_size() - s_geom.scrim_bot[idx] - s_geom.tag_h - 4;
     }
 }
 
@@ -1159,7 +1160,8 @@ static int tag_score(const lv_area_t *box, int skip)
     for (int i = 0; i < 3; i++) {
         if (s_ring_lbl_used[i] && boxes_hit(box, &s_ring_lbl_area[i])) s += 3;
     }
-    if (box->y1 < s_geom.scrim_top || box->y2 > screen_size() - s_geom.scrim_bot) s += 2;
+    int idx = (s_mode == MODE_SCOPE) ? 1 : 0;
+    if (box->y1 < s_geom.scrim_top[idx] || box->y2 > screen_size() - s_geom.scrim_bot[idx]) s += 2;
     s += rim_penalty(box);
     return s;
 }
@@ -1298,10 +1300,13 @@ static void place_scope_labels(int max)
             }
         }
         lv_area_t box;
+        int lead_before = s_lead_n;
         place_tag_box(ax, ay, best->mark, &box);
-        if ((ax != best->gx || ay != best->gy) && s_lead_n > 0) {
+        if ((ax != best->gx || ay != best->gy) && s_lead_n > lead_before) {
             /* place_tag_box() anchored the leader on the pushed point; the line
-             * has to reach the contact itself or it floats. */
+             * has to reach the contact itself or it floats. Snapshot the count
+             * rather than assuming a bare s_lead_n > 0: only reset the leader
+             * this call actually appended. */
             s_lead[s_lead_n - 1].x1 = (int16_t)best->gx;
             s_lead[s_lead_n - 1].y1 = (int16_t)best->gy;
         }
@@ -1336,8 +1341,8 @@ static void place_compass(void)
          * inward instead of vanishing under the strip text. The crosshair
          * endpoints above are set either way (review_impl_D3 M-1). */
         int ly = y - 16;
-        if (ly < s_geom.scrim_top + 2)                  ly = s_geom.scrim_top + 2;
-        if (ly > screen_size() - s_geom.scrim_bot - 34) ly = screen_size() - s_geom.scrim_bot - 34;
+        if (ly < s_geom.scrim_top[idx] + 2)                  ly = s_geom.scrim_top[idx] + 2;
+        if (ly > screen_size() - s_geom.scrim_bot[idx] - 34) ly = screen_size() - s_geom.scrim_bot[idx] - 34;
         if (s_lbl_card[i]) {
             set_lbl(s_lbl_card[i], names[i]);
             lv_obj_set_pos(s_lbl_card[i], x - 12, ly);
@@ -1783,16 +1788,16 @@ static void fill_scope_corners(int within, int tracked, float range, page_conn_t
 {
     char buf[32];
 
-    if (within > 99) within = 99;
     if (tracked < 0)   tracked = 0;
     if (tracked > 999) tracked = 999;
-    snprintf(buf, sizeof(buf), "%d / %d", within, tracked);
-    set_lbl(s_sc_within, buf);
     if (s_scope_contacts_ring) {
         int v = (tracked > 0) ? (within * 1000 / tracked) : 0;
         if (v > 1000) v = 1000;
         lv_arc_set_value(s_scope_contacts_ring, v);
     }
+    if (within > 99) within = 99;
+    snprintf(buf, sizeof(buf), "%d / %d", within, tracked);
+    set_lbl(s_sc_within, buf);
 
     int rng = (int)(range + 0.5f);
     if (rng > 999) rng = 999;
@@ -2429,8 +2434,8 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
         .tag_font2  = &lv_font_montserrat_22,
         .tag_l1_y   = 2,
         .tag_l2_y   = 31,
-        .scrim_top  = HDR_H,
-        .scrim_bot  = STRIP_H,
+        .scrim_top  = { HDR_H, HDR_H },
+        .scrim_bot  = { STRIP_H, STRIP_H },
     };
     adsb_fill_corner_areas();
 
