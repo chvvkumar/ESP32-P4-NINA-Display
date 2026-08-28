@@ -314,3 +314,16 @@ add_nina_host_test(test_screen_geom
         ${CMAKE_CURRENT_SOURCE_DIR}/test_screen_geom.c
         ${NINA_REPO_ROOT}/main/screen_geom.c
 )
+
+# ---------------------------------------------------------------------------
+# test_ui_round -- the round layout geometry (main/ui/ui_round.h): rim radius,
+# chord widths and the page inset. Header-only and pure, so the only source it
+# needs beside the test is main/screen_geom.c, which backs the three globals it
+# reads. add_nina_host_test() already puts main/ and main/ui/ on the include
+# path and links m for sqrtf.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_ui_round
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_round.c
+        ${NINA_REPO_ROOT}/main/screen_geom.c
+)
