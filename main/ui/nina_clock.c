@@ -33,6 +33,7 @@
 #include "display_defs.h"
 #include "app_config.h"
 #include "weather_client.h"
+#include "ui_round.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -1190,9 +1191,13 @@ static void make_metric_pair(lv_obj_t *parent, const char *cap,
  * numerals sized and weighted by temperature.
  */
 static void build_layout_broadside(void) {
-    lv_obj_set_style_pad_top(clock_root, 30, 0);
-    lv_obj_set_style_pad_bottom(clock_root, 26, 0);
-    lv_obj_set_style_pad_hor(clock_root, 34, 0);
+    /* 30 / 26 / 34 on square (all larger than ui_page_inset()'s 16), the safe
+     * inset on round: 105 at 720, 118 at 800. Every block below is
+     * LV_PCT(100) or LV_SIZE_CONTENT in a SPACE_BETWEEN column, so the pads
+     * are the only geometry that moves. */
+    lv_obj_set_style_pad_top(clock_root, LV_MAX(30, ui_page_inset()), 0);
+    lv_obj_set_style_pad_bottom(clock_root, LV_MAX(26, ui_page_inset()), 0);
+    lv_obj_set_style_pad_hor(clock_root, LV_MAX(34, ui_page_inset()), 0);
     lv_obj_set_style_pad_row(clock_root, 0, 0);
     lv_obj_set_flex_flow(clock_root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(clock_root, LV_FLEX_ALIGN_SPACE_BETWEEN,
@@ -1214,8 +1219,10 @@ static void build_layout_broadside(void) {
     /* ── Hero: huge time, rotated PM on its right ── */
     lv_obj_t *hero = make_container(clock_root);
     /* 24 px wider than the content column so the PM mark can sit in the
-     * root's right padding, clear of a four-digit time ("10:12"). */
-    lv_obj_set_size(hero, screen_size() - 2 * 34 + 24, 212);
+     * root's horizontal padding, clear of a four-digit time ("10:12"). The
+     * pad is the same expression as pad_hor above: 676 on square
+     * (720 - 68 + 24), 534 at 720 round, 588 at 800 round. */
+    lv_obj_set_size(hero, screen_size() - 2 * LV_MAX(34, ui_page_inset()) + 24, 212);
 
     lbl_time = make_label(hero, &lv_font_saira_black_300, BS_BONE, -4, "");
     lv_obj_align(lbl_time, LV_ALIGN_LEFT_MID, -6, 0);
@@ -1258,26 +1265,30 @@ static void build_layout_broadside(void) {
     make_metric_pair(metrics, "WIND", &lbl_wind_val);
     make_metric_pair(metrics, "UV",   &lbl_uv_val);
 
-    /* ── Forecast: numerals sized+weighted by temp, bottoms aligned ── */
-    forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+    /* round: no forecast row on the inset faces (ledger ruling B3); the
+     * budget only fits the head, hero, condition, now row and metrics. */
+    if (!SCREEN_ROUND) {
+        /* ── Forecast: numerals sized+weighted by temp, bottoms aligned ── */
+        forecast_row = make_container(clock_root);
+        lv_obj_set_size(forecast_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+        lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 
-    for (int i = 0; i < FORECAST_BARS; i++) {
-        lv_obj_t *cell = make_container(forecast_row);
-        lv_obj_set_size(cell, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_END,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_row(cell, 8, 0);
+        for (int i = 0; i < FORECAST_BARS; i++) {
+            lv_obj_t *cell = make_container(forecast_row);
+            lv_obj_set_size(cell, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_END,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_row(cell, 8, 0);
 
-        forecast_temp_lbls[i] = make_label(cell, &lv_font_saira_light_46,
-                                           BS_HAIR, 0, "--");
-        forecast_lbls[i] = make_label(cell, &lv_font_overpass_16,
-                                      BS_HAIR, 0, "--");
+            forecast_temp_lbls[i] = make_label(cell, &lv_font_saira_light_46,
+                                               BS_HAIR, 0, "--");
+            forecast_lbls[i] = make_label(cell, &lv_font_overpass_16,
+                                          BS_HAIR, 0, "--");
+        }
     }
 }
 
@@ -1320,9 +1331,17 @@ static void build_layout_evensong(void) {
      * + forecast 68 (39 + 4 + 25) + pad_bottom 24 = 711, leaving +9
      * slack so SPACE_BETWEEN never goes negative (a negative flex gap
      * stacks the blocks and rams the hour word into "IT IS"). */
-    lv_obj_set_style_pad_top(clock_root, 28, 0);
-    lv_obj_set_style_pad_bottom(clock_root, 24, 0);
-    lv_obj_set_style_pad_hor(clock_root, 50, 0);
+    /* Horizontal: 50 on square, the safe inset on round (105 at 720, 118 at
+     * 800). Vertical: the block above budgets 659 px of content (this
+     * includes the forecast row round no longer builds; the extra slack on
+     * round is deliberate). Raising the vertical pads to the safe inset would
+     * leave 510 and drive the SPACE_BETWEEN gaps negative, which stacks the
+     * blocks. Clamp the vertical pad to the slack that actually exists: 28
+     * and 24 on square (the literals win), 30 at 720 round, 70 at 800 round. */
+    const int ev_pad_v = LV_MIN(ui_page_inset(), (screen_size() - 659) / 2);
+    lv_obj_set_style_pad_top(clock_root, LV_MAX(28, ev_pad_v), 0);
+    lv_obj_set_style_pad_bottom(clock_root, LV_MAX(24, ev_pad_v), 0);
+    lv_obj_set_style_pad_hor(clock_root, LV_MAX(50, ui_page_inset()), 0);
     lv_obj_set_style_pad_row(clock_root, 0, 0);
     lv_obj_set_flex_flow(clock_root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(clock_root, LV_FLEX_ALIGN_SPACE_BETWEEN,
@@ -1390,36 +1409,40 @@ static void build_layout_evensong(void) {
     make_ev_row(table, 4, "WIND",        &lbl_wind_val);
     make_ev_row(table, 5, "UV INDEX",    &lbl_uv_val);
 
-    /* ── Forecast: temps row over hours row ── */
-    forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(forecast_row, 4, 0);
-    lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+    /* round: no forecast row on the inset faces (ledger ruling B3); the 659 px
+     * budget above already accounts for it (see the pad clamp above). */
+    if (!SCREEN_ROUND) {
+        /* ── Forecast: temps row over hours row ── */
+        forecast_row = make_container(clock_root);
+        lv_obj_set_size(forecast_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_row(forecast_row, 4, 0);
+        lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 
-    lv_obj_t *temps_row = make_container(forecast_row);
-    lv_obj_set_size(temps_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(temps_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(temps_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_t *hours_row = make_container(forecast_row);
-    lv_obj_set_size(hours_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(hours_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(hours_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_t *temps_row = make_container(forecast_row);
+        lv_obj_set_size(temps_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(temps_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(temps_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+        lv_obj_t *hours_row = make_container(forecast_row);
+        lv_obj_set_size(hours_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(hours_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(hours_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
 
-    for (int i = 0; i < FORECAST_BARS; i++) {
-        forecast_temp_lbls[i] = make_label(temps_row, &lv_font_overpass_27,
-                                           EV_PARCH, 0, "--");
-        lv_obj_set_width(forecast_temp_lbls[i], 56);
-        lv_obj_set_style_text_align(forecast_temp_lbls[i],
-                                    LV_TEXT_ALIGN_CENTER, 0);
-        forecast_lbls[i] = make_label(hours_row, &lv_font_overpass_16,
-                                      EV_MUTE, 0, "--");
-        lv_obj_set_width(forecast_lbls[i], 56);
-        lv_obj_set_style_text_align(forecast_lbls[i], LV_TEXT_ALIGN_CENTER, 0);
+        for (int i = 0; i < FORECAST_BARS; i++) {
+            forecast_temp_lbls[i] = make_label(temps_row, &lv_font_overpass_27,
+                                               EV_PARCH, 0, "--");
+            lv_obj_set_width(forecast_temp_lbls[i], 56);
+            lv_obj_set_style_text_align(forecast_temp_lbls[i],
+                                        LV_TEXT_ALIGN_CENTER, 0);
+            forecast_lbls[i] = make_label(hours_row, &lv_font_overpass_16,
+                                          EV_MUTE, 0, "--");
+            lv_obj_set_width(forecast_lbls[i], 56);
+            lv_obj_set_style_text_align(forecast_lbls[i], LV_TEXT_ALIGN_CENTER, 0);
+        }
     }
 }
 
@@ -2275,7 +2298,11 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     /* Root — full screen, own background, overrides parent padding */
     clock_root = lv_obj_create(parent);
     lv_obj_set_size(clock_root, screen_size(), screen_size());
-    lv_obj_set_pos(clock_root, -OUTER_PADDING, -OUTER_PADDING);
+    /* Full bleed. Centring rather than negating a literal pad: on square a 720
+     * root centred in main_cont's 688 content box lands at (-16,-16), exactly
+     * what lv_obj_set_pos(-OUTER_PADDING, -OUTER_PADDING) produced, and it
+     * stays centred while the round inset aid pads main_cont differently. */
+    lv_obj_center(clock_root);
     lv_obj_set_style_bg_color(clock_root, lv_color_hex(CLK_BG), 0);
     lv_obj_set_style_bg_opa(clock_root, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(clock_root, 0, 0);
