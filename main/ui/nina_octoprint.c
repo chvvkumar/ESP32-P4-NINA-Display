@@ -1434,7 +1434,9 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
          * layout or theme rebuild re-writes the fresh, empty arclabel. */
         if (strcmp(s_rim_state_shadow, state_str) != 0) {
             snprintf(s_rim_state_shadow, sizeof(s_rim_state_shadow), "%s", state_str);
+#if LV_USE_ARCLABEL
             lv_arclabel_set_text(s_w.rim_state_arclabel, s_rim_state_shadow);
+#endif
         }
     }
 

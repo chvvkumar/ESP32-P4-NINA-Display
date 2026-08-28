@@ -448,7 +448,7 @@ static void update_moon_corner_labels(image_page_t *p)
     set_label_if_changed(p->lbl_moon_set,  set);
     /* Illumination is a shape on round: the arc replaces the percentage that
      * lbl_timestamp carries on square. moon_caption() formats the percentage
-     * as "NN %"; atoi stops at the space. */
+     * as "NN%"; atoi stops at the '%'. */
     if (p->moon_illum_arc) {
         char name[24], pct[16];
         moon_caption(name, sizeof(name), pct, sizeof(pct));
@@ -496,6 +496,13 @@ void image_page_build_overlay_square(image_page_t *p, lv_obj_t *page_container)
     lv_obj_set_style_pad_left(p->overlay_bar, 0, 0);
     lv_obj_set_style_pad_right(p->overlay_bar, 0, 0);
     lv_obj_clear_flag(p->overlay_bar, LV_OBJ_FLAG_SCROLLABLE);
+    /* lv_obj_create() makes an object CLICKABLE by default and this bar has no
+     * event handler of its own, so a C2 tap landing in its bottom 68 px strip
+     * was swallowed here instead of reaching page_container's overlay_tap_cb
+     * (review_impl_F1.md, "Outside F1's scope" note). Clear it so the tap falls
+     * through, matching the round overlay_bar (round_layer() in
+     * nina_image_page_round.c already clears it for the same reason). */
+    lv_obj_clear_flag(p->overlay_bar, LV_OBJ_FLAG_CLICKABLE);
 
     p->lbl_region = lv_label_create(p->overlay_bar);
     lv_obj_set_style_text_font(p->lbl_region, &lv_font_overpass_27, 0);

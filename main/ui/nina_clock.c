@@ -2510,8 +2510,10 @@ void clock_page_update(void) {
         if (lbl_wind_val)  lv_label_set_text(lbl_wind_val, "--");
         if (lbl_uv_val)    lv_label_set_text(lbl_uv_val, "--");
         if (forecast_row) lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+#if LV_USE_ARCLABEL
         if (clk_arc_cond)  lv_arclabel_set_text(clk_arc_cond, "--");
         if (clk_arc_stats) lv_arclabel_set_text(clk_arc_stats, "--");
+#endif
         /* Clear the shadows too: a provider that recovers with the same
          * reading it had before the outage must still repaint over "--". */
         clk_arc_cond_prev[0] = '\0';
@@ -2656,7 +2658,9 @@ void clock_page_update(void) {
         snprintf(cbuf, sizeof(cbuf), "%s / H %.0f / L %.0f",
                  cond_upper, wd.temp_high, wd.temp_low);
         if (strcmp(cbuf, clk_arc_cond_prev) != 0) {
+#if LV_USE_ARCLABEL
             lv_arclabel_set_text(clk_arc_cond, cbuf);
+#endif
             strncpy(clk_arc_cond_prev, cbuf, sizeof(clk_arc_cond_prev) - 1);
             clk_arc_cond_prev[sizeof(clk_arc_cond_prev) - 1] = '\0';
         }
@@ -2666,7 +2670,9 @@ void clock_page_update(void) {
         snprintf(sbuf, sizeof(sbuf), "%.0f%% / %.0f\xc2\xb0 / %s %.0f / UV %s",
                  wd.humidity, wd.dew_point, wd.wind_dir, wd.wind_speed, uv_s);
         if (strcmp(sbuf, clk_arc_stats_prev) != 0) {
+#if LV_USE_ARCLABEL
             lv_arclabel_set_text(clk_arc_stats, sbuf);
+#endif
             strncpy(clk_arc_stats_prev, sbuf, sizeof(clk_arc_stats_prev) - 1);
             clk_arc_stats_prev[sizeof(clk_arc_stats_prev) - 1] = '\0';
         }

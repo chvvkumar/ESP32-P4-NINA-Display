@@ -1375,7 +1375,9 @@ static void place_ring_label(int slot, int r, const char *text)
         static char rim_shadow[16];
         if (strcmp(rim_shadow, text) != 0) {
             snprintf(rim_shadow, sizeof(rim_shadow), "%s", text);
+#if LV_USE_ARCLABEL
             lv_arclabel_set_text(s_scope_rim_label, rim_shadow);
+#endif
         }
         show_obj(s_lbl_ring[slot], false);
         s_ring_lbl_used[slot] = false;
@@ -2624,9 +2626,11 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
 
     /* The Scope caption never changes, so it is laid out once here rather than
      * re-run through lv_arclabel_set_text() on every poll. NULL on square. */
+#if LV_USE_ARCLABEL
     if (s_scope_contacts_arclabel) {
         lv_arclabel_set_text(s_scope_contacts_arclabel, "CONTACTS");
     }
+#endif
 
     /* One owner for the draw callback, whichever family built the host. */
     lv_obj_add_event_cb(s_disc, disc_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);

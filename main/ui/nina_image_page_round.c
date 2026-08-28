@@ -38,10 +38,11 @@ extern const lv_font_t lv_font_overpass_27;
 #define IMG_ARC_W             16
 #define IMG_MOON_DISC_PX     432
 #define IMG_MOON_DISC_DY     (-12)
-#define IMG_MOON_TOP_W       342
+#define IMG_MOON_TOP_W       366   /* review_impl_F1.md M-6: 342 left only 10 px of margin */
 #define IMG_MOON_TOP_DY     (-264)
-#define IMG_MOON_BOT_W       400
-#define IMG_MOON_BOT_DY      244
+#define IMG_MOON_BOT_DY      232   /* review_impl_F1.md I-2: box width is now the chord at this
+                                     * row (see image_page_build_overlay_round), not a literal;
+                                     * 232 keeps it 5.5 px clear of the disc bottom (was 244/400) */
 #define IMG_MOON_NAME_DY     290
 #define IMG_MOON_ROW_H        45   /* 27 px line height 39 + 6 pad, as on square */
 #define IMG_MOON_TICK_H       16   /* fits between the arc object's own edges */
@@ -88,6 +89,26 @@ static lv_obj_t *moon_label(lv_obj_t *box, lv_align_t align)
     return lbl;
 }
 
+/* Rise/Set only: the bottom chord can be narrower than "Rise 12:34pm +1" (12h
+ * clock with a day suffix, the worst case in fmt_moon_event()), so each label
+ * is bounded to half the box and dots instead of running into its neighbour
+ * (review_impl_F1.md I-2 / ESCALATION 1 ruling). Width, text align and long
+ * mode are set before lv_obj_align so alignment sees the final box, matching
+ * the lbl_timestamp pattern below. */
+static lv_obj_t *moon_label_capped(lv_obj_t *box, lv_align_t align, int w, lv_text_align_t txt_align)
+{
+    lv_obj_t *lbl = lv_label_create(box);
+    lv_obj_set_style_text_font(lbl, &lv_font_overpass_27, 0);
+    image_page_caption_style(lbl);
+    lv_obj_set_width(lbl, w);
+    lv_obj_set_style_text_align(lbl, txt_align, 0);
+    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
+    lv_obj_align(lbl, align, 0, 0);
+    lv_label_set_text(lbl, "");
+    lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
+    return lbl;
+}
+
 void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
 {
     const int rs = ui_rim_radius();
@@ -119,9 +140,11 @@ void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
         p->lbl_moon_age  = moon_label(top, LV_ALIGN_LEFT_MID);
         p->lbl_moon_next = moon_label(top, LV_ALIGN_RIGHT_MID);
 
-        lv_obj_t *bot = moon_chord_box(page_container, IMG_MOON_BOT_W, IMG_MOON_BOT_DY);
-        p->lbl_moon_rise = moon_label(bot, LV_ALIGN_LEFT_MID);
-        p->lbl_moon_set  = moon_label(bot, LV_ALIGN_RIGHT_MID);
+        int bot_w = ui_chord_at_y(screen_center() + IMG_MOON_BOT_DY + IMG_MOON_ROW_H / 2);
+        lv_obj_t *bot = moon_chord_box(page_container, bot_w, IMG_MOON_BOT_DY);
+        int bot_cap_w = bot_w / 2 - 8;
+        p->lbl_moon_rise = moon_label_capped(bot, LV_ALIGN_LEFT_MID,  bot_cap_w, LV_TEXT_ALIGN_LEFT);
+        p->lbl_moon_set  = moon_label_capped(bot, LV_ALIGN_RIGHT_MID, bot_cap_w, LV_TEXT_ALIGN_RIGHT);
 
         /* Lunar age arc: track full circle, indicator from twelve o'clock
          * clockwise to the lit fraction. lv_arc puts its centre line at
@@ -166,7 +189,7 @@ void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
                                        IMG_CAP_ANGLE_START, IMG_CAP_ANGLE_SIZE, false,
                                        LV_ARCLABEL_TEXT_ALIGN_TRAILING);
     image_page_caption_style(p->lbl_region);
-    lv_arclabel_set_text(p->lbl_region, "");
+    /* No lv_arclabel_set_text("") here: ui_arclabel_create() already set it. */
 
     /* Branch B: the per-frame HH:MM stamp of the Radar and Cloud Cover loops
      * changes on every playback step, and the A2 arclabel redraw measurement has

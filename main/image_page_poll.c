@@ -65,8 +65,8 @@ _Atomic bool moon_anim_request = false;
  *      ratio: 720/240=3, representable on PPA's 1/16 scale grid so the whole 720
  *      output is filled with no edge-streak remainder, and no per-frame memset)
  *      into the ping-pong output buffer s_ppa_out[ping];
- *   3. image_page_show_borrowed(p, s_ppa_out[ping], 720, 720) points the
- *      LVGL descriptor straight at it (no copy) at scale 1.0; then flip ping.
+ *   3. image_page_show_borrowed(p, s_ppa_out[ping], moon_fit_sz(), moon_fit_sz()) points
+ *      the LVGL descriptor straight at it (no copy) at scale 1.0; then flip ping.
  * The PPA driver handles cache coherency for the BLOCKING transfer in BOTH
  * directions, so the output is coherent for LVGL read when the call returns — no
  * manual esp_cache_msync. The output is DOUBLE-BUFFERED (s_ppa_out[0]/[1]); PPA
@@ -1511,8 +1511,9 @@ static bool moon_poll_once(void *arg)
      * home and `continue` so the inner settle loop runs the snap-back +
      * resting commit exactly as the rubber-band path does. */
     if (freespin_hold) {
-        /* One crisp held-orientation frame at native 720. moon_sphere_render_ex
-         * owns its own PSRAM buffer; the commit takes ownership. */
+        /* One crisp held-orientation frame at moon_fit_sz() (native panel size on
+         * square, the shrunk 432 disc on round). moon_sphere_render_ex owns its
+         * own PSRAM buffer; the commit takes ownership. */
         float hy, hp; moon_drag_get(&hy, &hp);
         uint16_t *hold_img = moon_sphere_render_ex(moon_fit_sz(), moon_fit_sz(), &live,
                                                    96, 48, cfg->moon_bg_style,
