@@ -24,6 +24,7 @@
  *   wrapper picks it from the direction so no caller has to know this.
  */
 #include "ui_arclabel.h"
+#include "screen_geom.h"
 
 /* Angular span both rim conventions use. 120 degrees at radius 312 is about
  * 653 px of arc, which holds a caption at 27 px with room for the ellipsis. */
@@ -42,13 +43,13 @@ lv_obj_t *ui_arclabel_create(lv_obj_t *parent, const lv_font_t *font, int radius
      * content box centre the widget measures from is the object centre. */
     lv_obj_remove_style_all(o);
 
-    /* Full parent, centred. The object is only a canvas: the radius is set
-     * explicitly below, so the size never moves a glyph. It is the parent size
-     * rather than 2 * radius so a glyph cell straddling the radius cannot be
-     * clipped by its own object, and IGNORE_LAYOUT keeps a flex or grid parent
-     * from moving it off centre. */
+    /* Full panel, centred. The object is only a canvas: the radius is set
+     * explicitly below, so the size never moves a glyph. It is sized to the
+     * panel (not a parent-relative percent, and not 2 * radius) so a padded
+     * ancestor cannot shrink it and clip a glyph cell straddling the radius;
+     * IGNORE_LAYOUT keeps a flex or grid parent from moving it off centre. */
     lv_obj_add_flag(o, LV_OBJ_FLAG_IGNORE_LAYOUT);
-    lv_obj_set_size(o, LV_PCT(100), LV_PCT(100));
+    lv_obj_set_size(o, screen_size(), screen_size());
     lv_obj_center(o);
     lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 

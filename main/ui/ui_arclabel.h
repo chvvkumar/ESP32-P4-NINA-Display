@@ -17,7 +17,11 @@
 /* Text on an arc centred on the parent's centre. angle_start_deg follows lv_arclabel:
  * 0 = three o'clock, clockwise positive. radius is the text baseline radius in px.
  * dir_cw false draws the glyphs counter-clockwise (readable on the bottom rim).
- * Returns the lv_arclabel; the caller sets colour and text through the lv_arclabel API. */
+ * Returns the lv_arclabel; the caller sets colour and text through the lv_arclabel API.
+ * The wrapper sizes its own object to the full panel, so it never clips its own
+ * glyphs regardless of an ancestor's padding, but every ancestor up to the screen
+ * still clips at ITS OWN coords: the parent must be the full-panel page root or
+ * lv_layer_top(), never a padded container, or rim text is clipped away. */
 lv_obj_t *ui_arclabel_create(lv_obj_t *parent, const lv_font_t *font, int radius,
                              int angle_start_deg, int angle_size_deg, bool dir_cw,
                              lv_arclabel_text_align_t halign);
