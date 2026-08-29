@@ -861,12 +861,23 @@ jobs:
               '### Firmware Files',
               '| File | Board | Description |',
               '|------|-------|-------------|',
-              '| `nina-display-factory.bin` | 4B square 720x720 | Full factory image (flash at 0x0000) |',
-              '| `nina-display-ota.bin` | 4B square 720x720 | OTA update binary (upload via web UI) |',
-              '| `nina-display.elf` | 4B square 720x720 | Firmware ELF (for decoding core dumps) |',
-              # The round family is built and size-gated on every run but is not
-              # published on the stable channel yet. Its three rows join this
-              # table at the phase 2 gate; alpha (build-snd.yml) ships it now.
+              '| `nina-display-factory.bin` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | Full factory image (flash at 0x0000) |',
+              '| `nina-display-ota.bin` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | OTA update binary (upload via web UI) |',
+              '| `nina-display.elf` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | Firmware ELF (for decoding core dumps) |',
+              # Board names are the ha_model strings from main/board_profile.c,
+              # so a release row reads the same as the model the device reports
+              # over MQTT and on its own system info page.
+              #
+              # The round family is built on every run but is still not attached
+              # to a stable release, so its rows stay out of this table: listing
+              # a file the release does not carry is worse than omitting it.
+              # When the round assets are added to `gh release create` below,
+              # add these three rows with them:
+              #   `nina-display-round-factory.bin` / `-ota.bin` / `.elf`
+              #   ESP32-P4-WIFI6-Touch-LCD-3.4C (round, 800x800) and
+              #   ESP32-P4-WIFI6-Touch-LCD-4C (round, 720x720) -- ONE round
+              #   build serves both; the panel is set on the device.
+              # The alpha channel (build-snd.yml) ships all six today.
               '',
               '### Flashing',
               '- **Factory:** Use [ESP Web Flasher](https://espressif.github.io/esptool-js/) — flash at address `0x0000`',
