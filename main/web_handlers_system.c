@@ -261,13 +261,40 @@ static void ota_refusal_tap_cb(lv_event_t *e) {
     ota_refusal_dismiss();
 }
 
+/* The two refusal texts, shared by /api/ota and /api/ota-check: the short one
+ * goes on the panel, the JSON one to the client. */
+static void ota_family_reject_texts(ota_family_verdict_t verdict,
+                                    const char **screen_msg, const char **json)
+{
+    if (verdict == OTA_FAMILY_NO_DESC) {
+        *screen_msg = "The uploaded file is not an ESP32-P4 application image. "
+                      "Flash the binary that matches this device.";
+        *json = "{\"error\":\"wrong firmware family: this file carries no firmware app "
+                "descriptor, so it is not an ESP32-P4 application image. Download the "
+                "binary that matches this device.\"}";
+    } else {
+        *screen_msg = "The uploaded file is built for the other panel shape and would "
+                      "leave this screen dark. Flash the binary that matches this device.";
+        *json = "{\"error\":\"wrong firmware family: this image is built for the other "
+                "panel shape and would leave the screen dark. Download the binary that "
+                "matches this device.\"}";
+    }
+}
+
 static void ota_show_refusal(const char *message) {
     if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return;
-    if (!ota_overlay) {
-        bsp_display_unlock();
-        return;
+    if (ota_overlay) {
+        lv_obj_clean(ota_overlay);
+    } else {
+        /* Pre-check refusal: no progress overlay exists yet, so build the
+         * same black base the progress screen uses. */
+        ota_overlay = lv_obj_create(lv_scr_act());
+        lv_obj_remove_style_all(ota_overlay);
+        lv_obj_set_size(ota_overlay, screen_size(), screen_size());
+        lv_obj_set_style_bg_color(ota_overlay, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
+        lv_obj_center(ota_overlay);
     }
-    lv_obj_clean(ota_overlay);
     ota_progress_label = NULL;
     ota_bar = NULL;
     ota_bar_glow = NULL;
@@ -312,6 +339,63 @@ static void ota_show_refusal(const char *message) {
     ota_refusal_timer = lv_timer_create(ota_refusal_timer_cb, 30000, NULL);
     lv_timer_set_repeat_count(ota_refusal_timer, 1);
     bsp_display_unlock();
+}
+
+/* POST /api/ota-check: the first bytes of a firmware file (the page sends 4 KB).
+ * Runs the same family gate as /api/ota so a wrong-shape file is refused in one
+ * round trip instead of after a 7 MB upload, and raises the panel's
+ * wrong-firmware screen. Never touches flash or the network. /api/ota keeps
+ * its own check and drain for clients that skip this call. */
+esp_err_t ota_check_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    if (req->content_len <= 0) {
+        return send_400(req, "No firmware data received");
+    }
+    if (req->content_len > 65536) {
+        return send_400(req, "Send only the first bytes of the file");
+    }
+    if (atomic_load(&ota_in_progress)) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Update already in progress\"}");
+        return ESP_OK;
+    }
+
+    uint8_t hdr[OTA_FAMILY_HDR_BYTES];
+    char sink[512];
+    size_t have = 0;
+    int remaining = req->content_len;
+    int timeouts = 0;
+    while (remaining > 0) {
+        bool to_hdr = have < sizeof(hdr);
+        char *dst = to_hdr ? (char *)hdr + have : sink;
+        int want = to_hdr ? (int)(sizeof(hdr) - have) : (int)sizeof(sink);
+        if (want > remaining) want = remaining;
+        int n = httpd_req_recv(req, dst, want);
+        if (n <= 0) {
+            if (n == HTTPD_SOCK_ERR_TIMEOUT && ++timeouts < 5) continue;
+            return send_400(req, "Upload interrupted");
+        }
+        timeouts = 0;
+        if (to_hdr) have += (size_t)n;
+        remaining -= n;
+    }
+
+    ota_family_verdict_t verdict = (have < OTA_FAMILY_HDR_BYTES)
+        ? OTA_FAMILY_NO_DESC : ota_family_check(hdr, have);
+    httpd_resp_set_type(req, "application/json");
+    if (verdict == OTA_FAMILY_ACCEPT) {
+        httpd_resp_sendstr(req, "{\"ok\":true}");
+        return ESP_OK;
+    }
+    const char *screen_msg, *json;
+    ota_family_reject_texts(verdict, &screen_msg, &json);
+    ota_show_refusal(screen_msg);
+    httpd_resp_set_status(req, "409 Conflict");
+    httpd_resp_sendstr(req, json);
+    return ESP_OK;
 }
 
 /**
@@ -473,19 +557,7 @@ esp_err_t ota_post_handler(httpd_req_t *req)
                  * erases nothing up front), so aborting here leaves the target
                  * slot exactly as it was. */
                 const char *screen_msg, *json;
-                if (verdict == OTA_FAMILY_NO_DESC) {
-                    screen_msg = "The uploaded file is not an ESP32-P4 application image. "
-                                 "Flash the binary that matches this device.";
-                    json = "{\"error\":\"wrong firmware family: this file carries no firmware app "
-                           "descriptor, so it is not an ESP32-P4 application image. Download the "
-                           "binary that matches this device.\"}";
-                } else {
-                    screen_msg = "The uploaded file is built for the other panel shape and would "
-                                 "leave this screen dark. Flash the binary that matches this device.";
-                    json = "{\"error\":\"wrong firmware family: this image is built for the other "
-                           "panel shape and would leave the screen dark. Download the binary that "
-                           "matches this device.\"}";
-                }
+                ota_family_reject_texts(verdict, &screen_msg, &json);
                 ota_show_refusal(screen_msg);
                 /* Drain the rest of the upload before answering: closing the
                  * socket while the browser is still sending makes XHR report a

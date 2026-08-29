@@ -391,6 +391,7 @@ void start_web_server(void)
         { { "/api/panel",            HTTP_GET,  panel_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/panel",            HTTP_POST, panel_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ota",              HTTP_POST, ota_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/ota-check",        HTTP_POST, ota_check_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/perf",             HTTP_GET,  perf_get_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/perf/reset",       HTTP_POST, perf_reset_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL }, ROUTE_AUTH_REQUIRED },

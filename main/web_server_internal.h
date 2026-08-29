@@ -187,6 +187,7 @@ esp_err_t voice_preview_post_handler(httpd_req_t *req);
 esp_err_t reboot_post_handler(httpd_req_t *req);
 esp_err_t factory_reset_post_handler(httpd_req_t *req);
 esp_err_t ota_post_handler(httpd_req_t *req);
+esp_err_t ota_check_post_handler(httpd_req_t *req);
 esp_err_t version_get_handler(httpd_req_t *req);
 esp_err_t panel_get_handler(httpd_req_t *req);
 esp_err_t panel_post_handler(httpd_req_t *req);

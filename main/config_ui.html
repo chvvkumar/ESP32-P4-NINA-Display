@@ -4279,7 +4279,22 @@
         showToast('OTA upload error','error');
         btn.disabled=false;
       });
-      xhr.send(file);
+      /* Ask the device to judge the file header first: a wrong-shape file is
+         refused in one round trip instead of after the whole upload. If the
+         check itself cannot be reached, fall through and let /api/ota decide. */
+      status.textContent='Checking file...';
+      file.slice(0,4096).arrayBuffer().then(function(head){
+        return fetch('/api/ota-check',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:head});
+      }).then(function(r){
+        if(r.ok){status.textContent='Uploading...';xhr.send(file);return;}
+        return r.json().catch(function(){return {};}).then(function(j){
+          var reason=j.error||('HTTP '+r.status);
+          status.classList.add('is-error');
+          status.textContent='Update refused: '+reason;
+          showToast(reason,'error');
+          btn.disabled=false;
+        });
+      }).catch(function(){status.textContent='Uploading...';xhr.send(file);});
     }
 
     /* === Screenshot === */
