@@ -1038,7 +1038,7 @@ static void pages_home_row_cb(lv_event_t *e)
     lv_obj_clear_flag(head, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *btn = lv_button_create(head);
-    lv_obj_set_size(btn, HUB_BACK_W, HUB_HEADER_H);
+    lv_obj_set_size(btn, SCREEN_ROUND ? HUB_BACK_W_ROUND : HUB_BACK_W, HUB_HEADER_H);
     lv_obj_align(btn, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_style_radius(btn, 14, 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -1527,7 +1527,13 @@ static void hub_make_info_row(lv_obj_t *parent, const char *key, const char *val
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     ui_label(row, key, &lv_font_montserrat_24, UI_THEME_COLOR(label_color));
-    ui_label(row, value, &lv_font_montserrat_32, UI_THEME_COLOR(text_color));
+    /* The value takes whatever the key leaves and dots at that edge: a dev
+     * build's "snd-alpha-76-ge896e32-dirty" at 32 px ran back over the
+     * VERSION key on the 564 px round chord (bench B12 on the 3.4C). */
+    lv_obj_t *val = ui_label(row, value, &lv_font_montserrat_32, UI_THEME_COLOR(text_color));
+    lv_obj_set_flex_grow(val, 1);
+    lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_label_set_long_mode(val, LV_LABEL_LONG_DOT);
 }
 
 static void build_more_screen(lv_obj_t *parent)

@@ -48,6 +48,9 @@ void settings_hub_round_header_font(lv_obj_t *header)
     lv_obj_t *back = lv_obj_get_child(header, 0);
     lv_obj_t *lbl  = back ? lv_obj_get_child(back, 0) : NULL;
     if (lbl) lv_obj_set_style_text_font(lbl, &lv_font_montserrat_28, 0);
+    /* "< BACK" at 28 px is about 100 px; the shipped 96 px button clipped
+     * the K (bench B12). The theme picker overrides this with its own pill. */
+    if (back) lv_obj_set_width(back, HUB_BACK_W_ROUND);
 }
 
 /* Place one tile at an absolute offset from the screen centre and re-font it
@@ -109,6 +112,11 @@ static void fit_hub_screen(lv_obj_t *screen)
     lv_obj_set_size(hub_grid_obj, LV_PCT(100), LV_PCT(100));
     lv_obj_set_style_pad_all(hub_grid_obj, 0, 0);
     lv_obj_align(hub_grid_obj, LV_ALIGN_CENTER, 0, 0);
+    /* The layer is child 1, drawn over the header (child 0), and a clickable
+     * transparent layer wins the hit test over everything under it: the BACK
+     * button was visible and dead (bench B12 on the 3.4C). The tiles keep
+     * their own CLICKABLE; only the layer stops claiming taps. */
+    lv_obj_remove_flag(hub_grid_obj, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *t0 = lv_obj_get_child(hub_grid_obj, 0);   /* THEME */
     lv_obj_t *t1 = lv_obj_get_child(hub_grid_obj, 1);   /* BRIGHTNESS */

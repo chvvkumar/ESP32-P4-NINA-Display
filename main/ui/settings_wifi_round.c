@@ -32,7 +32,7 @@
 #define WR_HEADER_W     420
 #define WR_HEADER_H      72
 #define WR_HEADER_DY   (-228)
-#define WR_BACK_W        96     /* HUB_BACK_W: the shared header's BACK button */
+#define WR_BACK_W       HUB_BACK_W_ROUND   /* the shared header's BACK, widened on round */
 #define WR_ROW_W        530
 #define WR_ROW_H         72
 #define WR_SROW_DY     (-142)

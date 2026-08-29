@@ -39,9 +39,15 @@ lv_obj_t *settings_hub_make_theme_card(lv_obj_t *parent, int idx, int active,
  *  theme screen's BACK pill styling. */
 void settings_hub_round_fit(lv_obj_t *screen, hub_screen_t which);
 
+/** Width of the shared BACK button on round: "< BACK" at montserrat_28 is
+ *  about 100 px and the square 96 px button clipped it. Used by the header
+ *  font pass, the WiFi header fit and the Home Page picker's own BACK. */
+#define HUB_BACK_W_ROUND 116
+
 /** Raise the shared header's BACK label to the 27 px round floor (it ships at
- *  lv_font_montserrat_24). Called by every round fit pass that keeps a header,
- *  including the WiFi ones in settings_wifi_round.c. */
+ *  lv_font_montserrat_24) and widen the button to HUB_BACK_W_ROUND. Called by
+ *  every round fit pass that keeps a header, including the WiFi ones in
+ *  settings_wifi_round.c. */
 void settings_hub_round_header_font(lv_obj_t *header);
 
 /** Raise every label under @p cont, at any depth, still using an under-floor
