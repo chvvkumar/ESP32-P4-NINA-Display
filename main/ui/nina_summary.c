@@ -1081,6 +1081,17 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
 
     prev_visible_count = visible;
 
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Online rigs take the outermost rings in slot order (bench B1 ruling). */
+    {
+        bool shown[MAX_NINA_INSTANCES];
+        for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            shown[i] = nina_slot_available[i] && i < count && nina_connection_is_connected(i);
+        }
+        nina_summary_round_place_rings(cards, shown);
+    }
+#endif
+
     /* ── Update card data ────────────────────────────────────────── */
     for (int i = 0; i < MAX_NINA_INSTANCES && i < count; i++) {
         summary_card_t *sc = &cards[i];

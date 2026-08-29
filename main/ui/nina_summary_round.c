@@ -63,6 +63,29 @@ static int sr_card_half(int dy_max) {
     return (int)sqrtf((float)(rc * rc - dy_max * dy_max)) - SR_CARD_EDGE;
 }
 
+/* Ring radius for the k-th shown rig, outermost first. */
+static int sr_ring_radius(int rank) {
+    return ui_rim_radius() - SR_RING_OFF - rank * SR_RING_PITCH;
+}
+
+static void sr_arc_set_radius(lv_obj_t *arc, int r, int width) {
+    if (!arc) return;
+    int side = 2 * r + width;
+    lv_obj_set_size(arc, side, side);
+    lv_obj_center(arc);
+}
+
+void nina_summary_round_place_rings(summary_card_t *cards, const bool *shown) {
+    int rank = 0;
+    for (int slot = 0; slot < MAX_NINA_INSTANCES; slot++) {
+        if (!shown[slot]) continue;
+        int r = sr_ring_radius(rank++);
+        nina_subbar_ring_set_radius(&cards[slot].ring, r);
+        sr_arc_set_radius(cards[slot].ring_crown, r, SR_RING_W);
+        sr_arc_set_radius(cards[slot].ring_flip_tick, r, SR_TICK_W);
+    }
+}
+
 static lv_obj_t *sr_label(lv_obj_t *parent, const lv_font_t *font,
                           uint32_t color, const char *text);
 static lv_obj_t *sr_bullseye(lv_obj_t *parent, int x, int y, uint32_t dot_color,
@@ -138,7 +161,7 @@ void nina_summary_round_create_card(summary_card_t *sc, lv_obj_t *parent, int sl
     int gb = app_config_get()->color_brightness;
 
     /* 1: this rig's ring set. Slot 0 outermost. */
-    int r = ui_rim_radius() - SR_RING_OFF - slot * SR_RING_PITCH;
+    int r = sr_ring_radius(slot);   /* re-ranked outward by nina_summary_round_place_rings() */
     nina_subbar_create_ring(&sc->ring, parent, r, SR_RING_W, SR_CROWN_DEG);
     sc->ring_crown = ui_dial_arc(parent, r, SR_RING_W,
                                  -SR_CROWN_DEG / 2, SR_CROWN_DEG / 2);

@@ -89,6 +89,14 @@ void nina_subbar_create(nina_subbar_t *sb, lv_obj_t *parent, int block_h);
 void nina_subbar_create_ring(nina_subbar_t *sb, lv_obj_t *parent,
                              int radius, int width, int gap_deg);
 
+/**
+ * @brief Move a ring to a new centre-line radius (ring mode only).
+ *
+ * Resizes and re-centres the container and forces the block row to rebuild on
+ * the next nina_subbar_update(). No-op when the radius is unchanged.
+ */
+void nina_subbar_ring_set_radius(nina_subbar_t *sb, int radius);
+
 /** @brief Push -1 to the elapsed callback (the layout's idle reset). */
 void nina_subbar_reset_elapsed(nina_subbar_t *sb);
 

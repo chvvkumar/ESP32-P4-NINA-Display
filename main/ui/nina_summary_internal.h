@@ -110,3 +110,12 @@ void summary_bind_card_tap(lv_obj_t *card, int instance_index);
  * chord-derived width. LVGL lock held by caller.
  */
 void nina_summary_round_create_card(summary_card_t *sc, lv_obj_t *parent, int slot);
+
+/**
+ * @brief Rank the shown rigs outward (round family only).
+ *
+ * Online rigs take the outermost rings in slot order: with rigs 1 and 2
+ * offline, rig 3 sits on the rim ring instead of two pitches in. Called once
+ * per summary update after visibility is settled; @p shown is indexed by slot.
+ */
+void nina_summary_round_place_rings(summary_card_t *cards, const bool *shown);

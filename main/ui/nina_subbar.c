@@ -284,6 +284,17 @@ void nina_subbar_create_ring(nina_subbar_t *sb, lv_obj_t *parent,
     nina_subbar_apply_theme(sb);
 }
 
+void nina_subbar_ring_set_radius(nina_subbar_t *sb, int radius) {
+    if (!sb || !sb->ring || !sb->cont || radius <= 0 || radius == sb->ring_radius) return;
+    sb->ring_radius = radius;
+    int side = 2 * radius + sb->ring_width;
+    lv_obj_set_size(sb->cont, side, side);
+    lv_obj_center(sb->cont);
+    /* The blocks are arcs sized from ring_radius at rebuild time: invalidate
+     * the target cache so the next update rebuilds and repaints them. */
+    sb->cached_target = -1;
+}
+
 void nina_subbar_reset_elapsed(nina_subbar_t *sb) {
     if (!sb || !sb->elapsed_cb) return;
     sb->elapsed_cb(sb->elapsed_ud, -1);
