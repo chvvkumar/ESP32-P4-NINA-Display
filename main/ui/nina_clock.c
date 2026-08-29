@@ -126,7 +126,6 @@ lv_obj_t *lbl_ampm = NULL;
 lv_obj_t *lbl_humid_val = NULL;
 lv_obj_t *lbl_dew_val   = NULL;
 lv_obj_t *lbl_wind_val  = NULL;
-lv_obj_t *lbl_uv_val   = NULL;
 
 /* Forecast (Classic + Console bars; hour labels shared by all layouts) */
 lv_obj_t *forecast_row  = NULL;
@@ -792,7 +791,7 @@ static void create_clock_timer(void) {
 
 #if !CONFIG_NINA_FAMILY_ROUND
 /**
- * Build the 4-column stats strip (HUMID / DEW PT / WIND / UV IDX) with
+ * Build the 3-column stats strip (HUMID / DEW PT / WIND) with
  * vertical dividers. Used by the Classic layout.
  */
 static void build_stats_strip(lv_obj_t *parent) {
@@ -808,8 +807,6 @@ static void build_stats_strip(lv_obj_t *parent) {
     make_stat_col(stats_strip, "--", "DEW PT", &lbl_dew_val);
     make_vdivider(stats_strip);
     make_stat_col(stats_strip, "--", "WIND",   &lbl_wind_val);
-    make_vdivider(stats_strip);
-    make_stat_col(stats_strip, "--", "UV IDX", &lbl_uv_val);
 }
 
 /**
@@ -1099,11 +1096,8 @@ static void build_layout_console(void) {
     make_label(sub, &lv_font_overpass_27, CON_DIM, 0, "DEW");
     lbl_dew_val = make_label(sub, &lv_font_overpass_27, CON_CREAM, 0, "--");
 
-    /* WIND cell — UV sub */
-    sub = make_console_cell(grid, 3, "WIND", &lv_font_saira_light_46,
-                            &lbl_wind_val);
-    make_label(sub, &lv_font_overpass_27, CON_DIM, 0, "UV");
-    lbl_uv_val = make_label(sub, &lv_font_overpass_27, CON_CREAM, 0, "--");
+    /* WIND cell, no sub row (UV dropped from every face, bench B5) */
+    make_console_cell(grid, 3, "WIND", &lv_font_saira_light_46, &lbl_wind_val);
 
     /* ── Forecast strip ── */
     forecast_row = make_container(clock_root);
@@ -1264,7 +1258,6 @@ static void build_layout_broadside(void) {
     make_metric_pair(metrics, "HUM",  &lbl_humid_val);
     make_metric_pair(metrics, "DEW",  &lbl_dew_val);
     make_metric_pair(metrics, "WIND", &lbl_wind_val);
-    make_metric_pair(metrics, "UV",   &lbl_uv_val);
 
     /* round: no forecast row on the inset faces (ledger ruling B3); the
      * budget only fits the head, hero, condition, now row and metrics. */
@@ -1328,18 +1321,18 @@ static void make_ev_row(lv_obj_t *parent, int idx, const char *key,
 static void build_layout_evensong(void) {
     /* Vertical budget (720px, worst case = forecast visible):
      * pad_top 28 + head 59 (39 + 20 reserved gap) + words 273
-     * (154 + 116 + 51 - 2*24 pad_row) + date 25 + table 234 (6*39)
-     * + forecast 68 (39 + 4 + 25) + pad_bottom 24 = 711, leaving +9
+     * (154 + 116 + 51 - 2*24 pad_row) + date 25 + table 195 (5*39)
+     * + forecast 68 (39 + 4 + 25) + pad_bottom 24 = 672, leaving +48
      * slack so SPACE_BETWEEN never goes negative (a negative flex gap
      * stacks the blocks and rams the hour word into "IT IS"). */
     /* Horizontal: 50 on square, the safe inset on round (105 at 720, 118 at
-     * 800). Vertical: the block above budgets 659 px of content (this
+     * 800). Vertical: the block above budgets 620 px of content (this
      * includes the forecast row round no longer builds; the extra slack on
      * round is deliberate). Raising the vertical pads to the safe inset would
      * leave 510 and drive the SPACE_BETWEEN gaps negative, which stacks the
      * blocks. Clamp the vertical pad to the slack that actually exists: 28
-     * and 24 on square (the literals win), 30 at 720 round, 70 at 800 round. */
-    const int ev_pad_v = LV_MIN(ui_page_inset(), (screen_size() - 659) / 2);
+     * and 24 on square (the literals win), 50 at 720 round, 90 at 800 round. */
+    const int ev_pad_v = LV_MIN(ui_page_inset(), (screen_size() - 620) / 2);
     lv_obj_set_style_pad_top(clock_root, LV_MAX(28, ev_pad_v), 0);
     lv_obj_set_style_pad_bottom(clock_root, LV_MAX(24, ev_pad_v), 0);
     lv_obj_set_style_pad_hor(clock_root, LV_MAX(50, ui_page_inset()), 0);
@@ -1408,7 +1401,6 @@ static void build_layout_evensong(void) {
     make_ev_row(table, 2, "HUMIDITY",    &lbl_humid_val);
     make_ev_row(table, 3, "DEW POINT",   &lbl_dew_val);
     make_ev_row(table, 4, "WIND",        &lbl_wind_val);
-    make_ev_row(table, 5, "UV INDEX",    &lbl_uv_val);
 
 #if CONFIG_NINA_FAMILY_ROUND
     /* Every row stays; each steps in to the glass chord at its own edge
@@ -1416,7 +1408,7 @@ static void build_layout_evensong(void) {
     clock_round_fit_column(clock_root, table);
 #endif
 
-    /* round: no forecast row on the inset faces (ledger ruling B3); the 659 px
+    /* round: no forecast row on the inset faces (ledger ruling B3); the 620 px
      * budget above already accounts for it (see the pad clamp above). */
     if (!SCREEN_ROUND) {
         /* ── Forecast: temps row over hours row ── */
@@ -1565,7 +1557,6 @@ static void build_layout_blueprint(void) {
     lbl_humid_val = make_blu_callout(472, 300, &lv_font_overpass_27);
     lbl_dew_val   = make_blu_callout(472, 342, &lv_font_overpass_27);
     lbl_wind_val  = make_blu_callout(472, 384, &lv_font_overpass_27);
-    lbl_uv_val    = make_blu_callout(472, 426, &lv_font_overpass_27);
 
     /* ── Dimensioned elevation chart ── */
     forecast_row = make_container(clock_root);
@@ -2191,7 +2182,7 @@ static void reset_widget_ptrs(void) {
     lbl_day = lbl_date = lbl_year = lbl_mday = NULL;
     lbl_temp = lbl_deg = lbl_cond = lbl_hilo = NULL;
     lbl_time = lbl_ampm = NULL;
-    lbl_humid_val = lbl_dew_val = lbl_wind_val = lbl_uv_val = NULL;
+    lbl_humid_val = lbl_dew_val = lbl_wind_val = NULL;
     forecast_row = NULL;
     for (int i = 0; i < FORECAST_BARS; i++) {
         forecast_bars[i] = NULL;
@@ -2518,7 +2509,6 @@ void clock_page_update(void) {
         if (lbl_humid_val) lv_label_set_text(lbl_humid_val, "--");
         if (lbl_dew_val)   lv_label_set_text(lbl_dew_val, "--");
         if (lbl_wind_val)  lv_label_set_text(lbl_wind_val, "--");
-        if (lbl_uv_val)    lv_label_set_text(lbl_uv_val, "--");
         if (forecast_row) lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 #if LV_USE_ARCLABEL
         if (clk_arc_cond)  lv_arclabel_set_text(clk_arc_cond, "--");
@@ -2619,13 +2609,6 @@ void clock_page_update(void) {
 
     /* Stats. Blueprint carries its caption inside each value ("HUM 91%");
      * Transit folds all readings into two combined right-column rows. */
-    char uv_s[16];
-    if (wd.uv_index < 0.0f) {
-        snprintf(uv_s, sizeof(uv_s), "--");
-    } else {
-        snprintf(uv_s, sizeof(uv_s), "%.0f", wd.uv_index);
-    }
-
     if (s_layout == 4) {
         char sbuf[64];
         snprintf(sbuf, sizeof(sbuf), "HUM %.0f%%", wd.humidity);
@@ -2635,15 +2618,13 @@ void clock_page_update(void) {
         snprintf(sbuf, sizeof(sbuf), "WIND %s %.0f", wd.wind_dir,
                  wd.wind_speed);
         if (lbl_wind_val) lv_label_set_text(lbl_wind_val, sbuf);
-        snprintf(sbuf, sizeof(sbuf), "UV %s", uv_s);
-        if (lbl_uv_val) lv_label_set_text(lbl_uv_val, sbuf);
     } else if (s_layout == 5) {
         char sbuf[96];
         snprintf(sbuf, sizeof(sbuf), "H %.0f L %.0f  HUM %.0f%%",
                  wd.temp_high, wd.temp_low, wd.humidity);
         if (lbl_humid_val) lv_label_set_text(lbl_humid_val, sbuf);
-        snprintf(sbuf, sizeof(sbuf), "DEW %.0f\xc2\xb0  WIND %s %.0f  UV %s",
-                 wd.dew_point, wd.wind_dir, wd.wind_speed, uv_s);
+        snprintf(sbuf, sizeof(sbuf), "DEW %.0f\xc2\xb0  WIND %s %.0f",
+                 wd.dew_point, wd.wind_dir, wd.wind_speed);
         if (lbl_dew_val) lv_label_set_text(lbl_dew_val, sbuf);
     } else {
         char buf[16];
@@ -2655,8 +2636,6 @@ void clock_page_update(void) {
 
         snprintf(buf, sizeof(buf), "%s %.0f", wd.wind_dir, wd.wind_speed);
         if (lbl_wind_val) lv_label_set_text(lbl_wind_val, buf);
-
-        if (lbl_uv_val) lv_label_set_text(lbl_uv_val, uv_s);
     }
 
     /* Round Classic: the condition row and the stats row live on the rim as
@@ -2677,8 +2656,8 @@ void clock_page_update(void) {
     }
     if (clk_arc_stats) {
         char sbuf[160];
-        snprintf(sbuf, sizeof(sbuf), "%.0f%% / %.0f\xc2\xb0 / %s %.0f / UV %s",
-                 wd.humidity, wd.dew_point, wd.wind_dir, wd.wind_speed, uv_s);
+        snprintf(sbuf, sizeof(sbuf), "%.0f%% / %.0f\xc2\xb0 / %s %.0f",
+                 wd.humidity, wd.dew_point, wd.wind_dir, wd.wind_speed);
         if (strcmp(sbuf, clk_arc_stats_prev) != 0) {
 #if LV_USE_ARCLABEL
             lv_arclabel_set_text(clk_arc_stats, sbuf);
@@ -2819,13 +2798,12 @@ void clock_page_apply_theme(void) {
     set_label_color(lbl_humid_val, p.secondary);
     set_label_color(lbl_dew_val,   p.secondary);
     set_label_color(lbl_wind_val,  p.secondary);
-    set_label_color(lbl_uv_val,    p.secondary);
 
     /* Stat caption labels: the sibling children of each value's parent. */
-    lv_obj_t *val_labels[4] = {
-        lbl_humid_val, lbl_dew_val, lbl_wind_val, lbl_uv_val
+    lv_obj_t *val_labels[3] = {
+        lbl_humid_val, lbl_dew_val, lbl_wind_val
     };
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 3; i++) {
         if (!val_labels[i]) continue;
         lv_obj_t *col = lv_obj_get_parent(val_labels[i]);
         if (!col) continue;

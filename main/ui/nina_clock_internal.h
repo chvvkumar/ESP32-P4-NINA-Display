@@ -95,7 +95,6 @@ extern lv_obj_t *lbl_hilo;
 extern lv_obj_t *lbl_humid_val;
 extern lv_obj_t *lbl_dew_val;
 extern lv_obj_t *lbl_wind_val;
-extern lv_obj_t *lbl_uv_val;
 
 extern lv_obj_t *forecast_row;
 extern lv_obj_t *forecast_bars[FORECAST_BARS];
