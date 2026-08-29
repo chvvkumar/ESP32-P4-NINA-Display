@@ -1461,6 +1461,13 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
      * the inscribed square ask ui_page_inset() for it; pages that want the whole
      * disc negate this pad the way the image page always has. */
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
+    /* Never a scroll host. A full-bleed page (image pages, Image-forward,
+     * OctoPrint Immersive) negates that pad and overhangs the content box by
+     * 16 px on the right and bottom; with the default SCROLLABLE flag a swipe
+     * chains up here, drags the whole page by that overhang and the throw
+     * settles at the limit, not at 0, so the page stays shifted after the
+     * gesture (bench B10 on the 3.4C). Pages switch by HIDDEN + translate_x. */
+    lv_obj_remove_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
 
     /* Optional feature pages — created here ONLY if the feature is enabled in
      * config; otherwise on the first runtime enable (see

@@ -39,13 +39,26 @@
 #define GR_CROWN_DEG    40
 #define GR_LABEL_K      40      /* state arclabel baseline: Rs - 40 */
 
-/* Cap and text bands, as offsets from the panel centre (720: 486 / 546 / 588). */
-#define GR_CAP_DY      126
+/* Cap and text bands, as offsets from the panel centre. Nothing sits under the
+ * LAYER row, so the band goes as low as the rim allows: the cells row is placed
+ * where the rim's half chord equals the cells' half width (outer bottom corners
+ * on the rim) and the LAYER row a fixed gap under it. That is 123 / 225 at 720
+ * (the hand numbers were 126 / 228) and 191 / 293 at 800, which gains the 65 px
+ * of taper the 720 numbers left empty there (bench B10 on the 3.4C). */
 #define GR_PCT_DY     (-60)
-#define GR_CELL_DY     126
-#define GR_LAYER_DY    228
+#define GR_CELL_H       64      /* caption over value, as octo_w_row builds it */
+#define GR_CELL_GAP     38      /* cells bottom to LAYER row top */
 #define GR_CELL_CHORD  600
 #define GR_CELL_W      150
+
+static int gr_cell_dy(void)
+{
+    const int rs = ui_rim_radius(), h = GR_CELL_CHORD / 2;
+    return (int)sqrtf((float)(rs * rs - h * h)) - GR_CELL_H;
+}
+#define GR_CAP_DY      gr_cell_dy()
+#define GR_CELL_DY     gr_cell_dy()
+#define GR_LAYER_DY    (gr_cell_dy() + GR_CELL_H + GR_CELL_GAP)
 
 #define GR_DIM_OPA     LV_OPA_40
 #define GR_CAP_OPA     LV_OPA_60
