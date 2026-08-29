@@ -226,6 +226,17 @@ esp_err_t ota_github_ensure_can_update(void) {
  * the same base version since this project's pre-release tags
  * use the latest main release as their base.
  */
+/* Does this string carry a version compare_versions() can actually read?
+ * compare_versions() sscanf's "%d.%d.%d" and silently leaves 0.0.0 behind when
+ * that fails, so anything unparseable compares as older than every release ever
+ * published. Require all three numbers before trusting a tag. */
+static bool version_is_comparable(const char *tag) {
+    if (!tag || tag[0] == '\0') return false;
+    if (tag[0] == 'v' || tag[0] == 'V') tag++;
+    int maj = 0, min = 0, pat = 0;
+    return sscanf(tag, "%d.%d.%d", &maj, &min, &pat) == 3;
+}
+
 static int compare_versions(const char *v1, const char *v2) {
     if (v1[0] == 'v' || v1[0] == 'V') v1++;
     if (v2[0] == 'v' || v2[0] == 'V') v2++;
@@ -1233,6 +1244,21 @@ const char *ota_github_get_current_version(void) {
             ESP_LOGI(TAG, "Using OTA-installed version for comparison: %s", tag);
             return tag;
         }
+    }
+    /* BUILD_GIT_TAG is `git describe --tags --always --dirty`. It is a release
+     * tag only when HEAD is at one: on a working branch it comes back as
+     * "<nearest-tag>-<n>-g<sha>", and when the nearest tag is not a version at
+     * all -- the rolling snd-alpha tag, or a bare sha in a repo with no tags --
+     * there is no version in it to read. compare_versions() then scores the
+     * device 0.0.0, which puts it below every full-erase floor ever published,
+     * so a hand-flashed board is told its update needs a manual reflash over a
+     * floor it passed long ago. PROJECT_VER (version.txt) is always
+     * major.minor.patch and is what the UI already shows as the version, so a
+     * tag that carries no version defers to it. */
+    if (!version_is_comparable(BUILD_GIT_TAG)) {
+        ESP_LOGI(TAG, "Build tag \"%s\" carries no version; comparing as %s",
+                 BUILD_GIT_TAG, BUILD_VERSION);
+        return BUILD_VERSION;
     }
     return BUILD_GIT_TAG;
 }
