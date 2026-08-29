@@ -1519,7 +1519,10 @@ static void hub_make_info_row(lv_obj_t *parent, const char *key, const char *val
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
     lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, 40);
+    /* 40 px for a one-line value; a value that wraps (a dev build's version
+     * tag on the 564 px round chord) grows the row instead of being cut. */
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(row, 40, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_left(row, 24, 0);
@@ -1527,13 +1530,12 @@ static void hub_make_info_row(lv_obj_t *parent, const char *key, const char *val
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     ui_label(row, key, &lv_font_montserrat_24, UI_THEME_COLOR(label_color));
-    /* The value takes whatever the key leaves and dots at that edge: a dev
+    /* The value takes whatever the key leaves and wraps inside it: a dev
      * build's "snd-alpha-76-ge896e32-dirty" at 32 px ran back over the
      * VERSION key on the 564 px round chord (bench B12 on the 3.4C). */
     lv_obj_t *val = ui_label(row, value, &lv_font_montserrat_32, UI_THEME_COLOR(text_color));
     lv_obj_set_flex_grow(val, 1);
     lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_label_set_long_mode(val, LV_LABEL_LONG_DOT);
 }
 
 static void build_more_screen(lv_obj_t *parent)

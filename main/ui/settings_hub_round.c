@@ -38,6 +38,27 @@
 #define HUBR_CARD_GAP_MAX 40
 #define HUBR_BACK_W      140
 #define HUBR_BACK_H       56
+#define HUBR_BACK_DY     296     /* pill centre: under the MORE tile (bottom 252)
+                                  * and inside the rim at 720 (chord half 143 at
+                                  * its bottom edge 324 against a 70 px half pill) */
+
+/* Move the shared header's BACK button to a pill on the bottom cap, the way
+ * the theme picker has it, and leave the header with its centred title. The
+ * pill is FLOATING so a scrolling screen (Brightness, Pages, More) keeps it
+ * fixed and out of the flex flow; it stays a child of the screen so a rebuild
+ * deletes it with everything else. Run AFTER settings_hub_round_header_font(),
+ * which finds BACK as child 0 of the header. */
+static void back_to_bottom_pill(lv_obj_t *screen)
+{
+    if (!hub_header_obj) return;
+    lv_obj_t *back = lv_obj_get_child(hub_header_obj, 0);
+    if (!back || !lv_obj_check_type(back, &lv_button_class)) return;
+    lv_obj_set_parent(back, screen);
+    lv_obj_add_flag(back, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(back, HUBR_BACK_W, HUBR_BACK_H);
+    lv_obj_set_style_radius(back, LV_RADIUS_CIRCLE, 0);
+    lv_obj_align(back, LV_ALIGN_CENTER, 0, HUBR_BACK_DY);
+}
 
 /* The shared header's BACK label ships at lv_font_montserrat_24, under the
  * 27 px round floor, and it appears on every settings and WiFi screen. Child 0
@@ -97,6 +118,7 @@ static void fit_hub_screen(lv_obj_t *screen)
         lv_obj_set_size(hub_header_obj, HUBR_HEADER_W, HUBR_HEADER_H);
         lv_obj_align(hub_header_obj, LV_ALIGN_CENTER, 0, HUBR_HEADER_DY);
         settings_hub_round_header_font(hub_header_obj);
+        back_to_bottom_pill(screen);
     }
 
     /* The grid becomes a transparent full-screen placement layer; the six
@@ -178,13 +200,7 @@ static void fit_theme_screen(lv_obj_t *screen)
      * hub_back_cb stays the single back path and no new callback appears. */
     if (hub_header_obj) {
         settings_hub_round_header_font(hub_header_obj);
-        lv_obj_t *back = lv_obj_get_child(hub_header_obj, 0);
-        if (back) {
-            lv_obj_set_parent(back, lv_obj_get_parent(hub_grid_obj));
-            lv_obj_set_size(back, HUBR_BACK_W, HUBR_BACK_H);
-            lv_obj_set_style_radius(back, LV_RADIUS_CIRCLE, 0);
-            lv_obj_align(back, LV_ALIGN_CENTER, 0, grid_h / 2 + 44);
-        }
+        back_to_bottom_pill(screen);
         lv_obj_add_flag(hub_header_obj, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -234,6 +250,7 @@ static void fit_flex_screen(lv_obj_t *screen)
     lv_obj_set_scrollbar_mode(screen, LV_SCROLLBAR_MODE_AUTO);
 
     settings_hub_round_header_font(hub_header_obj);
+    back_to_bottom_pill(screen);
 
     /* A grow child (the Pages screen's CYCLE chip grid) would otherwise get
      * track_main_size - track_fix_main_size from LVGL's flex layout, which on
