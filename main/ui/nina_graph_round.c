@@ -29,12 +29,16 @@
 #include "lvgl.h"
 #include <stdio.h>
 
-#define GRR_TITLE_DY     36     /* from the chart's top edge */
+#define GRR_TITLE_CY    278     /* centre relative: dy that reproduces the 720 top-relative +36 placement */
 #define GRR_PILL_ROW_DY 216
 #define GRR_PILL_ROW_H   48
 #define GRR_BACK_W      140
-#define GRR_BACK_H       56
-#define GRR_BACK_DY      48     /* pixels from the overlay's bottom edge */
+#define GRR_BACK_H       48
+#define GRR_BACK_DY      66     /* pixels from the overlay's bottom edge */
+/* Half height of a y-axis label bed: (lv_font_montserrat_28.line_height 30 +
+ * 2 * pad_ver 2) / 2 = 17. Used to pin the label's OUTER edge at the chord,
+ * not its middle, so the extreme rows (dy +-320) do not clip. */
+#define GRR_Y_HALF_H     17
 
 /* The chart is the rim circle, not a fixed 684: the label x offsets below come
  * from ui_chord_half(), which uses Rs, so a chart smaller than 2 * Rs at 800
@@ -63,8 +67,12 @@ static void fit_y_label(lv_obj_t *lbl, int dy)
     lv_obj_set_style_pad_hor(lbl, 6, 0);
     lv_obj_set_style_pad_ver(lbl, 2, 0);
     lv_obj_set_style_radius(lbl, 6, 0);
+    /* Pin the label's outer-left corner at the chord, not its mid: the corner
+     * is |dy| + half the bed height away from the centre line, so the chord
+     * has to be taken there or the two extreme rows (dy +-320) clip. */
+    int ady = dy < 0 ? -dy : dy;
     lv_obj_align(lbl, LV_ALIGN_LEFT_MID,
-                 grr_chart_sz() / 2 - ui_chord_half(dy) + 12, dy);
+                 grr_chart_sz() / 2 - ui_chord_half(ady + GRR_Y_HALF_H) + 12, dy);
 }
 
 void graph_round_fit(void)
@@ -107,11 +115,16 @@ void graph_round_fit(void)
     fit_y_label(lbl_y_mid, s_y_dy[2]);
     fit_y_label(lbl_y_q3,  s_y_dy[3]);
     fit_y_label(lbl_y_bot, s_y_dy[4]);
+    /* The dashed threshold lines are added after the y labels and would
+     * otherwise draw over their beds. */
+    if (y_label_col) lv_obj_move_foreground(y_label_col);
 
     if (lbl_title) {
         lv_obj_set_style_text_font(lbl_title, &lv_font_montserrat_28, 0);
         lv_obj_set_style_bg_opa(lbl_title, LV_OPA_TRANSP, 0);   /* C1 */
-        lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, 0, GRR_TITLE_DY);
+        /* Centre relative, like every other cap, so it reproduces the 720
+         * pixels exactly and still clears the top y label at 800 (I-3). */
+        lv_obj_align(lbl_title, LV_ALIGN_CENTER, 0, -GRR_TITLE_CY);
         lv_obj_move_foreground(lbl_title);
     }
     /* Ships at lv_font_montserrat_20, under the 27 px round floor. */
