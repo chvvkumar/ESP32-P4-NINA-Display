@@ -256,6 +256,7 @@ lv_obj_t *clk_blu_peak_tick = NULL;
 lv_obj_t *clk_blu_max_lbl = NULL;
 
 clock_round_restyle_cb_t clock_round_restyle = NULL;
+uint16_t clock_round_tick_ms = 0;
 
 /* Shadows for the two round Classic rim arclabels: see the header. File scope
  * so reset_widget_ptrs() can clear them on a layout rebuild. */
@@ -761,7 +762,9 @@ static void clock_timer_cb(lv_timer_t *timer) {
     localtime_r(&now, &tm_now);
     uint32_t ms_to_next_min = (uint32_t)(60 - tm_now.tm_sec) * 1000;
     if (ms_to_next_min < 1000) ms_to_next_min = 60000;  /* Just ticked, wait full minute */
-    lv_timer_set_period(clock_timer, ms_to_next_min);
+    /* A round face that sweeps seconds (Classic) ticks every second instead. */
+    lv_timer_set_period(clock_timer, clock_round_tick_ms ? clock_round_tick_ms
+                                                         : ms_to_next_min);
 }
 
 /**
@@ -2252,6 +2255,7 @@ static void reset_widget_ptrs(void) {
     clk_arc_cond = clk_arc_stats = NULL;
     clk_blu_peak_tick = clk_blu_max_lbl = NULL;
     clock_round_restyle = NULL;
+    clock_round_tick_ms = 0;
     /* The rebuilt arclabels start at "--"; clearing the shadows forces the
      * next update to write the real strings instead of matching a shadow left
      * over from the deleted widgets. */

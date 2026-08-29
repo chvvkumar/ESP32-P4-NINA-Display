@@ -151,6 +151,10 @@ typedef void (*clock_round_restyle_cb_t)(const weather_data_t *wd,
                                          bool red_night, bool is_metric);
 extern clock_round_restyle_cb_t clock_round_restyle;
 
+/* Timer period a round face asks for, 0 = minute-aligned like the square
+ * faces. Classic round sets 1000 so its rim ring can sweep the seconds. */
+extern uint16_t clock_round_tick_ms;
+
 /**
  * Last string written to each round Classic rim arclabel. An arclabel re-lays
  * out every glyph on a text change, so the page writes only when the string

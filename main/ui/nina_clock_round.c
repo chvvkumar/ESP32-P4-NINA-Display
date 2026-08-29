@@ -100,6 +100,8 @@ static void round_pt(float deg, float r, lv_point_precise_t *out)
 
 /* ══ Face 0, Classic ═════════════════════════════════════════════════ */
 
+#define CLK_FC_BLOCK_W 16   /* forecast block stroke, every block */
+
 /* lv_line keeps a pointer to its points, so the store is file static. */
 static lv_point_precise_t s_now_tick_pts[2];
 
@@ -109,7 +111,9 @@ static void classic_restyle(const weather_data_t *wd, const struct tm *tm_now,
     const int rs = ui_rim_radius();
 
     if (clk_minute_arc) {
-        lv_arc_set_value(clk_minute_arc, tm_now->tm_min);
+        /* Seconds, not minutes (bench B4 ruling): the page timer runs at
+         * clock_round_tick_ms = 1000 on this face. */
+        lv_arc_set_value(clk_minute_arc, tm_now->tm_sec);
         lv_obj_set_style_arc_color(clk_minute_arc,
             lv_color_hex(red_night ? current_theme->bento_border : CLK_RULE),
             LV_PART_MAIN);
@@ -152,19 +156,6 @@ static void classic_restyle(const weather_data_t *wd, const struct tm *tm_now,
     int n = clock_dial_blocks(wd->hourly_hours, FORECAST_BARS,
                               start_deg, span_deg, src_idx);
 
-    /* Range over the entries actually drawn (src_idx[0..n-1]), not every
-     * FORECAST_BARS slot: a skipped/stale grid entry (OpenWeatherMap) would
-     * otherwise pull the range wider than the blocks on the dial. */
-    float t_min = wd->hourly_temps[n > 0 ? src_idx[0] : 0];
-    float t_max = t_min;
-    for (int i = 1; i < n; i++) {
-        float t = wd->hourly_temps[src_idx[i]];
-        if (t < t_min) t_min = t;
-        if (t > t_max) t_max = t;
-    }
-    float t_range = t_max - t_min;
-    if (t_range < 1.0f) t_range = 1.0f;
-
     for (int i = 0; i < FORECAST_BARS; i++) {
         if (i >= n) {
             lv_obj_add_flag(clk_fc_arc[i], LV_OBJ_FLAG_HIDDEN);
@@ -174,10 +165,11 @@ static void classic_restyle(const weather_data_t *wd, const struct tm *tm_now,
          * skips a stale/duplicate slot, so the two indices diverge after the
          * first skip. */
         float temp = wd->hourly_temps[src_idx[i]];
-        float frac = (temp - t_min) / t_range;
-        int w = 8 + (int)(frac * 14.0f + 0.5f);          /* 8..22 px */
+        /* One width for every block (bench B4 ruling): the colour alone
+         * carries the temperature, the 8..22 px thickness code read as a
+         * defect on the panel. */
         float tf = to_fahrenheit(temp, is_metric);
-        lv_obj_set_style_arc_width(clk_fc_arc[i], w, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(clk_fc_arc[i], CLK_FC_BLOCK_W, LV_PART_MAIN);
         lv_obj_set_style_arc_color(clk_fc_arc[i],
             lv_color_hex(bar_color_for_temp(tf, red_night)), LV_PART_MAIN);
         /* 2 degrees of air at each end so neighbouring blocks read apart */
@@ -205,11 +197,10 @@ static void build_round_classic(void)
 
     const int rs = ui_rim_radius();
 
-    /* Rim: ten dial blocks. Outer edge on rs - 2 for every block, so a
-     * thicker (warmer) block grows inward and the rim edge stays true. The
-     * angles and the widths come from classic_restyle(). */
+    /* Rim: ten dial blocks, outer edge on rs - 2, one width. The angles and
+     * colours come from classic_restyle(). */
     for (int i = 0; i < FORECAST_BARS; i++) {
-        lv_obj_t *a = round_arc(clock_root, rs - 2, 22, CLK_BAR_COOL);
+        lv_obj_t *a = round_arc(clock_root, rs - 2, CLK_FC_BLOCK_W, CLK_BAR_COOL);
         lv_arc_set_bg_angles(a, 0, 1);
         lv_obj_add_flag(a, LV_OBJ_FLAG_HIDDEN);
         clk_fc_arc[i] = a;
@@ -285,6 +276,7 @@ static void build_round_classic(void)
     }
 
     clock_round_restyle = classic_restyle;
+    clock_round_tick_ms = 1000;
 }
 
 /* ══ Face 1, Console 92 ══════════════════════════════════════════════ */
@@ -389,7 +381,10 @@ static void build_round_console(void)
      * ruler = 109 px, plus an empty 8 px flex gap for the unused sub row
      * (make_console_cell's H/L, DEW, UV row, left empty on round). 110 keeps
      * the box off the forecast row below it; the overflow is clipped. */
-    lv_obj_set_size(grid, 554, 110);
+    /* Width from the chord at the grid's bottom edge: 551 at 720 (the
+     * board's 554), 644 at 800, so the 3.4C gets the room it has. */
+    const int grid_w = ui_chord_at_y(cy + 202);
+    lv_obj_set_size(grid, grid_w, 110);
     lv_obj_align(grid, LV_ALIGN_TOP_MID, 0, cy + 92);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
@@ -415,7 +410,11 @@ static void build_round_console(void)
     lbl_cond_big  = vals[1];
     lbl_humid_val = vals[2];
     lbl_wind_val  = vals[3];
-    lv_obj_set_width(lbl_cond_big, 130);
+    /* The SKY value takes its whole cell at zero letter space: "SCATTERED"
+     * at overpass_27 is 150 px, which fits the 159 px cell at 800 and dots
+     * at 720. */
+    lv_obj_set_width(lbl_cond_big, grid_w / 4 - 2);
+    lv_obj_set_style_text_letter_space(lbl_cond_big, 0, 0);
     lv_label_set_long_mode(lbl_cond_big, LV_LABEL_LONG_DOT);
     lv_obj_set_style_text_align(lbl_cond_big, LV_TEXT_ALIGN_CENTER, 0);
 
@@ -678,7 +677,9 @@ static void build_round_blueprint(void)
      * labels stay NULL and the page skips them. */
     lbl_temp      = make_blu_callout(cy - 210, cy + 82, &lv_font_saira_light_46);
     lbl_cond      = make_blu_callout(cy + 40,  cy + 82, &lv_font_overpass_27);
-    lv_obj_set_width(lbl_cond, 172);
+    /* Out to the rim chord at the row's bottom edge (276 at 720, 315 at
+     * 800) so "SCATTERED CLOUDS" (266 px) is not dotted. */
+    lv_obj_set_width(lbl_cond, ui_chord_half(82 + 27) - 40 - 12);
     lv_label_set_long_mode(lbl_cond, LV_LABEL_LONG_DOT);
     lbl_humid_val = make_blu_callout(cy - 210, cy + 130, &lv_font_overpass_27);
     lbl_wind_val  = make_blu_callout(cy + 40,  cy + 130, &lv_font_overpass_27);
@@ -821,11 +822,15 @@ static void build_round_network(void)
      * between stations at 327 and 392. Moving the temperature line instead
      * would push met_tick_b out to r 357, past the rim. The chord at dy -9 is
      * 684 px, so the 640 px bar and its ticks still fit. */
-    met_cline[0] = make_bg_rect(forecast_row, cy - 320, cy - 9, 640, 14,
+    /* Bench B4 ruling: the map uses the rim. The conditions line runs
+     * chord to chord (its end ticks 6 px inside Rs) and the temperature line
+     * runs down to the rim below. */
+    const int c_half = ui_chord_half(9) - 6;
+    met_cline[0] = make_bg_rect(forecast_row, cy - c_half, cy - 9, 2 * c_half, 14,
                                 MET_BLUE);
-    met_cline[1] = make_bg_rect(forecast_row, cy - 327, cy - 24, 14, 44,
+    met_cline[1] = make_bg_rect(forecast_row, cy - c_half - 7, cy - 24, 14, 44,
                                 MET_BLUE);
-    met_cline[2] = make_bg_rect(forecast_row, cy + 313, cy - 24, 14, 44,
+    met_cline[2] = make_bg_rect(forecast_row, cy + c_half - 7, cy - 24, 14, 44,
                                 MET_BLUE);
 
     /* Five conditions stations, each one caption + value row. The legend is
@@ -861,12 +866,15 @@ static void build_round_network(void)
     /* Temperature line: a vertical run right of centre, moved in from the
      * square face's x 621 so the circle does not clip it to a stub. */
     const int tx = cy + 133;
+    /* Bottom of the temperature line: the rim at x = tx, 6 px inside Rs. */
+    const int t_bot = cy + ui_chord_half(133) - 6;
     met_tick_a = make_bg_rect(forecast_row, tx - 15, cy - 67, 44, 14, MET_TEAL);
-    met_tick_b = make_bg_rect(forecast_row, tx - 15, cy + 283, 44, 14,
+    met_tick_b = make_bg_rect(forecast_row, tx - 15, t_bot - 14, 44, 14,
                               MET_TEAL);
     for (int i = 0; i < NET_ROUND_STATIONS; i++) {
-        met_segs[i] = make_bg_rect(forecast_row, tx, cy - 60 + i * 58, 14, 58,
-                                   MET_TEAL);
+        int seg_y = cy - 60 + i * 58;
+        int seg_h = (i == NET_ROUND_STATIONS - 1) ? (t_bot - 14) - seg_y + 2 : 58;
+        met_segs[i] = make_bg_rect(forecast_row, tx, seg_y, 14, seg_h, MET_TEAL);
     }
     for (int i = 0; i < NET_ROUND_STATIONS; i++) {
         int sy = cy - 30 + i * 58;
