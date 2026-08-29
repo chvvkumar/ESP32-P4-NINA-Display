@@ -2,13 +2,24 @@
  * @file nina_layout_image_round.c
  * @brief NINA layout 1 (Image-forward) on a round panel: radial board 2.
  *
- * The approved square composition survives intact; only its two anchors move.
  * A circle has no bottom edge, so the 12 px block ledge becomes the panel's
- * outermost ring, one block per sub, and its notch at twelve o'clock is the
- * safety crown, which is where the shield used to sit beside the step. The
- * identity text goes on the rim as two arclabels (guideline G1), and the value
- * row keeps its shipped order, fonts and baseline, now on the chord at the
- * baseline 180 px below centre.
+ * outermost ring, one block per sub, flush with the glass the way the OctoPrint
+ * round layout puts its progress rim there, and its notch at twelve o'clock is
+ * the safety crown, which is where the shield used to sit beside the step.
+ *
+ * Everything the square layout kept on one baseline now reads as one bottom
+ * stack, top to bottom, the same shape octoprint_layout_glass_round.c uses:
+ *
+ *   rim top     target name (arclabel, guideline G1)
+ *   row         TOTAL RMS | sub counter | filter name, on one 64 px baseline
+ *   rule        hairline separating the row from the hero
+ *   hero        elapsed seconds, centred, 64 px Hanken
+ *   rim bottom  sequence step (arclabel), between the hero and the ring
+ *
+ * The stack is measured UPWARD from the ring: the step cell sits just inside
+ * the ring's inner edge, the hero clears the step, the rule clears the hero and
+ * the row clears the rule, so both panel sizes get the same composition with
+ * the extra diameter spent on chord width and on the picture in the middle.
  *
  * The capture, its CONTAIN fit and the whole retained-buffer handoff are the
  * shipped ones in nina_layout_image.c, which stays compiled on both families
@@ -33,30 +44,42 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 
 /* ---- design tokens ------------------------------------------------------ */
 
-#define IFR_R_LEDGE_OFF   12    /* ledge ring, offset from the rim radius */
+/* The ledge ring is FLUSH with the panel edge: its centreline is half a stroke
+ * in, so the ring's outer edge lands on the glass and no ground shows between
+ * it and the picture. Same rule as octoprint_layout_glass_round.c's rim; it
+ * replaces the old ui_rim_radius() - 12 inset, which left an 11 px black band
+ * outside the ring. */
 #define IFR_W_LEDGE       14
 #define IFR_CROWN_DEG     40
 
-#define IFR_R_TARGET_OFF  40    /* target arclabel baseline radius */
-#define IFR_R_STEP_OFF    86    /* step arclabel, one line further in */
+static inline int ifr_ring_r(void)  { return screen_center() - IFR_W_LEDGE / 2; }
 
-/* Value row. IFR_ROW_DY is the TEXT BASELINE offset from the panel centre, not
- * the row's top: the digits sit on that chord. That chord alone is not enough
- * to keep the row clear of the ledge ring, whose 14 px stroke centred at
- * Rs - 12 reaches inward to Rs - 19: IFR_ROW_PAD trims the row further, to
- * the ring's inner edge with 4 px to spare (review C3 important I-1; the
- * original 8 px pad left the outer glyphs overlapping the ring by 13-14 px).
- * ui_chord_half(180) is 290 at 720 and 334 at 800, so the chord is 580 / 668
- * and the row, after the pad, is 528 / 616. The labels are content sized
- * rather than sample sized (review C important I-5): a worst case of RMS
- * 99.99" (182 px) + counter 999 / 999 (122 px) + elapsed 9999s (174 px) is
- * 478 px, so 528 has margin; a filter name wider than about 170 px at
- * Montserrat 24 would crowd the centre column (the shipped square row has the
- * same exposure). The cost is that the closing quote and the "s" walk by a
- * digit width when the digit count changes. */
-#define IFR_ROW_DY       180
-#define IFR_ROW_PAD       26    /* keep the row's ends inside the ledge ring's
-                                  * inner edge (Rs - 19) with 4 px to spare */
+/* Outer edge of a rim glyph cell, a hairline inside the ring's inner edge.
+ * ui_arclabel_* take the OUTER edge and grow the cell inward, so one radius
+ * serves the target on the top rim and the step on the bottom rim. */
+#define IFR_TEXT_GAP       6
+static inline int ifr_text_r(void)
+{
+    return screen_center() - IFR_W_LEDGE - IFR_TEXT_GAP;
+}
+
+/* Bottom stack, measured upward from the step cell on the rim. IFR_STEP_H is
+ * lv_font_montserrat_28's line height; the rest are gaps. At 720 this puts the
+ * step cell at dy 310..340, the hero's baseline row at 234..300, the rule at
+ * 224 and the value row's bottom at 214; at 800 each lands 40 px lower. */
+#define IFR_STEP_H        30
+#define IFR_STEP_GAP      10    /* hero bottom to the step cell top */
+#define IFR_RULE_GAP      10    /* rule to the row above and the hero below */
+#define IFR_RULE_W         2
+#define IFR_RULE_COLOR    0x262a30
+
+/* The value row's ends must stay inside the ring. ui_chord_half() measures on
+ * ui_rim_radius() (Rs = 0.985 R), which is about 10 px wider than the ring's
+ * inner edge now that the ring sits on the glass, so the pad covers that and
+ * leaves margin: a worst case of RMS 99.99" (182 px) + counter 999 / 999
+ * (122 px) + a filter name (about 170 px) is 474 px against the 512 px the
+ * chord gives at 720. */
+#define IFR_ROW_PAD       26
 
 #define IFR_CROWN_IDLE    0x2a2a2a
 #define IFR_TARGET_FG     0xf2f2f4
@@ -190,68 +213,84 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     lv_image_set_src(p->alt.cap_img, NULL);
     nina_dashboard_bind_tap(p->alt.cap_img, NINA_TAP_CAPTURE);
 
-    /* 2: the ledge, now the outermost ring, plus its crown at twelve o'clock.
-     * lbl_safety names the crown: the Material shield is not drawn here. */
-    nina_subbar_create_ring(&p->subbar, parent, ui_rim_radius() - IFR_R_LEDGE_OFF,
+    /* 2: the ledge, now the outermost ring and flush with the glass, plus its
+     * crown at twelve o'clock. lbl_safety names the crown: the Material shield
+     * is not drawn here. */
+    nina_subbar_create_ring(&p->subbar, parent, ifr_ring_r(),
                             IFR_W_LEDGE, IFR_CROWN_DEG);
     nina_subbar_set_elapsed_cb(&p->subbar, ifr_elapsed_cb, p);
-    p->alt.lbl_safety = ui_dial_arc(parent, ui_rim_radius() - IFR_R_LEDGE_OFF,
+    p->alt.lbl_safety = ui_dial_arc(parent, ifr_ring_r(),
                                     IFR_W_LEDGE, -IFR_CROWN_DEG / 2, IFR_CROWN_DEG / 2);
     lv_obj_set_style_arc_color(p->alt.lbl_safety, lv_color_hex(IFR_CROWN_IDLE),
                                LV_PART_MAIN);
 
-    /* 3: identity on the rim (guideline G1). Target on the outer arc, sequence
-     * step on the one inside it, both centred on twelve o'clock. */
-    p->alt.lbl_target = ui_arclabel_top(parent, IFR_FONT_TARGET,
-                                        ui_rim_radius() - IFR_R_TARGET_OFF);
-    p->alt.lbl_seq_step = ui_arclabel_top(parent, IFR_FONT_STEP,
-                                          ui_rim_radius() - IFR_R_STEP_OFF);
+    /* 3: identity on the rim (guideline G1). The target keeps twelve o'clock;
+     * the sequence step moves to the BOTTOM rim, under the elapsed hero and
+     * inside the ring, so the whole reading stack runs top to bottom in one
+     * place instead of straddling the panel. */
+    p->alt.lbl_target = ui_arclabel_top(parent, IFR_FONT_TARGET, ifr_text_r());
+    p->alt.lbl_seq_step = ui_arclabel_bottom(parent, IFR_FONT_STEP, ifr_text_r());
 
-    /* 4: the value row on the chord below the picture. The row box is placed so
-     * the 64 px font's baseline lands on IFR_ROW_DY: the labels are bottom
-     * aligned in a row one line high, so the baseline sits base_line px above
-     * the row's bottom edge. */
-    int row_h = lv_font_get_line_height(IFR_FONT_ELAPSED);
-    int row_w = 2 * ui_chord_half(IFR_ROW_DY) - 2 * IFR_ROW_PAD;
+    /* 4: the bottom stack, measured upward from the step cell on the rim.
+     * lv_font_get_line_height() is asked for the hero's face rather than
+     * hard-coding it, so a font swap moves the whole stack instead of
+     * overlapping the rim text. */
+    const int el_h      = lv_font_get_line_height(IFR_FONT_ELAPSED);
+    const int el_bottom = ifr_text_r() - IFR_STEP_H - IFR_STEP_GAP;
+    const int el_top    = el_bottom - el_h;
+    const int rule_dy   = el_top - IFR_RULE_GAP;
+    const int row_bottom = rule_dy - IFR_RULE_GAP;
+    const int row_w     = 2 * ui_chord_half(row_bottom) - 2 * IFR_ROW_PAD;
+
+    /* Row: TOTAL RMS, the sub counter and the filter name on one 64 px
+     * baseline. The elapsed seconds used to hold this row's right slot and are
+     * now the hero below it, so the three readings that are left spread across
+     * the chord. Children are bottom aligned: LVGL has no baseline, and the
+     * three faces differ. */
     p->alt.row_vals = lv_obj_create(parent);
     lv_obj_remove_style_all(p->alt.row_vals);
     lv_obj_remove_flag(p->alt.row_vals, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(p->alt.row_vals, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(p->alt.row_vals, row_w, row_h);
+    lv_obj_set_size(p->alt.row_vals, row_w, el_h);
     lv_obj_align(p->alt.row_vals, LV_ALIGN_TOP_MID, 0,
-                 screen_center() + IFR_ROW_DY + IFR_FONT_ELAPSED->base_line - row_h);
+                 screen_center() + row_bottom - el_h);
     lv_obj_set_style_pad_all(p->alt.row_vals, 0, 0);
     lv_obj_set_style_pad_gap(p->alt.row_vals, 0, 0);
     lv_obj_set_flex_flow(p->alt.row_vals, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(p->alt.row_vals, LV_FLEX_ALIGN_SPACE_BETWEEN,
                           LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
 
-    /* Left: TOTAL RMS on the elapsed baseline. */
     p->alt.lbl_rms = ifr_value_label(p->alt.row_vals);
     nina_dashboard_bind_tap(p->alt.lbl_rms, NINA_TAP_RMS);
 
-    /* Centre: counter over filter name. The page dots are hidden on this
-     * layout, so the centre column is free. */
-    lv_obj_t *grp_center = lv_obj_create(p->alt.row_vals);
-    lv_obj_remove_style_all(grp_center);
-    lv_obj_remove_flag(grp_center, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_height(grp_center, row_h);
-    lv_obj_set_width(grp_center, LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(grp_center, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(grp_center, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_gap(grp_center, 2, 0);
-    nina_dashboard_bind_tap(grp_center, NINA_TAP_SEQUENCE);
-
-    p->alt.lbl_count = ifr_label(grp_center, IFR_FONT_COUNT, "--");
+    p->alt.lbl_count = ifr_label(p->alt.row_vals, IFR_FONT_COUNT, "--");
     lv_obj_set_style_text_align(p->alt.lbl_count, LV_TEXT_ALIGN_CENTER, 0);
-    p->alt.lbl_filter = ifr_label(grp_center, IFR_FONT_FILTER, "");
-    lv_obj_set_style_text_align(p->alt.lbl_filter, LV_TEXT_ALIGN_CENTER, 0);
+    nina_dashboard_bind_tap(p->alt.lbl_count, NINA_TAP_SEQUENCE);
+
+    p->alt.lbl_filter = ifr_label(p->alt.row_vals, IFR_FONT_FILTER, "");
+    lv_obj_set_style_text_align(p->alt.lbl_filter, LV_TEXT_ALIGN_RIGHT, 0);
     nina_dashboard_bind_tap(p->alt.lbl_filter, NINA_TAP_FILTER);
 
-    /* Right: elapsed seconds. */
-    p->alt.lbl_elapsed = ifr_value_label(p->alt.row_vals);
-    lv_label_set_text(p->alt.lbl_elapsed, "--s");
+    /* Rule: the hairline that separates the row from the hero. A flat fixed
+     * tone, like the ring's own unfilled blocks, so no theme handle is needed
+     * and apply_theme has nothing to repaint. */
+    lv_obj_t *rule = lv_obj_create(parent);
+    lv_obj_remove_style_all(rule);
+    lv_obj_remove_flag(rule, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(rule, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(rule, row_w, IFR_RULE_W);
+    lv_obj_align(rule, LV_ALIGN_TOP_MID, 0,
+                 screen_center() + rule_dy - IFR_RULE_W / 2);
+    lv_obj_set_style_bg_opa(rule, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(rule, lv_color_hex(IFR_RULE_COLOR), 0);
+
+    /* Hero: the elapsed seconds, centred, with the step arclabel under it. */
+    p->alt.lbl_elapsed = ifr_label(parent, IFR_FONT_ELAPSED, "--s");
+    lv_obj_set_width(p->alt.lbl_elapsed, row_w);
+    lv_obj_set_style_text_align(p->alt.lbl_elapsed, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(p->alt.lbl_elapsed, LV_ALIGN_TOP_MID, 0,
+                 screen_center() + el_top);
+    nina_dashboard_bind_tap(p->alt.lbl_elapsed, NINA_TAP_EXPOSURE);
 
     /* A rebuild that kept the retained frame re-attaches it. */
     nina_layout_image_reattach_capture(page_index);

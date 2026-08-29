@@ -28,8 +28,16 @@ static lv_obj_t *progress_cont  = NULL;
 static lv_obj_t *lbl_dl_title   = NULL;
 static lv_obj_t *lbl_percent    = NULL;
 static lv_obj_t *lbl_hint       = NULL;
+#if SCREEN_ROUND
+/* Round runs the progress on the panel PERIMETER instead of a chord-limited
+ * horizontal bar: one arc flush with the glass, and no glow twin (an arc has no
+ * second layer to offset it against, so a 40% copy of the ring just fringes). */
+static lv_obj_t *ring_progress  = NULL;
+#define OTA_RING_W  16
+#else
 static lv_obj_t *bar_progress   = NULL;
 static lv_obj_t *bar_glow       = NULL;
+#endif
 
 /* Error mode widgets */
 static lv_obj_t *error_cont     = NULL;
@@ -75,6 +83,21 @@ static uint32_t dim_color(uint32_t c) {
     uint8_t g = ((c >> 8)  & 0xFF) * 30 / 100;
     uint8_t b = ((c)       & 0xFF) * 30 / 100;
     return ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+}
+
+/* Paint the download progress on whichever widget this family built: the
+ * perimeter arc on round, the bar plus its glow twin on square. Safe before
+ * create() -- every pointer is NULL then. */
+static void ota_progress_paint(int percent, bool animate)
+{
+#if SCREEN_ROUND
+    LV_UNUSED(animate);   /* lv_arc has no per-call anim flag; it snaps. */
+    if (ring_progress) lv_arc_set_value(ring_progress, percent);
+#else
+    lv_anim_enable_t a = animate ? LV_ANIM_ON : LV_ANIM_OFF;
+    if (bar_progress) lv_bar_set_value(bar_progress, percent, a);
+    if (bar_glow)     lv_bar_set_value(bar_glow, percent, a);
+#endif
 }
 
 /* ── Create ─────────────────────────────────────────────────────────── */
@@ -226,10 +249,38 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     lv_obj_set_style_text_align(lbl_hint, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_pad_top(lbl_hint, 8, 0);
 
-    /* 580 on square (ui_page_root_size() is 688, so the literal wins), the
-     * inscribed square on round: 510 at 720 and 564 at 800. The bar is
-     * centred at about mid height, where the chord is 684 at 720 and 760 at
-     * 800, so this clamp is about the root, not the chord. */
+#if SCREEN_ROUND
+    /* Perimeter ring. The centreline is screen_center() - OTA_RING_W/2, so the
+     * OUTER edge lands on the glass and the download reads as the rim of the
+     * device itself. IGNORE_LAYOUT keeps it out of progress_cont's flex column,
+     * which stays the title / percent / hint stack in the middle. */
+    const int ota_ring_r = screen_center() - OTA_RING_W / 2;
+    ring_progress = lv_arc_create(progress_cont);
+    lv_obj_remove_style_all(ring_progress);
+    lv_obj_add_flag(ring_progress, LV_OBJ_FLAG_IGNORE_LAYOUT);
+    lv_obj_remove_flag(ring_progress, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(ring_progress, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_style(ring_progress, NULL, LV_PART_KNOB);
+    lv_obj_set_size(ring_progress, 2 * ota_ring_r + OTA_RING_W,
+                    2 * ota_ring_r + OTA_RING_W);
+    lv_obj_center(ring_progress);
+    /* Twelve o'clock start, one full turn clockwise. */
+    lv_arc_set_rotation(ring_progress, 270);
+    lv_arc_set_bg_angles(ring_progress, 0, 360);
+    lv_arc_set_range(ring_progress, 0, 100);
+    lv_arc_set_value(ring_progress, 0);
+    lv_obj_set_style_bg_opa(ring_progress, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ring_progress, OTA_RING_W, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(ring_progress, lv_color_hex(0x1a1a2e), LV_PART_MAIN);
+    lv_obj_set_style_arc_opa(ring_progress, LV_OPA_50, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(ring_progress, false, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(ring_progress, OTA_RING_W, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(ring_progress, lv_color_hex(0x3b82f6), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_opa(ring_progress, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(ring_progress, false, LV_PART_INDICATOR);
+#else
+    /* 580 on square (ui_page_root_size() is 688, so the literal wins). The bar
+     * is centred at about mid height. */
     const int ota_bar_w = LV_MIN(580, ui_page_root_size());
 
     /* Bar container — holds glow + main bar overlapping */
@@ -265,6 +316,7 @@ void nina_ota_prompt_create(lv_obj_t *parent) {
     lv_obj_set_style_bg_opa(bar_progress, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(bar_progress, 6, LV_PART_INDICATOR);
     lv_obj_center(bar_progress);
+#endif
 
     /* ── Error container (hidden initially) ── */
     error_cont = lv_obj_create(ota_overlay);
@@ -447,8 +499,7 @@ void nina_ota_prompt_show(const char *new_version, const char *current_version, 
 
     /* Reset progress */
     lv_label_set_text(lbl_percent, "0%");
-    lv_bar_set_value(bar_progress, 0, LV_ANIM_OFF);
-    lv_bar_set_value(bar_glow, 0, LV_ANIM_OFF);
+    ota_progress_paint(0, false);
 
     /* Show overlay */
     lv_obj_clear_flag(ota_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -474,8 +525,7 @@ void nina_ota_prompt_show_progress(void) {
     lv_obj_clear_flag(progress_cont, LV_OBJ_FLAG_HIDDEN);
 
     lv_label_set_text(lbl_percent, "0%");
-    lv_bar_set_value(bar_progress, 0, LV_ANIM_OFF);
-    lv_bar_set_value(bar_glow, 0, LV_ANIM_OFF);
+    ota_progress_paint(0, false);
 }
 
 void nina_ota_prompt_set_progress(int percent) {
@@ -486,8 +536,7 @@ void nina_ota_prompt_set_progress(int percent) {
     char buf[8];
     snprintf(buf, sizeof(buf), "%d%%", percent);
     lv_label_set_text(lbl_percent, buf);
-    lv_bar_set_value(bar_progress, percent, LV_ANIM_ON);
-    lv_bar_set_value(bar_glow, percent, LV_ANIM_ON);
+    ota_progress_paint(percent, true);
 }
 
 void nina_ota_prompt_show_error(const char *error_msg) {
@@ -610,12 +659,19 @@ void nina_ota_prompt_apply_theme(void) {
         lv_obj_set_style_text_color(lbl_percent, lv_color_hex(accent), 0);
     if (lbl_hint)
         lv_obj_set_style_text_color(lbl_hint, lv_color_hex(label), 0);
+#if SCREEN_ROUND
+    if (ring_progress) {
+        lv_obj_set_style_arc_color(ring_progress, lv_color_hex(dim_color(accent)), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(ring_progress, lv_color_hex(accent), LV_PART_INDICATOR);
+    }
+#else
     if (bar_glow)
         lv_obj_set_style_bg_color(bar_glow, lv_color_hex(accent), LV_PART_INDICATOR);
     if (bar_progress) {
         lv_obj_set_style_bg_color(bar_progress, lv_color_hex(dim_color(accent)), LV_PART_MAIN);
         lv_obj_set_style_bg_color(bar_progress, lv_color_hex(accent), LV_PART_INDICATOR);
     }
+#endif
 
     /* ── Error screen ── */
     if (lbl_error)

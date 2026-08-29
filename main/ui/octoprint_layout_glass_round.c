@@ -8,17 +8,17 @@
  * octoprint_data_t.
  *
  * The picture IS the page, cover-cropped edge to edge, and the 8 px linear
- * track that ran above the square metrics row becomes the RIM: a 10 px arc at
- * ui_rim_radius() - 12 with an 18 px state crown at twelve o'clock. That buys
- * back the whole bottom of the circle for the readings the narrowing chord was
- * about to squeeze out.
+ * track that ran above the square metrics row becomes the RIM: a 10 px arc
+ * flush with the panel edge, with a state crown of the same stroke at twelve
+ * o'clock. That buys back the whole bottom of the circle for the readings the
+ * narrowing chord was about to squeeze out.
  *
  *   page   hero host, cover, the only child of the page
  *   layer  flat page dim + flat cap from centre + 126 to the bottom
  *   rim    progress arc (arc_completion, retargeted from the bar) + crown
- *   rim    state, on a top arclabel (G1: it changes far less than once a minute)
- *   centre percent + unit over the picture, no plate
- *   cap    four caption-over-value cells on the 600 px chord, then the layer row
+ *   cap    four caption-over-value cells on the 600 px chord, the layer row,
+ *          the percent + unit under it, then the state on a bottom arclabel
+ *          between the percent and the ring -- no plate under any of them
  *
  * Dropped from the square layout, per the board: the connection chip (the crown
  * carries link health as colour and the fault strip still speaks), "COMPLETE",
@@ -31,34 +31,67 @@
 #include "ui_dial.h"
 #include "ui_round.h"
 
-/* Rim ring and crown. Radii are ui_rim_radius() minus an absolute offset, so
- * the 800 panel keeps the same stroke and the same distance from the bezel. */
-#define GR_RIM_K        12      /* rim arc centreline: Rs - 12 */
+/* Rim ring and crown. The ring is flush with the panel edge: its centreline is
+ * screen_center() - GR_RIM_W/2, so its OUTER edge lands exactly on the glass and
+ * no ground shows between the ring and the picture behind it. The crown shares
+ * the ring's centreline AND its stroke -- a wider crown read as a second, fatter
+ * arc at twelve o'clock. The crown is NOT progress: it is the fixed 40 degree
+ * state/health band the update path paints, and the progress track stops short
+ * of it on both sides. */
 #define GR_RIM_W        10
-#define GR_CROWN_W      18
+#define GR_CROWN_W      GR_RIM_W
 #define GR_CROWN_DEG    40
-#define GR_LABEL_K      40      /* state arclabel baseline: Rs - 40 */
 
-/* Cap and text bands, as offsets from the panel centre. Nothing sits under the
- * LAYER row, so the band goes as low as the rim allows: the cells row is placed
+/* Rim centreline: outer edge on the panel edge. */
+static inline int gr_rim_r(void) { return screen_center() - GR_RIM_W / 2; }
+
+/* State text on the BOTTOM rim, in the band between the percent hero and the
+ * ring. ui_arclabel_bottom() takes the OUTER edge of the glyph cell, so this is
+ * the ring's inner edge less a hairline; the cell grows inward from there. */
+#define GR_STATE_H       30     /* lv_font_montserrat_28.line_height */
+#define GR_STATE_GAP     11     /* percent row bottom to the state cell */
+static inline int gr_state_r(void) { return screen_center() - GR_RIM_W - 6; }
+
+/* Cap and text bands, as offsets from the panel centre. The cells row is placed
  * where the rim's half chord equals the cells' half width (outer bottom corners
- * on the rim) and the LAYER row a fixed gap under it. That is 123 / 225 at 720
- * (the hand numbers were 126 / 228) and 191 / 293 at 800, which gains the 65 px
- * of taper the 720 numbers left empty there (bench B10 on the 3.4C). */
-#define GR_PCT_DY     (-60)
+ * on the rim), the LAYER row a fixed gap under it, and the percent hero last,
+ * under LAYER, with the state text on the bottom rim under that. Those are
+ * 123 / 201 / 250 at 720 and 163 / 241 / 310 at 800. The percent used to sit at
+ * the panel centre, over the picture, and the state on the TOP rim; the four
+ * rows now read as one bottom stack and the picture keeps its middle. */
 #define GR_CELL_H       64      /* caption over value, as octo_w_row builds it */
-#define GR_CELL_GAP     38      /* cells bottom to LAYER row top */
+#define GR_CELL_GAP     14      /* cells bottom to LAYER row top */
 #define GR_CELL_CHORD  600
 #define GR_CELL_W      150
+#define GR_LAYER_H      30      /* lv_font_montserrat_28.line_height */
+#define GR_PCT_GAP       6      /* LAYER row bottom to percent row top */
+#define GR_PCT_H        66      /* lv_font_montserrat_64.line_height */
+
+/* Height of everything under the cells row: gap, LAYER, gap, percent. */
+#define GR_BELOW_CELLS  (GR_CELL_GAP + GR_LAYER_H + GR_PCT_GAP + GR_PCT_H)
 
 static int gr_cell_dy(void)
 {
     const int rs = ui_rim_radius(), h = GR_CELL_CHORD / 2;
-    return (int)sqrtf((float)(rs * rs - h * h)) - GR_CELL_H;
+    int dy = (int)sqrtf((float)(rs * rs - h * h)) - GR_CELL_H;
+    /* The chord rule alone puts the cells as low as the rim allows, which is
+     * fine while nothing follows them. Four rows do now, and on the 800 panel
+     * the chord answer (191) drops the last of them under the state text. Cap
+     * the row so the percent's bottom still clears the state cell: 123 at 720
+     * (the chord answer, unchanged) and 163 at 800. */
+    const int dy_max = gr_state_r() - GR_STATE_H - GR_STATE_GAP
+                       - GR_CELL_H - GR_BELOW_CELLS;
+    return (dy < dy_max) ? dy : dy_max;
 }
 #define GR_CAP_DY      gr_cell_dy()
 #define GR_CELL_DY     gr_cell_dy()
 #define GR_LAYER_DY    (gr_cell_dy() + GR_CELL_H + GR_CELL_GAP)
+/* Percent is the LAST row, under LAYER, and is aligned by its CENTRE, so the
+ * half line height is added on top of the row's top edge. At 720 the row bottom
+ * lands at dy 303 and at 800 at dy 343, both 11 px clear of the state cell above
+ * the ring; the widest the number gets ("100" plus the unit, about 180 px)
+ * clears the chord at either size. */
+#define GR_PCT_DY      (GR_LAYER_DY + GR_LAYER_H + GR_PCT_GAP + GR_PCT_H / 2)
 
 #define GR_DIM_OPA     LV_OPA_40
 #define GR_CAP_OPA     LV_OPA_60
@@ -129,7 +162,7 @@ static void build_ground(lv_obj_t *page, octoprint_widgets_t *w)
 
 static void build_rim(lv_obj_t *layer, octoprint_widgets_t *w)
 {
-    int r = ui_rim_radius() - GR_RIM_K;
+    int r = gr_rim_r();
 
     /* The progress ring IS arc_completion, so the update path drives it with no
      * new code: only the geometry differs from the square arc. */
@@ -150,9 +183,12 @@ static void build_rim(lv_obj_t *layer, octoprint_widgets_t *w)
     w->rim_crown = crown;
 
     /* G1: the state is caption-class text and changes far less than once a
-     * minute, so it goes on the rim. lbl_state stays NULL on this layout. */
-    w->rim_state_arclabel = ui_arclabel_top(layer, &lv_font_montserrat_28,
-                                            ui_rim_radius() - GR_LABEL_K);
+     * minute, so it goes on the rim. BOTTOM rim, under the percent hero and
+     * inside the ring, so the whole reading stack -- cells, LAYER, percent,
+     * state -- reads top to bottom in one place instead of straddling the
+     * panel. lbl_state stays NULL on this layout. */
+    w->rim_state_arclabel = ui_arclabel_bottom(layer, &lv_font_montserrat_28,
+                                               gr_state_r());
 }
 
 /* -- readings ------------------------------------------------------------ */

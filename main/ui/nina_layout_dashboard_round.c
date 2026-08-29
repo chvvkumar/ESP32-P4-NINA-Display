@@ -35,7 +35,13 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 
 /* ---- design tokens ------------------------------------------------------ */
 
-/* Ring radii, offsets from the rim radius (radial.md: Rs-12 and Rs-40). */
+/* Ring radii. The board pinned these to the rim radius (radial.md: Rs-12 and
+ * Rs-40), which left a 10 px black band outside the exposure ring. The ring is
+ * now FLUSH with the glass the way octoprint_layout_glass_round.c's rim is: its
+ * centreline sits half a stroke in, so its outer edge lands on the panel edge.
+ * The offsets below are kept and reused as the SPACING between the three rim
+ * features, so the whole stack slides outward together and the board's
+ * 28 px ring separation and 3 px tick bias survive. */
 #define DR_R_EXPOSURE_OFF   12
 #define DR_R_SUB_OFF        40
 #define DR_W_EXPOSURE       16
@@ -201,7 +207,11 @@ void nina_layout_dashboard_round_create(dashboard_page_t *p, lv_obj_t *parent,
     lv_obj_set_style_pad_gap(parent, 0, 0);
     lv_obj_remove_flag(parent, LV_OBJ_FLAG_SCROLLABLE);
 
-    const int r_exp = ui_rim_radius() - DR_R_EXPOSURE_OFF;
+    /* Exposure ring flush with the glass; the sub ring and the flip tick keep
+     * their board spacing relative to it. */
+    const int r_exp  = screen_center() - DR_W_EXPOSURE / 2;
+    const int r_sub  = r_exp - (DR_R_SUB_OFF - DR_R_EXPOSURE_OFF);
+    const int r_tick = r_exp - (DR_R_TICK_OFF - DR_R_EXPOSURE_OFF);
 
     /* 1: the exposure ring. This IS p->arc_exposure, so every line of the
      * shipped exposure model (seed, long linear anim, completion snap, gap
@@ -236,16 +246,14 @@ void nina_layout_dashboard_round_create(dashboard_page_t *p, lv_obj_t *parent,
     lv_obj_set_style_arc_color(p->ring_crown, lv_color_hex(0x2a2a2a), LV_PART_MAIN);
 
     /* 3: the meridian-flip tick. Hidden until a countdown arrives. */
-    p->ring_flip_tick = ui_dial_arc(parent, ui_rim_radius() - DR_R_TICK_OFF,
-                                    DR_W_TICK, 0, 2);
+    p->ring_flip_tick = ui_dial_arc(parent, r_tick, DR_W_TICK, 0, 2);
     lv_obj_set_style_arc_color(p->ring_flip_tick,
         lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)),
         LV_PART_MAIN);
     lv_obj_add_flag(p->ring_flip_tick, LV_OBJ_FLAG_HIDDEN);
 
     /* 4: the sub ring, same block rule as the square ledge. */
-    nina_subbar_create_ring(&p->subbar, parent, ui_rim_radius() - DR_R_SUB_OFF,
-                            DR_W_SUB, DR_GAP_DEG);
+    nina_subbar_create_ring(&p->subbar, parent, r_sub, DR_W_SUB, DR_GAP_DEG);
     nina_subbar_set_elapsed_cb(&p->subbar, dr_elapsed_cb, p);
 
     /* 5: the centre spine. One flex column on the widest chords it needs. */

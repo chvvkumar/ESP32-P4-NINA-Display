@@ -451,10 +451,18 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
 }
 
 static void update_header(dashboard_page_t *p, const nina_client_t *d) {
-    // Telescope + camera on one line
+    /* Telescope + camera. Square puts them on one line in the header row; the
+     * round dashboard spine is a centred column with room for two, and the
+     * joined string wrapped mid-name there, so the break is explicit. */
     if (d->telescope_name[0] && d->camera_name[0]) {
         char buf[132];
-        snprintf(buf, sizeof(buf), "%s | %s", d->telescope_name, d->camera_name);
+        /* Two literal formats, not a ternary one: -Wformat-truncation can
+           only bound the result when it can see the separator. */
+        if (SCREEN_ROUND) {
+            snprintf(buf, sizeof(buf), "%s\n%s", d->telescope_name, d->camera_name);
+        } else {
+            snprintf(buf, sizeof(buf), "%s | %s", d->telescope_name, d->camera_name);
+        }
         set_label_if_changed(p->lbl_instance_name, buf);
     } else if (d->telescope_name[0]) {
         set_label_if_changed(p->lbl_instance_name, d->telescope_name);

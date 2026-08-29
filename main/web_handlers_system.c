@@ -95,14 +95,45 @@ esp_err_t factory_reset_post_handler(httpd_req_t *req)
 
 static lv_obj_t *ota_overlay = NULL;
 static lv_obj_t *ota_progress_label = NULL;
-static lv_obj_t *ota_bar = NULL;
-static lv_obj_t *ota_bar_glow = NULL;
+static lv_obj_t *ota_bar = NULL;        /* square only */
+static lv_obj_t *ota_bar_glow = NULL;   /* square only */
+static lv_obj_t *ota_ring = NULL;       /* round only: the perimeter arc */
 static lv_timer_t *ota_refusal_timer = NULL;   /* wrong-firmware screen auto-dismiss */
 
 /* Accent color for the progress bar */
 #define OTA_ACCENT       0x00D4FF   /* Cyan */
 #define OTA_ACCENT_DIM   0x005566   /* Dimmed cyan for track */
 #define OTA_GLOW_OPA     LV_OPA_40
+
+/* Round runs the pushed-OTA progress on the panel PERIMETER, the same way
+ * nina_ota_prompt.c runs the GitHub download: a 560 px horizontal bar has no
+ * chord to sit on near the bottom of a circle, so it was being clipped at both
+ * ends. One arc flush with the glass, and no glow twin (an arc has no second
+ * layer to offset against, so a 40% copy of it just fringes the edge).
+ * ponytail: third hand-rolled progress track in this tree (here,
+ * nina_ota_prompt.c, nina_wait_overlay.c). One ui_progress helper owning the
+ * round/square split would retire all three; worth doing when the wait overlay
+ * gets its own round pass. */
+#define OTA_RING_W       16
+
+/* Every handle the progress screen owns, dropped in one place: the overlay is
+ * torn down or wiped from three call sites and each must forget all of them. */
+static void ota_progress_forget(void) {
+    ota_progress_label = NULL;
+    ota_bar = NULL;
+    ota_bar_glow = NULL;
+    ota_ring = NULL;
+}
+
+/* Paint on whichever widget this family built. Safe before the overlay exists:
+ * every handle is NULL then. */
+static void ota_progress_paint(int percent) {
+    if (ota_ring) {
+        lv_arc_set_value(ota_ring, percent);   /* lv_arc has no anim flag */
+    }
+    if (ota_bar)      lv_bar_set_value(ota_bar, percent, LV_ANIM_ON);
+    if (ota_bar_glow) lv_bar_set_value(ota_bar_glow, percent, LV_ANIM_ON);
+}
 
 /* Active theme accessor (defined in nina_dashboard.c by the dashboard module) */
 const theme_t *nina_dashboard_get_theme(void);
@@ -145,7 +176,9 @@ static void ota_show_overlay(const char *message) {
         lv_obj_set_style_text_color(title, lv_color_hex(title_color), 0);
         lv_obj_set_style_text_font(title, &lv_font_montserrat_36, 0);
         lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_width(title, LV_PCT(90));
+        /* The title's top edge sits 160 px above centre, where the rim gives
+         * about 630 px of chord at 720: 90% (648) would clip its corners. */
+        lv_obj_set_width(title, SCREEN_ROUND ? LV_PCT(80) : LV_PCT(90));
         lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 200);
 
         /* ── Large percentage — center ── */
@@ -164,6 +197,32 @@ static void ota_show_overlay(const char *message) {
         lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(hint, LV_ALIGN_CENTER, 0, 70);
 
+#if SCREEN_ROUND
+        /* ── Perimeter arc, outer edge flush with the glass ── */
+        const int ring_r = screen_center() - OTA_RING_W / 2;
+        ota_ring = lv_arc_create(ota_overlay);
+        lv_obj_remove_style_all(ota_ring);
+        lv_obj_remove_flag(ota_ring, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(ota_ring, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_style(ota_ring, NULL, LV_PART_KNOB);
+        lv_obj_set_size(ota_ring, 2 * ring_r + OTA_RING_W, 2 * ring_r + OTA_RING_W);
+        lv_obj_center(ota_ring);
+        lv_arc_set_rotation(ota_ring, 270);
+        lv_arc_set_bg_angles(ota_ring, 0, 360);
+        lv_arc_set_range(ota_ring, 0, 100);
+        lv_arc_set_value(ota_ring, 0);
+        lv_obj_set_style_bg_opa(ota_ring, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(ota_ring, OTA_RING_W, LV_PART_MAIN);
+        lv_obj_set_style_arc_color(ota_ring, lv_color_hex(track_color), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(ota_ring, LV_OPA_30, LV_PART_MAIN);
+        lv_obj_set_style_arc_rounded(ota_ring, false, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(ota_ring, OTA_RING_W, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(ota_ring, lv_color_hex(accent_color), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_opa(ota_ring, LV_OPA_COVER, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_rounded(ota_ring, false, LV_PART_INDICATOR);
+        LV_UNUSED(glow_color);
+        LV_UNUSED(grad_color);
+#else
         /* ── Glow layer behind progress bar (wider/taller, blurred look) ── */
         ota_bar_glow = lv_bar_create(ota_overlay);
         lv_obj_remove_style_all(ota_bar_glow);
@@ -196,6 +255,7 @@ static void ota_show_overlay(const char *message) {
         lv_obj_set_style_bg_grad_color(ota_bar, lv_color_hex(grad_color), LV_PART_INDICATOR);
         lv_obj_set_style_bg_grad_dir(ota_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
         lv_obj_set_style_radius(ota_bar, 6, LV_PART_INDICATOR);
+#endif
 
         bsp_display_unlock();
     }
@@ -208,12 +268,7 @@ static void ota_update_progress(int percent) {
             snprintf(buf, sizeof(buf), "%d%%", percent);
             lv_label_set_text(ota_progress_label, buf);
         }
-        if (ota_bar) {
-            lv_bar_set_value(ota_bar, percent, LV_ANIM_ON);
-        }
-        if (ota_bar_glow) {
-            lv_bar_set_value(ota_bar_glow, percent, LV_ANIM_ON);
-        }
+        ota_progress_paint(percent);
         bsp_display_unlock();
     }
 }
@@ -223,9 +278,7 @@ static void ota_remove_overlay(void) {
         if (ota_overlay) {
             lv_obj_delete(ota_overlay);
             ota_overlay = NULL;
-            ota_progress_label = NULL;
-            ota_bar = NULL;
-            ota_bar_glow = NULL;
+            ota_progress_forget();
         }
         bsp_display_unlock();
     }
@@ -245,9 +298,7 @@ static void ota_refusal_dismiss(void) {
     if (ota_overlay) {
         lv_obj_delete_async(ota_overlay);
         ota_overlay = NULL;
-        ota_progress_label = NULL;
-        ota_bar = NULL;
-        ota_bar_glow = NULL;
+        ota_progress_forget();
     }
 }
 
@@ -295,9 +346,7 @@ static void ota_show_refusal(const char *message) {
         lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
         lv_obj_center(ota_overlay);
     }
-    ota_progress_label = NULL;
-    ota_bar = NULL;
-    ota_bar_glow = NULL;
+    ota_progress_forget();
 
     const theme_t *t = nina_dashboard_get_theme();
     bool red_night = (t && theme_is_red_night(t));
