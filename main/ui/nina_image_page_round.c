@@ -188,7 +188,8 @@ void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
                                        rs - IMG_R_CAPTION_INSET,
                                        IMG_CAP_ANGLE_START, IMG_CAP_ANGLE_SIZE, false,
                                        LV_ARCLABEL_TEXT_ALIGN_TRAILING);
-    image_page_caption_style(p->lbl_region);
+    /* NULL when the widget allocation failed; the styler dereferences. */
+    if (p->lbl_region) image_page_caption_style(p->lbl_region);
     /* No lv_arclabel_set_text("") here: ui_arclabel_create() already set it. */
 
     /* Branch B: the per-frame HH:MM stamp of the Radar and Cloud Cover loops

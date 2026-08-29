@@ -1906,7 +1906,8 @@ static void fill_board_marks(void)
         m->x = (int16_t)px;
         m->y = (int16_t)py;
         m->color = page_col(a->emergency ? COL_EMERG : alt_color(a));
-        m->opa = LV_OPA_COVER;
+        /* Dim with the row panel this arrow belongs to (review D5 M-1). */
+        m->opa = (a->seen_pos_s > STALE_DIM_S) ? LV_OPA_40 : LV_OPA_COVER;
 
         float hdg = (a->track_deg < 0.0f) ? 0.0f : a->track_deg;
         float t = hdg * ADSB_DEG2RAD;
@@ -2381,8 +2382,7 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
      * negating a literal pad: on square a 720 root centred in main_cont's 688
      * content box lands at (-16,-16), exactly what
      * lv_obj_set_pos(-OUTER_PADDING, -OUTER_PADDING) produced, and it stays
-     * centred while the round inset aid pads main_cont differently
-     * (same fix as nina_clock.c). */
+     * centred whatever pad main_cont carries (same fix as nina_clock.c). */
     lv_obj_center(s_root);
     lv_obj_set_style_bg_opa(s_root, LV_OPA_COVER, 0);
     lv_obj_set_style_pad_all(s_root, 0, 0);

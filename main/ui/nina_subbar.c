@@ -71,12 +71,19 @@ static void sb_block_geom(const nina_subbar_t *sb, int i, int *a0, int *a1) {
     if (*a1 <= *a0) *a1 = *a0 + 1;
 }
 
+/* Stale cue, ring mode only: every arc opacity scaled to 40 %. The flex row
+ * never sets sb->stale, so the square ledge keeps its shipped opacities. */
+static lv_opa_t sb_stale_opa(const nina_subbar_t *sb, lv_opa_t opa) {
+    if (!sb->stale) return opa;
+    return (lv_opa_t)(((uint32_t)opa * LV_OPA_40) / LV_OPA_COVER);
+}
+
 /* The one place a block's colour reaches pixels, in either mode. */
 static void sb_style_block(const nina_subbar_t *sb, lv_obj_t *b,
                            uint32_t color, lv_opa_t opa) {
     if (sb->ring) {
         lv_obj_set_style_arc_color(b, lv_color_hex(color), LV_PART_MAIN);
-        lv_obj_set_style_arc_opa(b, opa, LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(b, sb_stale_opa(sb, opa), LV_PART_MAIN);
     } else {
         lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
         lv_obj_set_style_bg_opa(b, opa, 0);
@@ -191,13 +198,13 @@ static void sb_place_fill(nina_subbar_t *sb, int idx, uint32_t color) {
         if (!sb->fill) {
             sb->fill = ui_dial_arc(sb->cont, sb->ring_radius,
                                    sb->ring_width, 0, 1);
-            lv_obj_set_style_arc_opa(sb->fill, SB_FILL_OPA, LV_PART_MAIN);
             sb->active_idx = idx;
             sb->ring_frac  = 0.0f;
         } else if (sb->active_idx != idx) {
             sb->active_idx = idx;
             sb->ring_frac  = 0.0f;
         }
+        lv_obj_set_style_arc_opa(sb->fill, sb_stale_opa(sb, SB_FILL_OPA), LV_PART_MAIN);
         lv_obj_set_style_arc_color(sb->fill, lv_color_hex(color), LV_PART_MAIN);
         sb_ring_fill_angles(sb, sb->ring_frac);
         return;
@@ -350,6 +357,13 @@ void nina_subbar_set_progress(nina_subbar_t *sb, float frac) {
         if (secs > 9999) secs = 9999;
         sb->elapsed_cb(sb->elapsed_ud, secs);
     }
+}
+
+void nina_subbar_set_stale(nina_subbar_t *sb, bool stale) {
+    if (!sb || !sb->ring || sb->stale == stale) return;
+    sb->stale = stale;
+    sb_paint_blocks(sb, (sb->cached_done > 0) ? sb->cached_done : 0,
+                    sb->cached_block_color);
 }
 
 void nina_subbar_apply_theme(nina_subbar_t *sb) {

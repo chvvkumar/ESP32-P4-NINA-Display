@@ -119,7 +119,11 @@ static void build_fault_slot(lv_obj_t *page, octoprint_widgets_t *w)
     if (!w->error_strip) {
         return;
     }
-    int wdt = band_w(BR_B_DY, BR_B_H);
+    /* The strip's OWN chord, not band B's. It sits 40 px above band A and is
+     * 34 px tall, so its narrow edge is 296 px from the equator: 338 px wide at
+     * 720 and 472 at 800. Band B's 556 px let a long error_text overrun the
+     * glass by 60 to 100 px per side (final review area 3 minor 2). */
+    int wdt = band_w(BR_A_DY - 40, 34);
     lv_obj_set_style_bg_opa(w->error_strip, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(w->error_strip, 0, 0);
     lv_obj_set_style_radius(w->error_strip, 0, 0);

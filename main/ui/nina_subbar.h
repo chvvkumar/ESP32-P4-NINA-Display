@@ -59,6 +59,7 @@ typedef struct {
     float ring_span;         /* 360 - ring_gap */
     float ring_gap;          /* reserved gap at twelve o'clock, degrees */
     float ring_frac;         /* last in-flight fraction, so a repaint keeps it */
+    bool  stale;             /* ring mode only: arcs at 40 % while data is stale */
 
     nina_subbar_elapsed_cb_t elapsed_cb;
     void                    *elapsed_ud;
@@ -108,6 +109,17 @@ void nina_subbar_set_elapsed_cb(nina_subbar_t *sb, nina_subbar_elapsed_cb_t cb, 
  * @param frac Interpolated exposure fraction, 0..1, from arc_interp_timer_cb.
  */
 void nina_subbar_set_progress(nina_subbar_t *sb, float frac);
+
+/**
+ * @brief Ring mode: dim every block to 40 % while the source data is stale.
+ *
+ * The round layouts have no room for the square "Last update" text label (it
+ * sits outside the disc), so the stale cue is the ring itself dimming, the same
+ * cue the round Dashboard gives on its exposure ring. No-op on the flex-row
+ * form, which is what the square family builds, and no-op when the flag is
+ * already at the requested value.
+ */
+void nina_subbar_set_stale(nina_subbar_t *sb, bool stale);
 
 /** @brief Re-colour every block in place. */
 void nina_subbar_apply_theme(nina_subbar_t *sb);

@@ -712,8 +712,8 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
 
 #if CONFIG_NINA_FAMILY_ROUND
     /* Radial board 3: the rings reach past the inset square, so the root is
-     * full bleed and negates whatever pad the parent carries (16, or the safe
-     * inset while the phase 1 inset aid is on), the same way the full-bleed
+     * full bleed and negates whatever pad the parent carries (16 on both
+     * families today), the same way the full-bleed
      * dashboard pages do it. The cards are placed absolutely, so the root runs
      * no layout. */
     {
@@ -731,8 +731,8 @@ lv_obj_t *summary_page_create(lv_obj_t *parent) {
     /* 688 on square (screen_size() 720 minus 2 * 16), the inscribed square on
      * round: 510 at 720 and 564 at 800. Centred rather than left at the
      * parent's top-left corner, so the placement does not depend on
-     * main_cont's pad (16, or the safe inset while the round inset aid is
-     * compiled in). On square the root exactly fills main_cont's content box,
+     * main_cont's pad (16 on both families today).
+     * On square the root exactly fills main_cont's content box,
      * so centring resolves to the same (16,16) it has today. */
     lv_obj_set_size(sum_page, ui_page_root_size(), ui_page_root_size());
     lv_obj_center(sum_page);

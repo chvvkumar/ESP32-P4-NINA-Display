@@ -727,8 +727,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     lv_obj_set_size(p->page, screen_size() - 2 * OUTER_PADDING, screen_size() - 2 * OUTER_PADDING);
     lv_obj_set_style_pad_gap(p->page, GRID_GAP, 0);
 
-    /* A full-bleed layout negates the parent's padding, whatever it is: 16 on
-     * square, and the safe inset on round while the phase 1 inset aid is on. */
+    /* A full-bleed layout negates the parent's padding, whatever it is (16 on
+     * both families today). */
     const int parent_pad = lv_obj_get_style_pad_left(parent, 0);
 
     if (p->layout == 1) {

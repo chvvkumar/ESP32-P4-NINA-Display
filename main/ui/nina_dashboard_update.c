@@ -985,11 +985,12 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
 
     /* The "Last update" label floats at the page root's top-right corner; on
      * round that root is the full square panel, so the label sits well
-     * outside the visible circle. p->ring_exposure dimming is the round
-     * stale cue instead (below), so skip formatting and showing a label
-     * nobody can see (review C12 M-3). */
+     * outside the visible circle. A dimmed ring is the round stale cue
+     * instead (below): the exposure ring on round layout 0, the sub-bar ledge
+     * ring on round layout 1. Either way, skip formatting and showing a label
+     * nobody can see (review C12 M-3, review area 2 I-1). */
     if (stale_ms > STALE_WARN_MS) {
-        if (!p->ring_exposure) {
+        if (!p->ring_exposure && !p->subbar.ring) {
             int stale_sec = (int)(stale_ms / 1000);
             if (stale_sec >= 120)
                 lv_label_set_text_fmt(p->lbl_stale, "Last update: %dm ago", stale_sec / 60);
@@ -1024,6 +1025,13 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
     if (p->ring_exposure) {
         set_arc_opa_if_changed(p->ring_exposure,
             (stale_ms > STALE_WARN_MS) ? LV_OPA_40 : LV_OPA_COVER, LV_PART_INDICATOR);
+    }
+
+    /* Round layout 1 (Image-forward) has no exposure ring, so its stale cue is
+     * the sub-bar ledge ring dimming the same way. The setter is a no-op on the
+     * square flex-row sub bar and when the flag has not moved. */
+    if (p->subbar.ring && !p->ring_exposure) {
+        nina_subbar_set_stale(&p->subbar, stale_ms > STALE_WARN_MS);
     }
 }
 

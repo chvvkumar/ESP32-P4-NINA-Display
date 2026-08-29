@@ -471,7 +471,9 @@ int main(void)
      * Custom, Radar, Clouds) start with their text hidden and a tap turns it
      * on, on BOTH panel families. These are the fresh-config defaults only;
      * a device that already stored a value keeps it, which is why the
-     * migrations were left alone. */
+     * migrations that copy a stored value were left alone. The migrations for
+     * versions that never had the field take the new default through
+     * clouds_set_defaults(). */
     printf("10. image page overlays default to hidden (guideline C2)\n");
     {
         app_config_t cfg;

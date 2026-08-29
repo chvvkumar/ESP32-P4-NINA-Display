@@ -42,6 +42,10 @@ lv_obj_t *ui_arclabel_create(lv_obj_t *parent, const lv_font_t *font, int radius
     /* No theme card behind rim text (guideline C1) and no padding, so the
      * content box centre the widget measures from is the object centre. */
     lv_obj_remove_style_all(o);
+    /* The strip above leaves the text colour at the LVGL default, which is
+     * black and invisible on every dark theme. White is the readable default;
+     * every caller sets its own colour straight after and overwrites this. */
+    lv_obj_set_style_text_color(o, lv_color_white(), 0);
 
     /* Full panel, centred. The object is only a canvas: the radius is set
      * explicitly below, so the size never moves a glyph. It is sized to the

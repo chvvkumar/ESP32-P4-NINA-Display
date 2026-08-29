@@ -2317,7 +2317,7 @@ lv_obj_t *clock_page_create(lv_obj_t *parent) {
     /* Full bleed. Centring rather than negating a literal pad: on square a 720
      * root centred in main_cont's 688 content box lands at (-16,-16), exactly
      * what lv_obj_set_pos(-OUTER_PADDING, -OUTER_PADDING) produced, and it
-     * stays centred while the round inset aid pads main_cont differently. */
+     * stays centred whatever pad main_cont carries. */
     lv_obj_center(clock_root);
     lv_obj_set_style_bg_color(clock_root, lv_color_hex(CLK_BG), 0);
     lv_obj_set_style_bg_opa(clock_root, LV_OPA_COVER, 0);

@@ -268,10 +268,16 @@ static void ifr_theme_page(dashboard_page_t *p, int gb) {
     uint32_t target_fg = red ? current_theme->text_color : IFR_TARGET_FG;
     uint32_t text      = ifr_dim(current_theme->text_color, gb);
 
-    lv_obj_set_style_text_color(p->alt.lbl_target,
-        lv_color_hex(ifr_dim(target_fg, gb)), 0);
-    lv_obj_set_style_text_color(p->alt.lbl_seq_step,
-        lv_color_hex(ifr_dim(current_theme->header_text_color, gb)), 0);
+    /* Both are ui_arclabel_top() results, which are NULL when the widget
+     * allocation failed; the rest of this file guards every handle. */
+    if (p->alt.lbl_target) {
+        lv_obj_set_style_text_color(p->alt.lbl_target,
+            lv_color_hex(ifr_dim(target_fg, gb)), 0);
+    }
+    if (p->alt.lbl_seq_step) {
+        lv_obj_set_style_text_color(p->alt.lbl_seq_step,
+            lv_color_hex(ifr_dim(current_theme->header_text_color, gb)), 0);
+    }
     lv_obj_set_style_text_color(p->alt.lbl_count, lv_color_hex(text), 0);
     lv_obj_set_style_text_color(p->alt.lbl_elapsed, lv_color_hex(text), 0);
     lv_obj_set_style_text_color(p->alt.lbl_filter,

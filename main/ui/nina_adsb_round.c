@@ -300,6 +300,9 @@ static void build_board(lv_obj_t *content, const adsb_slots_t *s, adsb_geom_t *g
         lv_obj_set_style_radius(p, 12, 0);
         lv_obj_clear_flag(p, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
         s->row_panel[i] = p;
+        /* Born hidden, as the square builder does: recompute() shows the rows
+         * it has contacts for (review D5 M-6). */
+        hide(p);
 
         s->row_call[i] = r_label(p, &lv_font_montserrat_28);
         lv_obj_set_pos(s->row_call[i], 18, 8);
