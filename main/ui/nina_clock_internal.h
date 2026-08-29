@@ -198,4 +198,13 @@ void reg_ter_bg(lv_obj_t *o);
  * Caller holds the LVGL display lock.
  */
 void clock_round_build(uint8_t layout);
+
+/**
+ * Fit an inset flex column to the glass: every direct child of @p root is
+ * narrowed to the panel chord at its own furthest edge and centred, and the
+ * rows of @p table are fitted one by one instead of the table as a whole.
+ * Evensong keeps every row this way (bench B5). Runs once at build, after the
+ * children exist; caller holds the LVGL display lock.
+ */
+void clock_round_fit_column(lv_obj_t *root, lv_obj_t *table);
 #endif

@@ -1410,6 +1410,12 @@ static void build_layout_evensong(void) {
     make_ev_row(table, 4, "WIND",        &lbl_wind_val);
     make_ev_row(table, 5, "UV INDEX",    &lbl_uv_val);
 
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Every row stays; each steps in to the glass chord at its own edge
+     * (bench B5 ruling: keep the rows, fit them). */
+    clock_round_fit_column(clock_root, table);
+#endif
+
     /* round: no forecast row on the inset faces (ledger ruling B3); the 659 px
      * budget above already accounts for it (see the pad clamp above). */
     if (!SCREEN_ROUND) {

@@ -908,6 +908,48 @@ static void build_round_network(void)
     clock_round_restyle = network_restyle;
 }
 
+/* ══ Column fit for the inset faces ══════════════════════════════════ */
+
+/* Narrow one object to the chord at its furthest edge and centre it. 8 px
+ * inside the physical radius, not Rs: the head row at 720 sits at dy 330,
+ * where the design rim leaves only 180 px and the row needs 270. */
+static void fit_to_chord(lv_obj_t *o, int cy, int r, int full)
+{
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    int d1 = a.y1 - cy;
+    int d2 = a.y2 - cy;
+    if (d1 < 0) d1 = -d1;
+    if (d2 < 0) d2 = -d2;
+    int dy = d1 > d2 ? d1 : d2;
+    if (dy >= r) return;
+    int w = 2 * (int)sqrtf((float)(r * r - dy * dy));
+    if (w >= full) return;
+    lv_obj_set_width(o, w);
+    lv_obj_set_style_translate_x(o, (full - w) / 2, 0);
+}
+
+void clock_round_fit_column(lv_obj_t *root, lv_obj_t *table)
+{
+    if (!root) return;
+    lv_obj_update_layout(root);
+    const int cy   = screen_center();
+    const int r    = screen_safe_radius() - 8;
+    const int full = lv_obj_get_content_width(root);
+    uint32_t n = lv_obj_get_child_count(root);
+    for (uint32_t i = 0; i < n; i++) {
+        lv_obj_t *c = lv_obj_get_child(root, (int32_t)i);
+        if (c == table) {
+            uint32_t m = lv_obj_get_child_count(table);
+            for (uint32_t k = 0; k < m; k++) {
+                fit_to_chord(lv_obj_get_child(table, (int32_t)k), cy, r, full);
+            }
+            continue;
+        }
+        fit_to_chord(c, cy, r, full);
+    }
+}
+
 /* ══ Dispatch ════════════════════════════════════════════════════════ */
 
 void clock_round_build(uint8_t layout)
