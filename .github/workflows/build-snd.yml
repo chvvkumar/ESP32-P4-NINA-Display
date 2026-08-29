@@ -302,9 +302,28 @@ jobs:
           # Build the release body. The HTML-comment markers below are parsed
           # by the device's update checker; the nina:sha marker carries the
           # full 40-char commit SHA.
+          # Backticks are escaped: this heredoc is unquoted so that
+          # \${GITHUB_SHA} expands, which means a bare backtick would run as a
+          # command substitution instead of printing.
+          # Board names are the ha_model strings from main/board_profile.c, so
+          # a row reads the same as the model the device reports over MQTT and
+          # on its own system info page. Every row must have a matching file in
+          # the release create below.
           cat > /tmp/snd-notes.md << EOF
           Rolling alpha build from the snd branch. This pre-release is overwritten on every push to snd.
           Commit: ${GITHUB_SHA}
+
+          ### Firmware Files
+          | File | Board | Description |
+          |------|-------|-------------|
+          | \`nina-display-factory.bin\` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | Full factory image (flash at 0x0000) |
+          | \`nina-display-ota.bin\` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | OTA update binary (upload via web UI) |
+          | \`nina-display.elf\` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | Firmware ELF (for decoding core dumps) |
+          | \`nina-display-round-factory.bin\` | ESP32-P4-WIFI6-Touch-LCD-3.4C (round, 800x800) and ESP32-P4-WIFI6-Touch-LCD-4C (round, 720x720) | Full factory image (flash at 0x0000) |
+          | \`nina-display-round-ota.bin\` | ESP32-P4-WIFI6-Touch-LCD-3.4C and ESP32-P4-WIFI6-Touch-LCD-4C | OTA update binary (upload via web UI) |
+          | \`nina-display-round.elf\` | ESP32-P4-WIFI6-Touch-LCD-3.4C and ESP32-P4-WIFI6-Touch-LCD-4C | Firmware ELF (for decoding core dumps) |
+
+          One round build serves both round boards. The panel size is set on the device (first-run screen, or the Panel setting), so there is no separate 3.4C and 4C binary.
 
           <!-- nina:channel=alpha -->
           <!-- nina:sha=${GITHUB_SHA} -->

@@ -864,24 +864,20 @@ jobs:
               '| `nina-display-factory.bin` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | Full factory image (flash at 0x0000) |',
               '| `nina-display-ota.bin` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | OTA update binary (upload via web UI) |',
               '| `nina-display.elf` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | Firmware ELF (for decoding core dumps) |',
+              '| `nina-display-round-factory.bin` | ESP32-P4-WIFI6-Touch-LCD-3.4C (round, 800x800) and ESP32-P4-WIFI6-Touch-LCD-4C (round, 720x720) | Full factory image (flash at 0x0000) |',
+              '| `nina-display-round-ota.bin` | ESP32-P4-WIFI6-Touch-LCD-3.4C and ESP32-P4-WIFI6-Touch-LCD-4C | OTA update binary (upload via web UI) |',
+              '| `nina-display-round.elf` | ESP32-P4-WIFI6-Touch-LCD-3.4C and ESP32-P4-WIFI6-Touch-LCD-4C | Firmware ELF (for decoding core dumps) |',
               # Board names are the ha_model strings from main/board_profile.c,
               # so a release row reads the same as the model the device reports
-              # over MQTT and on its own system info page.
-              #
-              # The round family is built on every run but is still not attached
-              # to a stable release, so its rows stay out of this table: listing
-              # a file the release does not carry is worse than omitting it.
-              # When the round assets are added to `gh release create` below,
-              # add these three rows with them:
-              #   `nina-display-round-factory.bin` / `-ota.bin` / `.elf`
-              #   ESP32-P4-WIFI6-Touch-LCD-3.4C (round, 800x800) and
-              #   ESP32-P4-WIFI6-Touch-LCD-4C (round, 720x720) -- ONE round
-              #   build serves both; the panel is set on the device.
-              # The alpha channel (build-snd.yml) ships all six today.
+              # over MQTT and on its own system info page. Every row here must
+              # have a matching file in `gh release create` below: listing a
+              # file the release does not carry is worse than omitting it.
+              '',
+              'One round build serves both round boards. The panel size is set on the device (first-run screen, or the Panel setting), so there is no separate 3.4C and 4C binary.',
               '',
               '### Flashing',
               '- **Factory:** Use [ESP Web Flasher](https://espressif.github.io/esptool-js/) — flash at address `0x0000`',
-              '- **OTA:** Upload `nina-display-ota.bin` via the device web UI at `http://<device-ip>/`',
+              '- **OTA:** Upload the `-ota.bin` for your board via the device web UI at `http://<device-ip>/`. The device also finds it by name on its own update channel.',
               '',
           ]
           with open('/tmp/release-notes.md', 'w') as f:
@@ -911,14 +907,20 @@ jobs:
           gh release delete "$TAG" --yes 2>/dev/null || true
           # --target pins the release (and a not-yet-existing tag) to the commit
           # actually built, so the tag can never point at the default branch.
-          # Square assets only. The round family is still built and size-gated
-          # above, and its binaries ride along in the upload-artifact bundle,
-          # but they are not attached to a stable release until the phase 2
-          # gate. The alpha channel (build-snd.yml) attaches all six today.
+          # All six assets, both families, on every channel this workflow
+          # publishes: main -> stable, dev -> pre-release/beta. A round device
+          # searches a release for `nina-display-round-ota.bin` (OTA_ASSET_NAME
+          # is compiled in per family), so leaving the round files off meant a
+          # round board on Stable or Beta could never update. Alpha
+          # (build-snd.yml) already attaches all six. Keep this list and the
+          # Firmware Files table above in step.
           gh release create "$TAG" \
             firmware/nina-display-factory.bin \
             firmware/nina-display-ota.bin \
             firmware/nina-display.elf \
+            firmware/nina-display-round-factory.bin \
+            firmware/nina-display-round-ota.bin \
+            firmware/nina-display-round.elf \
             --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \
