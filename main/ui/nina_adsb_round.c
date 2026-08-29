@@ -28,6 +28,7 @@ LV_FONT_DECLARE(lv_font_montserrat_64);
 #define ADSBR_SKY_CARD_V   106
 #define ADSBR_SKY_CARD_H    56
 #define ADSBR_SCOPE_CARD    24
+#define ADSBR_SCOPE_CARD_DIAG 60 /* under the Rs-38..Rs-12 arclabel glyph band */
 #define ADSBR_RING_INSET    34   /* the outermost number clears the bezel */
 #define ADSBR_CAP_H         72
 #define ADSBR_TAG_W        184
@@ -350,6 +351,7 @@ void adsb_round_build(lv_obj_t *root, lv_obj_t *content,
     *g = (adsb_geom_t){
         .card_off_v = { ADSBR_SKY_CARD_V, ADSBR_SCOPE_CARD },
         .card_off_h = { ADSBR_SKY_CARD_H, ADSBR_SCOPE_CARD },
+        .card_off_diag = ADSBR_SCOPE_CARD_DIAG,
         .rim_w      = { 2, 3 },
         .ring_inset = ADSBR_RING_INSET,
         .ring_lbl_w = 100,   /* the 28 px ring-number face needs more no-go

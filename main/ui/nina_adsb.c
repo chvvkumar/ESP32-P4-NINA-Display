@@ -1330,6 +1330,14 @@ static void place_compass(void)
         int idx = (s_mode == MODE_SCOPE) ? 1 : 0;
         int off = (co < 0.0f ? -co : co) > 0.707f ? s_geom.card_off_v[idx]
                                                   : s_geom.card_off_h[idx];
+        /* Round Scope: the range and CONTACTS arclabels own the two upper
+         * diagonals, 15..75 degrees either side of up, in the same rim band
+         * as the letters (bench B11: "1W5 NM" at up azimuth 320). A letter
+         * the rotation carries there steps in under the glyph band. */
+        if (idx == 1 && co > 0.0f) {
+            float as = si < 0.0f ? -si : si;
+            if (as > 0.259f && as < 0.966f) off = s_geom.card_off_diag;
+        }
         int cr = s_disc_r - off;
         int x = DISC_CX + (int)(cr * si);
         int y = DISC_CY - (int)(cr * co);
@@ -2428,6 +2436,7 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
     s_geom = (adsb_geom_t){
         .card_off_v = { 24, 24 },
         .card_off_h = { 24, 24 },
+        .card_off_diag = 24,
         .rim_w      = { 2, 2 },
         .ring_inset = ADSB_RING_INSET_INNER,
         .ring_lbl_w = 84,

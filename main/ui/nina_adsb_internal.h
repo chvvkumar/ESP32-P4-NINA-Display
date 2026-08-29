@@ -37,6 +37,10 @@
 typedef struct {
     int16_t card_off_v[2];   /* cardinal pull-in from the disc, near-vertical letters */
     int16_t card_off_h[2];   /* the same, near-horizontal letters */
+    int16_t card_off_diag;   /* Scope only: a letter carried 15..75 degrees either
+                              * side of up sits in the two rim arclabel spans
+                              * (range, CONTACTS) and steps in to this instead.
+                              * Square has no rim arclabels: 24, same as the rest */
     int16_t rim_w[2];        /* outer ring stroke width */
     int16_t ring_inset;      /* pull-in of the OUTERMOST ring number (slot 2) from
                               * its ring. The two inner numbers always use
