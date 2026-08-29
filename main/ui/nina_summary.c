@@ -1086,6 +1086,9 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
     {
         bool shown[MAX_NINA_INSTANCES];
         for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+            /* cppcheck-suppress arrayIndexThenCheck
+             * See rationale above: i is bounded by MAX_NINA_INSTANCES from
+             * the enclosing loop, independent of the `i < count` check. */
             shown[i] = nina_slot_available[i] && i < count && nina_connection_is_connected(i);
         }
         nina_summary_round_place_rings(cards, shown);

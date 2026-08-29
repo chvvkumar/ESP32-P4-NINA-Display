@@ -36,10 +36,10 @@ int main(void)
     check_int("ui_chord_half(-354) = 0, sign ignored", ui_chord_half(-354), 0);
     check_int("ui_chord_half(400) = 0 outside the rim", ui_chord_half(400), 0);
     check_int("ui_chord_half is symmetric at 240", ui_chord_half(240), ui_chord_half(-240));
-    check_int("ui_chord_at_y(360) = full width on the centreline", ui_chord_at_y(360), 684);
+    check_int("ui_chord_at_y(360) = full width on the centreline", ui_chord_at_y(360), 2 * 354);
     /* 354*354 - 240*240 = 67716; sqrtf gives 260.2, truncated to 260. */
     check_int("ui_chord_at_y(600) = 2 * 260", ui_chord_at_y(600), 2 * (int)sqrtf(354.0f * 354.0f - 240.0f * 240.0f));
-    check_int("ui_chord_at_y(600) = 486", ui_chord_at_y(600), 486);
+    check_int("ui_chord_at_y(600) = 520", ui_chord_at_y(600), 520);
     check_int("ui_chord_at_y(0) = 0 at the panel edge", ui_chord_at_y(0), 0);
 
     printf("\n== 3.4c round 800 (safe radius 400, inset 118) ==\n");
@@ -47,7 +47,7 @@ int main(void)
     check_int("ui_rim_radius = 0.985 * 400", ui_rim_radius(), 394);
     check_int("ui_chord_half(0) = the rim radius", ui_chord_half(0), 394);
     check_int("ui_chord_half(394) = 0 at the rim", ui_chord_half(394), 0);
-    check_int("ui_chord_at_y(400) = full width on the centreline", ui_chord_at_y(400), 760);
+    check_int("ui_chord_at_y(400) = full width on the centreline", ui_chord_at_y(400), 2 * 394);
 
     printf("\n== 4b square 720 (no safe circle) ==\n");
     screen_geom_set(720, 0, 0);

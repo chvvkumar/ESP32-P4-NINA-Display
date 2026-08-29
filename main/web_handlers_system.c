@@ -370,6 +370,13 @@ esp_err_t ota_check_post_handler(httpd_req_t *req)
     int timeouts = 0;
     while (remaining > 0) {
         bool to_hdr = have < sizeof(hdr);
+        /* cppcheck-suppress legacyUninitvar
+         * hdr and sink are OUTPUT buffers: this forms the address that
+         * httpd_req_recv() writes into, it never reads them. cppcheck has no
+         * IDF headers on the CI runner, so it cannot see that and reports the
+         * write target as an uninitialized read. Only the `have` bytes that
+         * were actually received are ever read back (ota_family_check below,
+         * guarded by have < OTA_FAMILY_HDR_BYTES). */
         char *dst = to_hdr ? (char *)hdr + have : sink;
         int want = to_hdr ? (int)(sizeof(hdr) - have) : (int)sizeof(sink);
         if (want > remaining) want = remaining;
