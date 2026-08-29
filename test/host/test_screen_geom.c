@@ -131,6 +131,18 @@ int main(void)
     check_int("floor 0, 0%: duty",   bsp_brightness_duty(0, 0),   0);
     check_int("floor 0, 100%: duty", bsp_brightness_duty(0, 100), 1023);
 
+    printf("\n== brightness curve, round panel floors ==\n");
+    /* 3.4C stays dark up to about 21% duty and the 4C up to about 23%, so the
+     * round rows floor there: user 0 is the last dark step, 100 is full duty. */
+    check_int("floor 20, 0%: actual percent",   bsp_brightness_actual_pct(20, 0),   20);
+    check_int("floor 20, 50%: actual percent",  bsp_brightness_actual_pct(20, 50),  60);
+    check_int("floor 20, 100%: actual percent", bsp_brightness_actual_pct(20, 100), 100);
+    check_int("floor 20, 100%: duty",           bsp_brightness_duty(20, 100),       1023);
+    check_int("floor 22, 0%: actual percent",   bsp_brightness_actual_pct(22, 0),   22);
+    check_int("floor 22, 50%: actual percent",  bsp_brightness_actual_pct(22, 50),  61);
+    check_int("floor 22, 100%: actual percent", bsp_brightness_actual_pct(22, 100), 100);
+    check_int("floor 22, 100%: duty",           bsp_brightness_duty(22, 100),       1023);
+
     printf("\n== brightness curve clamps out-of-range input ==\n");
     check_int("floor 47, -5% clamps to 0%",   bsp_brightness_actual_pct(47, -5),  47);
     check_int("floor 47, 150% clamps to 100%", bsp_brightness_actual_pct(47, 150), 100);

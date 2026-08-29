@@ -423,7 +423,10 @@ static const bsp_panel_row_t s_panel_rows[] = {
         .lane_rate_mbps = 1500, .dpi_clock_mhz = 80,
         .hbp = 20, .hpw = 20, .hfp = 40,
         .vbp = 12, .vpw = 4,  .vfp = 24,
-        .bright_floor_pct = 0,
+        /* Backlight is dark below about 21% duty on this panel, so 0..20 of
+         * the slider was a dead band. Floor 20 puts user 0 at the last dark
+         * step and spreads 1..100 over the range that actually lights. */
+        .bright_floor_pct = 20,
         .base_rot_180 = 1,
     },
     [BSP_PANEL_ROUND_4C] = {
@@ -438,7 +441,8 @@ static const bsp_panel_row_t s_panel_rows[] = {
         .lane_rate_mbps = 1500, .dpi_clock_mhz = 40,
         .hbp = 20, .hpw = 20, .hfp = 40,
         .vbp = 12, .vpw = 4,  .vfp = 24,
-        .bright_floor_pct = 0,
+        /* Dark below about 23% duty here, one step higher than the 3.4C. */
+        .bright_floor_pct = 22,
         .base_rot_180 = 1,
     },
 };
