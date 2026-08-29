@@ -74,6 +74,10 @@ static lv_obj_t *sr_label(lv_obj_t *parent, const lv_font_t *font,
     lv_obj_set_style_text_font(l, font, 0);
     lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
     lv_label_set_long_mode(l, LV_LABEL_LONG_DOT);
+    /* One line, always: LONG_DOT only ellipsises once the text runs out of
+     * height as well as width, and a content-sized height lets a long rig
+     * name wrap to four lines and over the bullseye row (bench B1, 3.4C). */
+    lv_obj_set_height(l, lv_font_get_line_height(font));
     lv_label_set_text(l, text ? text : "");
     return l;
 }
