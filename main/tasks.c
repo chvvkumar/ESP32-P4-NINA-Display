@@ -1630,14 +1630,19 @@ main_loop:
                             free(fres.thumbnail.rgb565_data);
                         }
                     } else {
-                        /* No frame came back. Drop the Image-forward latch so the
-                         * next event gets one more try, and hide the overlay if a
-                         * user-triggered thumbnail was what failed. */
+                        /* No frame came back. The Image-forward latch stays SET:
+                         * clearing it here re-armed needs_capture() on the very
+                         * next loop pass, and the worker's notify runs that pass
+                         * at fetch speed, so a rig with no image yet (NINA answers
+                         * "No image") was fetched about ten times a second. The
+                         * next new-image event fetches through auto_refresh anyway
+                         * and a success clears the latch; a page leave clears it
+                         * too. Hide the overlay if a user-triggered thumbnail was
+                         * what failed. */
                         bool hide_overlay = nina_dashboard_thumbnail_requested();
                         if (hide_overlay) nina_dashboard_clear_thumbnail_request();
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_layout_image_note_capture_request(fres.instance_idx, false);
-                            if (hide_overlay) nina_dashboard_hide_thumbnail();
+                        if (hide_overlay && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_hide_thumbnail();
                             bsp_display_unlock();
                         }
                     }
