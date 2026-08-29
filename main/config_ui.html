@@ -848,6 +848,7 @@
       box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
     }
     .progress-status { font-size: 0.8rem; color: #a1a1aa; margin-top: 10px; text-align: center; }
+    .progress-status.is-error { color: var(--danger); font-weight: 600; }
 
     /* === NODE CARD DISABLED === */
     .node-card-disabled { opacity: 0.5; pointer-events: none; transition: opacity 0.3s ease; }
@@ -4246,6 +4247,7 @@
       progressDiv.style.display='block';
       btn.disabled=true;
       fill.style.width='0%';
+      status.classList.remove('is-error');
       status.textContent='Uploading...';
       var xhr=new XMLHttpRequest();
       xhr.open('POST','/api/ota',true);
@@ -4265,12 +4267,14 @@
         }else{
           var reason='';
           try{reason=JSON.parse(xhr.responseText).error||'';}catch(e){}
+          status.classList.add('is-error');
           status.textContent=reason?('Update refused: '+reason):('Update failed (HTTP '+xhr.status+')');
           showToast(reason||'OTA failed','error');
           btn.disabled=false;
         }
       });
       xhr.addEventListener('error',function(){
+        status.classList.add('is-error');
         status.textContent='Upload error: the device closed the connection. Check that the file is the firmware for this panel.';
         showToast('OTA upload error','error');
         btn.disabled=false;

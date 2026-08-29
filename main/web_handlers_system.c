@@ -36,6 +36,7 @@
 #include "weather_client.h"
 #include "ui/nina_event_log.h"
 #include "voice_store.h"
+#include "ui/lv_font_warning_128.h"   /* WARNING_GLYPH for the wrong-firmware screen */
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -96,6 +97,7 @@ static lv_obj_t *ota_overlay = NULL;
 static lv_obj_t *ota_progress_label = NULL;
 static lv_obj_t *ota_bar = NULL;
 static lv_obj_t *ota_bar_glow = NULL;
+static lv_timer_t *ota_refusal_timer = NULL;   /* wrong-firmware screen auto-dismiss */
 
 /* Accent color for the progress bar */
 #define OTA_ACCENT       0x00D4FF   /* Cyan */
@@ -117,6 +119,17 @@ static void ota_show_overlay(const char *message) {
         uint32_t hint_color    = red_night ? t->label_color    : 0x555555;
         uint32_t track_color   = red_night ? t->bento_border   : OTA_ACCENT_DIM;
         uint32_t grad_color    = red_night ? t->bento_border   : 0x0088FF;
+
+        /* A refusal screen still up from a previous attempt (and its 30 s
+         * timer) would otherwise delete THIS overlay mid-update. */
+        if (ota_refusal_timer) {
+            lv_timer_delete(ota_refusal_timer);
+            ota_refusal_timer = NULL;
+        }
+        if (ota_overlay) {
+            lv_obj_delete(ota_overlay);
+            ota_overlay = NULL;
+        }
 
         /* ── Fullscreen black overlay ── */
         ota_overlay = lv_obj_create(lv_scr_act());
@@ -216,6 +229,89 @@ static void ota_remove_overlay(void) {
         }
         bsp_display_unlock();
     }
+}
+
+/* Wrong-firmware screen: replaces the progress widgets on the same overlay with
+ * the triangle the manual-flash prompt uses, the reason, and a dismiss hint.
+ * Shown BEFORE the request body is drained so the panel never sits at 0% while
+ * the browser finishes sending; stays up until a tap or 30 s. Both callbacks
+ * run inside the LVGL tick, so no display lock there. */
+
+static void ota_refusal_dismiss(void) {
+    if (ota_refusal_timer) {
+        lv_timer_delete(ota_refusal_timer);
+        ota_refusal_timer = NULL;
+    }
+    if (ota_overlay) {
+        lv_obj_delete_async(ota_overlay);
+        ota_overlay = NULL;
+        ota_progress_label = NULL;
+        ota_bar = NULL;
+        ota_bar_glow = NULL;
+    }
+}
+
+static void ota_refusal_timer_cb(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    ota_refusal_dismiss();
+}
+
+static void ota_refusal_tap_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    ota_refusal_dismiss();
+}
+
+static void ota_show_refusal(const char *message) {
+    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return;
+    if (!ota_overlay) {
+        bsp_display_unlock();
+        return;
+    }
+    lv_obj_clean(ota_overlay);
+    ota_progress_label = NULL;
+    ota_bar = NULL;
+    ota_bar_glow = NULL;
+
+    const theme_t *t = nina_dashboard_get_theme();
+    bool red_night = (t && theme_is_red_night(t));
+    uint32_t icon_color  = red_night ? t->text_color  : 0xFFB300;
+    uint32_t title_color = red_night ? t->text_color  : 0xFF4444;
+    uint32_t body_color  = red_night ? t->label_color : 0xCCCCCC;
+    uint32_t hint_color  = red_night ? t->label_color : 0x555555;
+
+    lv_obj_t *icon = lv_label_create(ota_overlay);
+    lv_label_set_text(icon, WARNING_GLYPH);
+    lv_obj_set_style_text_font(icon, &lv_font_warning_128, 0);
+    lv_obj_set_style_text_color(icon, lv_color_hex(icon_color), 0);
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, -180);
+
+    lv_obj_t *title = lv_label_create(ota_overlay);
+    lv_label_set_text(title, "Wrong Firmware");
+    lv_obj_set_style_text_color(title, lv_color_hex(title_color), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_36, 0);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, -70);
+
+    lv_obj_t *body = lv_label_create(ota_overlay);
+    lv_label_set_text(body, message);
+    lv_obj_set_width(body, LV_PCT(70));
+    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(body, lv_color_hex(body_color), 0);
+    lv_obj_set_style_text_font(body, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(body, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(body, LV_ALIGN_CENTER, 0, 40);
+
+    lv_obj_t *hint = lv_label_create(ota_overlay);
+    lv_label_set_text(hint, "Nothing was changed. Tap to dismiss.");
+    lv_obj_set_style_text_color(hint, lv_color_hex(hint_color), 0);
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_20, 0);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -100);
+
+    lv_obj_add_flag(ota_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(ota_overlay, ota_refusal_tap_cb, LV_EVENT_CLICKED, NULL);
+    if (ota_refusal_timer) lv_timer_delete(ota_refusal_timer);
+    ota_refusal_timer = lv_timer_create(ota_refusal_timer_cb, 30000, NULL);
+    lv_timer_set_repeat_count(ota_refusal_timer, 1);
+    bsp_display_unlock();
 }
 
 /**
@@ -376,6 +472,21 @@ esp_err_t ota_post_handler(httpd_req_t *req)
                 /* Nothing has been written yet (OTA_WITH_SEQUENTIAL_WRITES
                  * erases nothing up front), so aborting here leaves the target
                  * slot exactly as it was. */
+                const char *screen_msg, *json;
+                if (verdict == OTA_FAMILY_NO_DESC) {
+                    screen_msg = "The uploaded file is not an ESP32-P4 application image. "
+                                 "Flash the binary that matches this device.";
+                    json = "{\"error\":\"wrong firmware family: this file carries no firmware app "
+                           "descriptor, so it is not an ESP32-P4 application image. Download the "
+                           "binary that matches this device.\"}";
+                } else {
+                    screen_msg = "The uploaded file is built for the other panel shape and would "
+                                 "leave this screen dark. Flash the binary that matches this device.";
+                    json = "{\"error\":\"wrong firmware family: this image is built for the other "
+                           "panel shape and would leave the screen dark. Download the binary that "
+                           "matches this device.\"}";
+                }
+                ota_show_refusal(screen_msg);
                 /* Drain the rest of the upload before answering: closing the
                  * socket while the browser is still sending makes XHR report a
                  * bare network error and the 409 body below is never read. */
@@ -391,21 +502,11 @@ esp_err_t ota_post_handler(httpd_req_t *req)
                 }
                 free(buf);
                 esp_ota_abort(ota_handle);
-                ota_remove_overlay();
+                /* The refusal screen stays up (tap or 30 s); no ota_remove_overlay(). */
                 ota_restore_network();
                 httpd_resp_set_status(req, "409 Conflict");
                 httpd_resp_set_type(req, "application/json");
-                if (verdict == OTA_FAMILY_NO_DESC) {
-                    httpd_resp_sendstr(req,
-                        "{\"error\":\"wrong firmware family: this file carries no firmware app "
-                        "descriptor, so it is not an ESP32-P4 application image. Download the "
-                        "binary that matches this device.\"}");
-                } else {
-                    httpd_resp_sendstr(req,
-                        "{\"error\":\"wrong firmware family: this image is built for the other "
-                        "panel shape and would leave the screen dark. Download the binary that "
-                        "matches this device.\"}");
-                }
+                httpd_resp_sendstr(req, json);
                 return ESP_FAIL;
             }
             err = esp_ota_write(ota_handle, fam_hdr, OTA_FAMILY_HDR_BYTES);
