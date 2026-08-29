@@ -203,11 +203,12 @@ jobs:
         if: steps.check_skip.outputs.skip != 'true'
         run: |
           # Decide whether managed_components also needs purging BEFORE removing
-          # build/, since the comparison hash lives in build/.build_config_hash.
+          # build_square/, since the comparison hash lives in
+          # build_square/.build_config_hash.
           NEEDS_DEPS_CLEAN=false
-          if [ -f build/.build_config_hash ]; then
-            OLD_HASH=$(cat build/.build_config_hash)
-            NEW_HASH=$(cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1)
+          if [ -f build_square/.build_config_hash ]; then
+            OLD_HASH=$(cat build_square/.build_config_hash)
+            NEW_HASH=$(cat sdkconfig.defaults sdkconfig.defaults.square sdkconfig.defaults.round main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1)
             if [ "$OLD_HASH" != "$NEW_HASH" ]; then
               echo "Build config changed, will also purge managed_components"
               NEEDS_DEPS_CLEAN=true
@@ -217,12 +218,13 @@ jobs:
             NEEDS_DEPS_CLEAN=true
           fi
 
-          # Always purge build/ and sdkconfig: a stale sdkconfig selects the wrong
-          # display pipeline and a stale build/ keeps a stale build_version.h and
+          # Always purge the family build directories and any legacy root
+          # sdkconfig: a stale sdkconfig selects the wrong display pipeline and a
+          # stale build_square/ or build_round/ keeps a stale build_version.h and
           # object files. ccache (separate CCACHE_DIR) is untouched, so recompiles
           # stay fast.
-          rm -rf build sdkconfig
-          echo "Removed build and sdkconfig"
+          rm -rf build build_square build_round sdkconfig
+          echo "Removed build_square, build_round and any legacy build/sdkconfig"
 
           # Only re-download managed_components when the dependency/config hash
           # changed: it is pinned by dependencies.lock, and re-fetching from the
@@ -240,12 +242,21 @@ jobs:
           IDF_CCACHE_ENABLE: 1
         run: |
           . $IDF_PATH/export.sh
-          idf.py build
+          # Both families are built in ONE job on purpose. A strategy.matrix
+          # would fork every later step in this job, including the tag push and
+          # the release create, which would produce two releases per commit.
+          for FAMILY in square round; do
+            echo "=== building family: $FAMILY ==="
+            idf.py -B "build_${FAMILY}" \
+              -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.${FAMILY}" \
+              -DSDKCONFIG="build_${FAMILY}/sdkconfig" \
+              build
+          done
 
       - name: Save build config hash
         if: steps.check_skip.outputs.skip != 'true'
         run: |
-          cat sdkconfig.defaults main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1 > build/.build_config_hash
+          cat sdkconfig.defaults sdkconfig.defaults.square sdkconfig.defaults.round main/idf_component.yml main/CMakeLists.txt CMakeLists.txt dependencies.lock 2>/dev/null | sha256sum | cut -d' ' -f1 > build_square/.build_config_hash
 
       - name: Show ccache stats
         if: steps.check_skip.outputs.skip != 'true'
@@ -258,47 +269,44 @@ jobs:
           . $IDF_PATH/export.sh
           mkdir -p firmware
 
-          # Detect app binary from project_description.json
-          APP_BIN=$(python3 -c "
+          for FAMILY in square round; do
+            BDIR="build_${FAMILY}"
+            if [ "$FAMILY" = "round" ]; then PREFIX="nina-display-round"; else PREFIX="nina-display"; fi
+
+            APP_BIN=$(python3 -c "
           import json
-          with open('build/project_description.json') as f:
+          with open('${BDIR}/project_description.json') as f:
               d = json.load(f)
-          print('build/' + d['app_bin'])
+          print('${BDIR}/' + d['app_bin'])
+          ")
+            APP_ELF=$(python3 -c "
+          import json
+          with open('${BDIR}/project_description.json') as f:
+              d = json.load(f)
+          print('${BDIR}/' + d['app_elf'])
           ")
 
-          # Merge factory binary (bootloader + partition table + app)
-          python3 -m esptool --chip esp32p4 merge_bin \
-            --flash_mode dio \
-            --flash_size 32MB \
-            --flash_freq 80m \
-            -o firmware/nina-display-factory.bin \
-            0x2000  build/bootloader/bootloader.bin \
-            0x8000  build/partition_table/partition-table.bin \
-            0x20000 "$APP_BIN"
+            python3 -m esptool --chip esp32p4 merge_bin \
+              --flash_mode dio \
+              --flash_size 32MB \
+              --flash_freq 80m \
+              -o "firmware/${PREFIX}-factory.bin" \
+              0x2000  "${BDIR}/bootloader/bootloader.bin" \
+              0x8000  "${BDIR}/partition_table/partition-table.bin" \
+              0x20000 "$APP_BIN"
 
-          # Copy app binary as OTA file
-          cp "$APP_BIN" firmware/nina-display-ota.bin
+            cp "$APP_BIN" "firmware/${PREFIX}-ota.bin"
+            cp "$APP_ELF" "firmware/${PREFIX}.elf"
 
-          # Keep bootloader + partition table on disk (build/ tree) so the erase
-          # check can hash them. They are NOT uploaded as release assets anymore:
-          # the OTA-safe vs full-erase baseline is carried as SHA256 markers in the
-          # release body (see "Check full erase requirement" / "Generate release
-          # notes"). Staging copies kept for local inspection only.
-          cp build/bootloader/bootloader.bin firmware/bootloader.bin
-          cp build/partition_table/partition-table.bin firmware/partition-table.bin
+            echo "${FAMILY} factory: $(du -h firmware/${PREFIX}-factory.bin | cut -f1)"
+            echo "${FAMILY} OTA:     $(du -h firmware/${PREFIX}-ota.bin | cut -f1)"
+          done
 
-          # Copy ELF for crash backtrace decoding
-          APP_ELF=$(python3 -c "
-          import json
-          with open('build/project_description.json') as f:
-              d = json.load(f)
-          print('build/' + d['app_elf'])
-          ")
-          cp "$APP_ELF" firmware/nina-display.elf
-
-          # Report sizes
-          echo "Factory: $(du -h firmware/nina-display-factory.bin | cut -f1)"
-          echo "OTA:     $(du -h firmware/nina-display-ota.bin | cut -f1)"
+          # Bootloader + partition table of the SQUARE build only: they are what
+          # the full-erase check hashes against the previous release, and both
+          # families share sdkconfig.defaults so the bootloader is identical.
+          cp build_square/bootloader/bootloader.bin firmware/bootloader.bin
+          cp build_square/partition_table/partition-table.bin firmware/partition-table.bin
 
       - name: Extract firmware metrics
         if: steps.check_skip.outputs.skip != 'true'
@@ -313,17 +321,19 @@ jobs:
           # Convert to human readable using Python (bc not available on all runners)
           FACTORY_MB=$(python3 -c "print(f'{$FACTORY_SIZE / 1024 / 1024:.2f}')")
           OTA_MB=$(python3 -c "print(f'{$OTA_SIZE / 1024 / 1024:.2f}')")
+          ROUND_OTA_SIZE=$(stat -c%s firmware/nina-display-round-ota.bin 2>/dev/null || stat -f%z firmware/nina-display-round-ota.bin)
+          ROUND_OTA_MB=$(python3 -c "print(f'{$ROUND_OTA_SIZE / 1024 / 1024:.2f}')")
           
           # Extract PSRAM config from sdkconfig (exact key match to avoid multi-line grep)
-          PSRAM_SPEED=$(grep '^CONFIG_SPIRAM_SPEED=' sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "200")
+          PSRAM_SPEED=$(grep '^CONFIG_SPIRAM_SPEED=' build_square/sdkconfig 2>/dev/null | cut -d'=' -f2 || echo "200")
 
           # Get flash size from sdkconfig (exact key match)
-          FLASH_SIZE=$(grep '^CONFIG_ESPTOOLPY_FLASHSIZE=' sdkconfig | cut -d'"' -f2 || echo "32MB")
+          FLASH_SIZE=$(grep '^CONFIG_ESPTOOLPY_FLASHSIZE=' build_square/sdkconfig | cut -d'"' -f2 || echo "32MB")
           
           # Get memory usage from size output
-          if [ -f build/nina-display.map ]; then
-            DRAM_USED=$(grep -A 10 "Memory region.*Used Size" build/nina-display.map | grep "dram0" | awk '{print $2}' || echo "0")
-            IRAM_USED=$(grep -A 10 "Memory region.*Used Size" build/nina-display.map | grep "iram0" | awk '{print $2}' || echo "0")
+          if [ -f build_square/nina-display.map ]; then
+            DRAM_USED=$(grep -A 10 "Memory region.*Used Size" build_square/nina-display.map | grep "dram0" | awk '{print $2}' || echo "0")
+            IRAM_USED=$(grep -A 10 "Memory region.*Used Size" build_square/nina-display.map | grep "iram0" | awk '{print $2}' || echo "0")
           else
             DRAM_USED="N/A"
             IRAM_USED="N/A"
@@ -336,6 +346,7 @@ jobs:
             "psram": "32MB @ ${PSRAM_SPEED}MHz",
             "factory_size": "${FACTORY_MB} MB",
             "ota_size": "${OTA_MB} MB",
+            "round_ota_size": "${ROUND_OTA_MB} MB",
             "dram_used": "$DRAM_USED",
             "iram_used": "$IRAM_USED",
             "esp_idf": "${{ env.IDF_VERSION }}",
@@ -550,8 +561,8 @@ jobs:
           # --- PRIMARY: built-artifact hash vs previous release body markers ---
           # Freshly built hashes (also re-emitted into THIS release's body by the
           # release-notes step so the next run can read them).
-          NEW_PT="build/partition_table/partition-table.bin"
-          NEW_BL="build/bootloader/bootloader.bin"
+          NEW_PT="build_square/partition_table/partition-table.bin"
+          NEW_BL="build_square/bootloader/bootloader.bin"
           PT_SHA=$(sha256sum "$NEW_PT" | cut -d' ' -f1)
           BL_SHA=$(sha256sum "$NEW_BL" | cut -d' ' -f1)
 
@@ -607,8 +618,8 @@ jobs:
             RESOLVED_SDKCONFIG=""
             if [ -f sdkconfig ]; then
               RESOLVED_SDKCONFIG="sdkconfig"
-            elif [ -f build/config/sdkconfig.json ]; then
-              RESOLVED_SDKCONFIG="build/config/sdkconfig.json"
+            elif [ -f build_square/config/sdkconfig.json ]; then
+              RESOLVED_SDKCONFIG="build_square/config/sdkconfig.json"
             fi
             WATCH_KEYS='^(CONFIG_SECURE_BOOT=y|CONFIG_SECURE_BOOT_ENABLED=y|CONFIG_SECURE_FLASH_ENC_ENABLED=y|CONFIG_FLASH_ENCRYPTION_ENABLED=y|CONFIG_IDF_TARGET=|CONFIG_MMU_PAGE_SIZE|CONFIG_PARTITION_TABLE_OFFSET=|CONFIG_PARTITION_TABLE_MD5)'
             if [ -n "$RESOLVED_SDKCONFIG" ] && [ "$RESOLVED_SDKCONFIG" = "sdkconfig" ]; then
@@ -848,15 +859,25 @@ jobs:
               lines.append('')
           lines += [
               '### Firmware Files',
-              '| File | Description |',
-              '|------|-------------|',
-              '| `nina-display-factory.bin` | Full factory image (flash at 0x0000) |',
-              '| `nina-display-ota.bin` | OTA update binary (upload via web UI) |',
-              '| `nina-display.elf` | Firmware ELF (for decoding core dumps) |',
+              '| File | Board | Description |',
+              '|------|-------|-------------|',
+              '| `nina-display-factory.bin` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | Full factory image (flash at 0x0000) |',
+              '| `nina-display-ota.bin` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | OTA update binary (upload via web UI) |',
+              '| `nina-display.elf` | ESP32-P4-WIFI6-Touch-LCD-4B (square, 720x720) | Firmware ELF (for decoding core dumps) |',
+              '| `nina-display-round-factory.bin` | ESP32-P4-WIFI6-Touch-LCD-3.4C (round, 800x800) and ESP32-P4-WIFI6-Touch-LCD-4C (round, 720x720) | Full factory image (flash at 0x0000) |',
+              '| `nina-display-round-ota.bin` | ESP32-P4-WIFI6-Touch-LCD-3.4C and ESP32-P4-WIFI6-Touch-LCD-4C | OTA update binary (upload via web UI) |',
+              '| `nina-display-round.elf` | ESP32-P4-WIFI6-Touch-LCD-3.4C and ESP32-P4-WIFI6-Touch-LCD-4C | Firmware ELF (for decoding core dumps) |',
+              # Board names are the ha_model strings from main/board_profile.c,
+              # so a release row reads the same as the model the device reports
+              # over MQTT and on its own system info page. Every row here must
+              # have a matching file in `gh release create` below: listing a
+              # file the release does not carry is worse than omitting it.
+              '',
+              'One round build serves both round boards. The panel size is set on the device (first-run screen, or the Panel setting), so there is no separate 3.4C and 4C binary.',
               '',
               '### Flashing',
               '- **Factory:** Use [ESP Web Flasher](https://espressif.github.io/esptool-js/) — flash at address `0x0000`',
-              '- **OTA:** Upload `nina-display-ota.bin` via the device web UI at `http://<device-ip>/`',
+              '- **OTA:** Upload the `-ota.bin` for your board via the device web UI at `http://<device-ip>/`. The device also finds it by name on its own update channel.',
               '',
           ]
           with open('/tmp/release-notes.md', 'w') as f:
@@ -886,10 +907,20 @@ jobs:
           gh release delete "$TAG" --yes 2>/dev/null || true
           # --target pins the release (and a not-yet-existing tag) to the commit
           # actually built, so the tag can never point at the default branch.
+          # All six assets, both families, on every channel this workflow
+          # publishes: main -> stable, dev -> pre-release/beta. A round device
+          # searches a release for `nina-display-round-ota.bin` (OTA_ASSET_NAME
+          # is compiled in per family), so leaving the round files off meant a
+          # round board on Stable or Beta could never update. Alpha
+          # (build-snd.yml) already attaches all six. Keep this list and the
+          # Firmware Files table above in step.
           gh release create "$TAG" \
             firmware/nina-display-factory.bin \
             firmware/nina-display-ota.bin \
             firmware/nina-display.elf \
+            firmware/nina-display-round-factory.bin \
+            firmware/nina-display-round-ota.bin \
+            firmware/nina-display-round.elf \
             --target "$GITHUB_SHA" \
             --title "$TAG" \
             --notes-file /tmp/release-notes.md \

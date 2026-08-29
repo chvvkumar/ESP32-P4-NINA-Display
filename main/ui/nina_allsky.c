@@ -12,6 +12,7 @@
 #include "page_conn.h"
 #include "app_config.h"
 #include "themes.h"
+#include "ui_round.h"
 #include "ui_styles.h"
 #include "ui_helpers.h"
 #include "cJSON.h"
@@ -582,8 +583,11 @@ lv_obj_t *allsky_page_create(lv_obj_t *parent) {
 
     allsky_page = lv_obj_create(parent);
     lv_obj_remove_style_all(allsky_page);
-    lv_obj_set_size(allsky_page, SCREEN_SIZE - 2 * OUTER_PADDING,
-                    SCREEN_SIZE - 2 * OUTER_PADDING);
+    /* 688 on square, 510 at 720 round, 564 at 800 round. The 2 x 2 quadrant
+     * grid is built from flex_grow 1 and LV_PCT(100) only (:597-598, :613-614),
+     * so it reflows into the smaller box with no fixed-pixel child. */
+    lv_obj_set_size(allsky_page, ui_page_root_size(), ui_page_root_size());
+    lv_obj_center(allsky_page);
     lv_obj_set_flex_flow(allsky_page, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(allsky_page, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);

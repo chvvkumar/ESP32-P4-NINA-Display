@@ -177,3 +177,5 @@ watch_underrun.ps1
 skill-observations/
 .gsd/
 gsd-core/
+build_square/
+build_round/

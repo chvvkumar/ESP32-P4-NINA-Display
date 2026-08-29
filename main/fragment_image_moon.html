@@ -35,6 +35,14 @@
               </select>
               <div class="field-hint">Sets what renders behind the moon disc (plain black, starfield, soft glow, or both).</div>
             </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Disc size (round panels)</label>
+              <div class="slider-group">
+                <input type="range" class="slider" id="moon_round_size_pct" min="50" max="150" step="1" value="100" oninput="updateMoonSizeReadout();applyImagePage('image-moon');checkDirty()">
+                <span class="slider-val" id="moon_round_size_val">100%</span>
+              </div>
+              <div class="field-hint">How much of a round panel the moon fills, as a percent of the design rim (100 = the rim, above 100 runs past it to the glass edge). While the text is shown the disc shrinks just enough to clear it. Square panels ignore this.</div>
+            </div>
             <div class="field-hint" style="margin-top:12px">The moon view uses the device location set on the System tab.</div>
             <div class="field">
               <label class="field-label">Moon drag lighting</label>

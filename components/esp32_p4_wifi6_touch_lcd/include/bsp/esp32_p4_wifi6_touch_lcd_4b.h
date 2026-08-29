@@ -243,7 +243,7 @@ esp_err_t bsp_sdcard_unmount(void);
 
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
 
-#define BSP_LCD_DRAW_BUFF_SIZE     (BSP_LCD_H_RES * 50) // Frame buffer size in pixels
+#define BSP_LCD_DRAW_BUFF_SIZE     (bsp_display_get_h_res() * 50) // Frame buffer size in pixels
 #define BSP_LCD_DRAW_BUFF_DOUBLE   (0)
 
 /**

@@ -38,6 +38,14 @@ uint16_t *moon_sphere_render_ex(int w, int h, const moon_state_t *st,
  * explore_mix (0..1) crossfades the lighting of TRUE_PHASE / SURFACE_LOCKED
  * toward the fully-lit explore look (0 = the mode's own lighting, 1 = explore);
  * ignored for MOON_LIGHT_EXPLORE, which is always mix 1. */
+/* Orthographic half-extent used by every render: the disc diameter is
+ * min(w, h) / ortho, so 1.08 (the default) fills the canvas with an 8 percent
+ * margin and a larger value leaves the starfield around a smaller disc. Set
+ * from the task that renders (the Moon poller) before a render; it is read at
+ * render time only. */
+#define MOON_SPHERE_ORTHO_DEFAULT 1.08f
+void moon_sphere_set_ortho(float ortho_r);
+
 uint16_t *moon_sphere_render_into(int w, int h, const moon_state_t *st,
                                   int nb_sectors, int nb_stacks, uint8_t bg_style,
                                   float yaw_deg, float pitch_deg,

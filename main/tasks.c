@@ -18,6 +18,7 @@
 #include "spotify_auth.h"
 #include "spotify_client.h"
 #include "app_config.h"
+#include "screen_geom.h"
 #include "mqtt_ha.h"
 #include "ui/nina_dashboard.h"
 #include "ui/nina_dashboard_internal.h"
@@ -1000,15 +1001,16 @@ void spotify_poll_task(void *arg)
                         perf_timer_start(&g_perf.spotify_art_decode);
                         bool art_dec = jpeg_decode_rgb565(jpg_buf, jpg_size,
                                                           &art, &art_w, &art_h, &art_size);
-                        if (art_dec && art && (art_w != 720 || art_h != 720)) {
+                        const uint32_t art_target = (uint32_t)screen_size();
+                        if (art_dec && art && (art_w != art_target || art_h != art_target)) {
                             size_t scaled_size = 0;
                             uint8_t *scaled = ppa_scale_rgb565(art, art_w, art_h, 0,
-                                                               720, 720, &scaled_size);
+                                                               art_target, art_target, &scaled_size);
                             if (scaled) {
                                 free(art);
                                 art = scaled;
-                                art_w = 720;
-                                art_h = 720;
+                                art_w = art_target;
+                                art_h = art_target;
                                 art_size = scaled_size;
                             }
                             /* PPA refused: hand over the unscaled frame and let LVGL
@@ -1133,7 +1135,8 @@ void fetch_worker_task(void *arg) {
         case FETCH_THUMBNAIL: {
             size_t jpeg_size = 0;
             perf_timer_start(&g_perf.jpeg_fetch);
-            uint8_t *jpeg_buf = nina_client_fetch_prepared_image(req.url, 720, 720, 70, &jpeg_size);
+            uint8_t *jpeg_buf = nina_client_fetch_prepared_image(req.url, screen_size(),
+                                                                 screen_size(), 70, &jpeg_size);
             perf_timer_stop(&g_perf.jpeg_fetch);
             if (!jpeg_buf || jpeg_size == 0) break;
 
@@ -1627,14 +1630,19 @@ main_loop:
                             free(fres.thumbnail.rgb565_data);
                         }
                     } else {
-                        /* No frame came back. Drop the Image-forward latch so the
-                         * next event gets one more try, and hide the overlay if a
-                         * user-triggered thumbnail was what failed. */
+                        /* No frame came back. The Image-forward latch stays SET:
+                         * clearing it here re-armed needs_capture() on the very
+                         * next loop pass, and the worker's notify runs that pass
+                         * at fetch speed, so a rig with no image yet (NINA answers
+                         * "No image") was fetched about ten times a second. The
+                         * next new-image event fetches through auto_refresh anyway
+                         * and a success clears the latch; a page leave clears it
+                         * too. Hide the overlay if a user-triggered thumbnail was
+                         * what failed. */
                         bool hide_overlay = nina_dashboard_thumbnail_requested();
                         if (hide_overlay) nina_dashboard_clear_thumbnail_request();
-                        if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            nina_layout_image_note_capture_request(fres.instance_idx, false);
-                            if (hide_overlay) nina_dashboard_hide_thumbnail();
+                        if (hide_overlay && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                            nina_dashboard_hide_thumbnail();
                             bsp_display_unlock();
                         }
                     }
@@ -2666,7 +2674,7 @@ main_loop:
                         lv_obj_t *overlay = lv_obj_create(scr);
                         sleep_overlay = overlay;
                         lv_obj_remove_style_all(overlay);
-                        lv_obj_set_size(overlay, 720, 720);
+                        lv_obj_set_size(overlay, screen_size(), screen_size());
                         lv_obj_set_style_bg_color(overlay, lv_color_black(), 0);
                         lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
                         lv_obj_center(overlay);

@@ -6,7 +6,28 @@ include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 file(STRINGS "version.txt" PROJECT_VER)
 
-project(lvgl_demo_v9)
+# Shape family drives the CMake project name, which becomes
+# esp_app_desc_t.project_name in the image header and the basename of the
+# .bin/.elf/.map. The OTA family check (main/ota_github.c) reads that field to
+# refuse the other family's image. project() runs before sdkconfig is parsed,
+# so the family is taken from the SDKCONFIG_DEFAULTS argument the caller
+# passed, not from CONFIG_NINA_FAMILY_ROUND. A plain `idf.py build` with no
+# argument is the square family, which is what every existing invocation means.
+set(NINA_FAMILY "square")
+# The environment form is honoured too: `SDKCONFIG_DEFAULTS=... idf.py build`
+# never reaches the cache variable. main/CMakeLists.txt asserts afterwards that
+# this name and the parsed CONFIG_NINA_FAMILY_* agree.
+if(("${SDKCONFIG_DEFAULTS}" MATCHES "sdkconfig\\.defaults\\.round") OR
+   ("$ENV{SDKCONFIG_DEFAULTS}" MATCHES "sdkconfig\\.defaults\\.round"))
+    set(NINA_FAMILY "round")
+endif()
+message(STATUS "NINA shape family: ${NINA_FAMILY}")
+
+if(NINA_FAMILY STREQUAL "round")
+    project(nina-display-round)
+else()
+    project(nina-display)
+endif()
 
 # Build-time version header generation — runs git describe on every build.
 # configure_file() inside the script only writes if content changed,

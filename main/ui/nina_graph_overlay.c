@@ -301,7 +301,7 @@ void show_loading_state(void) {
 void nina_graph_overlay_create(lv_obj_t *parent) {
     overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(overlay);
-    lv_obj_set_size(overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(overlay, screen_size(), screen_size());
     lv_obj_set_style_bg_color(overlay, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(overlay, LV_OPA_COVER, 0);
     lv_obj_set_flex_flow(overlay, LV_FLEX_FLOW_COLUMN);
@@ -472,6 +472,13 @@ void nina_graph_overlay_create(lv_obj_t *parent) {
     lv_obj_center(btn_back_lbl);
 
     lv_obj_add_event_cb(btn_back, back_btn_cb, LV_EVENT_CLICKED, NULL);
+
+    /* Round composition: re-place what was just built. The chart, its four
+     * series, the pre-created threshold lines and every callback above are the
+     * shipped ones on both families. */
+#if CONFIG_NINA_FAMILY_ROUND
+    graph_round_fit();
+#endif
 }
 
 /* -- Public API ---------------------------------------------------------- */

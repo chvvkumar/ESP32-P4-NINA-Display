@@ -3,6 +3,7 @@
 #include "esp_system.h"
 #include "esp_ota_ops.h"
 #include "esp_partition.h"
+#include "board_profile.h"
 #include "esp_app_format.h"
 #include "perf_monitor.h"
 #include "freertos/FreeRTOS.h"
@@ -35,6 +36,7 @@
 #include "weather_client.h"
 #include "ui/nina_event_log.h"
 #include "voice_store.h"
+#include "ui/lv_font_warning_128.h"   /* WARNING_GLYPH for the wrong-firmware screen */
 
 // Handler for reboot
 esp_err_t reboot_post_handler(httpd_req_t *req)
@@ -93,13 +95,45 @@ esp_err_t factory_reset_post_handler(httpd_req_t *req)
 
 static lv_obj_t *ota_overlay = NULL;
 static lv_obj_t *ota_progress_label = NULL;
-static lv_obj_t *ota_bar = NULL;
-static lv_obj_t *ota_bar_glow = NULL;
+static lv_obj_t *ota_bar = NULL;        /* square only */
+static lv_obj_t *ota_bar_glow = NULL;   /* square only */
+static lv_obj_t *ota_ring = NULL;       /* round only: the perimeter arc */
+static lv_timer_t *ota_refusal_timer = NULL;   /* wrong-firmware screen auto-dismiss */
 
 /* Accent color for the progress bar */
 #define OTA_ACCENT       0x00D4FF   /* Cyan */
 #define OTA_ACCENT_DIM   0x005566   /* Dimmed cyan for track */
 #define OTA_GLOW_OPA     LV_OPA_40
+
+/* Round runs the pushed-OTA progress on the panel PERIMETER, the same way
+ * nina_ota_prompt.c runs the GitHub download: a 560 px horizontal bar has no
+ * chord to sit on near the bottom of a circle, so it was being clipped at both
+ * ends. One arc flush with the glass, and no glow twin (an arc has no second
+ * layer to offset against, so a 40% copy of it just fringes the edge).
+ * ponytail: third hand-rolled progress track in this tree (here,
+ * nina_ota_prompt.c, nina_wait_overlay.c). One ui_progress helper owning the
+ * round/square split would retire all three; worth doing when the wait overlay
+ * gets its own round pass. */
+#define OTA_RING_W       16
+
+/* Every handle the progress screen owns, dropped in one place: the overlay is
+ * torn down or wiped from three call sites and each must forget all of them. */
+static void ota_progress_forget(void) {
+    ota_progress_label = NULL;
+    ota_bar = NULL;
+    ota_bar_glow = NULL;
+    ota_ring = NULL;
+}
+
+/* Paint on whichever widget this family built. Safe before the overlay exists:
+ * every handle is NULL then. */
+static void ota_progress_paint(int percent) {
+    if (ota_ring) {
+        lv_arc_set_value(ota_ring, percent);   /* lv_arc has no anim flag */
+    }
+    if (ota_bar)      lv_bar_set_value(ota_bar, percent, LV_ANIM_ON);
+    if (ota_bar_glow) lv_bar_set_value(ota_bar_glow, percent, LV_ANIM_ON);
+}
 
 /* Active theme accessor (defined in nina_dashboard.c by the dashboard module) */
 const theme_t *nina_dashboard_get_theme(void);
@@ -117,10 +151,21 @@ static void ota_show_overlay(const char *message) {
         uint32_t track_color   = red_night ? t->bento_border   : OTA_ACCENT_DIM;
         uint32_t grad_color    = red_night ? t->bento_border   : 0x0088FF;
 
+        /* A refusal screen still up from a previous attempt (and its 30 s
+         * timer) would otherwise delete THIS overlay mid-update. */
+        if (ota_refusal_timer) {
+            lv_timer_delete(ota_refusal_timer);
+            ota_refusal_timer = NULL;
+        }
+        if (ota_overlay) {
+            lv_obj_delete(ota_overlay);
+            ota_overlay = NULL;
+        }
+
         /* ── Fullscreen black overlay ── */
         ota_overlay = lv_obj_create(lv_scr_act());
         lv_obj_remove_style_all(ota_overlay);
-        lv_obj_set_size(ota_overlay, SCREEN_SIZE, SCREEN_SIZE);
+        lv_obj_set_size(ota_overlay, screen_size(), screen_size());
         lv_obj_set_style_bg_color(ota_overlay, lv_color_hex(0x000000), 0);
         lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
         lv_obj_center(ota_overlay);
@@ -131,7 +176,9 @@ static void ota_show_overlay(const char *message) {
         lv_obj_set_style_text_color(title, lv_color_hex(title_color), 0);
         lv_obj_set_style_text_font(title, &lv_font_montserrat_36, 0);
         lv_obj_set_style_text_align(title, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_width(title, LV_PCT(90));
+        /* The title's top edge sits 160 px above centre, where the rim gives
+         * about 630 px of chord at 720: 90% (648) would clip its corners. */
+        lv_obj_set_width(title, SCREEN_ROUND ? LV_PCT(80) : LV_PCT(90));
         lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 200);
 
         /* ── Large percentage — center ── */
@@ -150,6 +197,32 @@ static void ota_show_overlay(const char *message) {
         lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_CENTER, 0);
         lv_obj_align(hint, LV_ALIGN_CENTER, 0, 70);
 
+#if SCREEN_ROUND
+        /* ── Perimeter arc, outer edge flush with the glass ── */
+        const int ring_r = screen_center() - OTA_RING_W / 2;
+        ota_ring = lv_arc_create(ota_overlay);
+        lv_obj_remove_style_all(ota_ring);
+        lv_obj_remove_flag(ota_ring, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_remove_flag(ota_ring, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_style(ota_ring, NULL, LV_PART_KNOB);
+        lv_obj_set_size(ota_ring, 2 * ring_r + OTA_RING_W, 2 * ring_r + OTA_RING_W);
+        lv_obj_center(ota_ring);
+        lv_arc_set_rotation(ota_ring, 270);
+        lv_arc_set_bg_angles(ota_ring, 0, 360);
+        lv_arc_set_range(ota_ring, 0, 100);
+        lv_arc_set_value(ota_ring, 0);
+        lv_obj_set_style_bg_opa(ota_ring, LV_OPA_TRANSP, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(ota_ring, OTA_RING_W, LV_PART_MAIN);
+        lv_obj_set_style_arc_color(ota_ring, lv_color_hex(track_color), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(ota_ring, LV_OPA_30, LV_PART_MAIN);
+        lv_obj_set_style_arc_rounded(ota_ring, false, LV_PART_MAIN);
+        lv_obj_set_style_arc_width(ota_ring, OTA_RING_W, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(ota_ring, lv_color_hex(accent_color), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_opa(ota_ring, LV_OPA_COVER, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_rounded(ota_ring, false, LV_PART_INDICATOR);
+        LV_UNUSED(glow_color);
+        LV_UNUSED(grad_color);
+#else
         /* ── Glow layer behind progress bar (wider/taller, blurred look) ── */
         ota_bar_glow = lv_bar_create(ota_overlay);
         lv_obj_remove_style_all(ota_bar_glow);
@@ -182,6 +255,7 @@ static void ota_show_overlay(const char *message) {
         lv_obj_set_style_bg_grad_color(ota_bar, lv_color_hex(grad_color), LV_PART_INDICATOR);
         lv_obj_set_style_bg_grad_dir(ota_bar, LV_GRAD_DIR_HOR, LV_PART_INDICATOR);
         lv_obj_set_style_radius(ota_bar, 6, LV_PART_INDICATOR);
+#endif
 
         bsp_display_unlock();
     }
@@ -194,12 +268,7 @@ static void ota_update_progress(int percent) {
             snprintf(buf, sizeof(buf), "%d%%", percent);
             lv_label_set_text(ota_progress_label, buf);
         }
-        if (ota_bar) {
-            lv_bar_set_value(ota_bar, percent, LV_ANIM_ON);
-        }
-        if (ota_bar_glow) {
-            lv_bar_set_value(ota_bar_glow, percent, LV_ANIM_ON);
-        }
+        ota_progress_paint(percent);
         bsp_display_unlock();
     }
 }
@@ -209,12 +278,180 @@ static void ota_remove_overlay(void) {
         if (ota_overlay) {
             lv_obj_delete(ota_overlay);
             ota_overlay = NULL;
-            ota_progress_label = NULL;
-            ota_bar = NULL;
-            ota_bar_glow = NULL;
+            ota_progress_forget();
         }
         bsp_display_unlock();
     }
+}
+
+/* Wrong-firmware screen: replaces the progress widgets on the same overlay with
+ * the triangle the manual-flash prompt uses, the reason, and a dismiss hint.
+ * Shown BEFORE the request body is drained so the panel never sits at 0% while
+ * the browser finishes sending; stays up until a tap or 30 s. Both callbacks
+ * run inside the LVGL tick, so no display lock there. */
+
+static void ota_refusal_dismiss(void) {
+    if (ota_refusal_timer) {
+        lv_timer_delete(ota_refusal_timer);
+        ota_refusal_timer = NULL;
+    }
+    if (ota_overlay) {
+        lv_obj_delete_async(ota_overlay);
+        ota_overlay = NULL;
+        ota_progress_forget();
+    }
+}
+
+static void ota_refusal_timer_cb(lv_timer_t *timer) {
+    LV_UNUSED(timer);
+    ota_refusal_dismiss();
+}
+
+static void ota_refusal_tap_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    ota_refusal_dismiss();
+}
+
+/* The two refusal texts, shared by /api/ota and /api/ota-check: the short one
+ * goes on the panel, the JSON one to the client. */
+static void ota_family_reject_texts(ota_family_verdict_t verdict,
+                                    const char **screen_msg, const char **json)
+{
+    if (verdict == OTA_FAMILY_NO_DESC) {
+        *screen_msg = "The uploaded file is not an ESP32-P4 application image. "
+                      "Flash the binary that matches this device.";
+        *json = "{\"error\":\"wrong firmware family: this file carries no firmware app "
+                "descriptor, so it is not an ESP32-P4 application image. Download the "
+                "binary that matches this device.\"}";
+    } else {
+        *screen_msg = "The uploaded file is built for the other panel shape and would "
+                      "leave this screen dark. Flash the binary that matches this device.";
+        *json = "{\"error\":\"wrong firmware family: this image is built for the other "
+                "panel shape and would leave the screen dark. Download the binary that "
+                "matches this device.\"}";
+    }
+}
+
+static void ota_show_refusal(const char *message) {
+    if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return;
+    if (ota_overlay) {
+        lv_obj_clean(ota_overlay);
+    } else {
+        /* Pre-check refusal: no progress overlay exists yet, so build the
+         * same black base the progress screen uses. */
+        ota_overlay = lv_obj_create(lv_scr_act());
+        lv_obj_remove_style_all(ota_overlay);
+        lv_obj_set_size(ota_overlay, screen_size(), screen_size());
+        lv_obj_set_style_bg_color(ota_overlay, lv_color_hex(0x000000), 0);
+        lv_obj_set_style_bg_opa(ota_overlay, LV_OPA_COVER, 0);
+        lv_obj_center(ota_overlay);
+    }
+    ota_progress_forget();
+
+    const theme_t *t = nina_dashboard_get_theme();
+    bool red_night = (t && theme_is_red_night(t));
+    uint32_t icon_color  = red_night ? t->text_color  : 0xFFB300;
+    uint32_t title_color = red_night ? t->text_color  : 0xFF4444;
+    uint32_t body_color  = red_night ? t->label_color : 0xCCCCCC;
+    uint32_t hint_color  = red_night ? t->label_color : 0x555555;
+
+    lv_obj_t *icon = lv_label_create(ota_overlay);
+    lv_label_set_text(icon, WARNING_GLYPH);
+    lv_obj_set_style_text_font(icon, &lv_font_warning_128, 0);
+    lv_obj_set_style_text_color(icon, lv_color_hex(icon_color), 0);
+    lv_obj_align(icon, LV_ALIGN_CENTER, 0, -180);
+
+    lv_obj_t *title = lv_label_create(ota_overlay);
+    lv_label_set_text(title, "Wrong Firmware");
+    lv_obj_set_style_text_color(title, lv_color_hex(title_color), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_36, 0);
+    lv_obj_align(title, LV_ALIGN_CENTER, 0, -70);
+
+    lv_obj_t *body = lv_label_create(ota_overlay);
+    lv_label_set_text(body, message);
+    lv_obj_set_width(body, LV_PCT(70));
+    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(body, lv_color_hex(body_color), 0);
+    lv_obj_set_style_text_font(body, &lv_font_montserrat_20, 0);
+    lv_obj_set_style_text_align(body, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(body, LV_ALIGN_CENTER, 0, 40);
+
+    lv_obj_t *hint = lv_label_create(ota_overlay);
+    lv_label_set_text(hint, "Nothing was changed. Tap to dismiss.");
+    lv_obj_set_style_text_color(hint, lv_color_hex(hint_color), 0);
+    lv_obj_set_style_text_font(hint, &lv_font_montserrat_20, 0);
+    lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -100);
+
+    lv_obj_add_flag(ota_overlay, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(ota_overlay, ota_refusal_tap_cb, LV_EVENT_CLICKED, NULL);
+    if (ota_refusal_timer) lv_timer_delete(ota_refusal_timer);
+    ota_refusal_timer = lv_timer_create(ota_refusal_timer_cb, 30000, NULL);
+    lv_timer_set_repeat_count(ota_refusal_timer, 1);
+    bsp_display_unlock();
+}
+
+/* POST /api/ota-check: the first bytes of a firmware file (the page sends 4 KB).
+ * Runs the same family gate as /api/ota so a wrong-shape file is refused in one
+ * round trip instead of after a 7 MB upload, and raises the panel's
+ * wrong-firmware screen. Never touches flash or the network. /api/ota keeps
+ * its own check and drain for clients that skip this call. */
+esp_err_t ota_check_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    if (req->content_len <= 0) {
+        return send_400(req, "No firmware data received");
+    }
+    if (req->content_len > 65536) {
+        return send_400(req, "Send only the first bytes of the file");
+    }
+    if (atomic_load(&ota_in_progress)) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"Update already in progress\"}");
+        return ESP_OK;
+    }
+
+    uint8_t hdr[OTA_FAMILY_HDR_BYTES];
+    char sink[512];
+    size_t have = 0;
+    int remaining = req->content_len;
+    int timeouts = 0;
+    while (remaining > 0) {
+        bool to_hdr = have < sizeof(hdr);
+        /* cppcheck-suppress legacyUninitvar
+         * hdr and sink are OUTPUT buffers: this forms the address that
+         * httpd_req_recv() writes into, it never reads them. cppcheck has no
+         * IDF headers on the CI runner, so it cannot see that and reports the
+         * write target as an uninitialized read. Only the `have` bytes that
+         * were actually received are ever read back (ota_family_check below,
+         * guarded by have < OTA_FAMILY_HDR_BYTES). */
+        char *dst = to_hdr ? (char *)hdr + have : sink;
+        int want = to_hdr ? (int)(sizeof(hdr) - have) : (int)sizeof(sink);
+        if (want > remaining) want = remaining;
+        int n = httpd_req_recv(req, dst, want);
+        if (n <= 0) {
+            if (n == HTTPD_SOCK_ERR_TIMEOUT && ++timeouts < 5) continue;
+            return send_400(req, "Upload interrupted");
+        }
+        timeouts = 0;
+        if (to_hdr) have += (size_t)n;
+        remaining -= n;
+    }
+
+    ota_family_verdict_t verdict = (have < OTA_FAMILY_HDR_BYTES)
+        ? OTA_FAMILY_NO_DESC : ota_family_check(hdr, have);
+    httpd_resp_set_type(req, "application/json");
+    if (verdict == OTA_FAMILY_ACCEPT) {
+        httpd_resp_sendstr(req, "{\"ok\":true}");
+        return ESP_OK;
+    }
+    const char *screen_msg, *json;
+    ota_family_reject_texts(verdict, &screen_msg, &json);
+    ota_show_refusal(screen_msg);
+    httpd_resp_set_status(req, "409 Conflict");
+    httpd_resp_sendstr(req, json);
+    return ESP_OK;
 }
 
 /**
@@ -329,6 +566,9 @@ esp_err_t ota_post_handler(httpd_req_t *req)
     bool failed = false;
     bool timed_out = false;
     int timeout_count = 0;
+    uint8_t fam_hdr[OTA_FAMILY_HDR_BYTES];
+    int  fam_have = 0;
+    bool fam_checked = false;
 
     while (remaining > 0) {
         int to_read = remaining < OTA_BUF_SIZE ? remaining : OTA_BUF_SIZE;
@@ -351,11 +591,69 @@ esp_err_t ota_post_handler(httpd_req_t *req)
         }
         timeout_count = 0;
 
-        err = esp_ota_write(ota_handle, buf, received);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
-            failed = true;
-            break;
+        const uint8_t *wp = (const uint8_t *)buf;
+        int wl = received;
+
+        if (!fam_checked) {
+            int take = OTA_FAMILY_HDR_BYTES - fam_have;
+            if (take > wl) take = wl;
+            memcpy(fam_hdr + fam_have, wp, (size_t)take);
+            fam_have += take;
+            if (fam_have < OTA_FAMILY_HDR_BYTES) {
+                /* httpd_req_recv returns whatever the socket has; a first chunk
+                 * shorter than 112 bytes is legal, so hold the write. */
+                remaining -= received;
+                received_total += received;
+                continue;
+            }
+            fam_checked = true;
+            ota_family_verdict_t verdict = ota_family_check(fam_hdr, OTA_FAMILY_HDR_BYTES);
+            if (verdict != OTA_FAMILY_ACCEPT) {
+                /* Nothing has been written yet (OTA_WITH_SEQUENTIAL_WRITES
+                 * erases nothing up front), so aborting here leaves the target
+                 * slot exactly as it was. */
+                const char *screen_msg, *json;
+                ota_family_reject_texts(verdict, &screen_msg, &json);
+                ota_show_refusal(screen_msg);
+                /* Drain the rest of the upload before answering: closing the
+                 * socket while the browser is still sending makes XHR report a
+                 * bare network error and the 409 body below is never read. */
+                int drain = remaining - received;
+                while (drain > 0) {
+                    int n = httpd_req_recv(req, buf, drain < OTA_BUF_SIZE ? drain : OTA_BUF_SIZE);
+                    if (n <= 0) {
+                        if (n == HTTPD_SOCK_ERR_TIMEOUT && ++timeout_count < 5) continue;
+                        break;
+                    }
+                    timeout_count = 0;
+                    drain -= n;
+                }
+                free(buf);
+                esp_ota_abort(ota_handle);
+                /* The refusal screen stays up (tap or 30 s); no ota_remove_overlay(). */
+                ota_restore_network();
+                httpd_resp_set_status(req, "409 Conflict");
+                httpd_resp_set_type(req, "application/json");
+                httpd_resp_sendstr(req, json);
+                return ESP_FAIL;
+            }
+            err = esp_ota_write(ota_handle, fam_hdr, OTA_FAMILY_HDR_BYTES);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+                failed = true;
+                break;
+            }
+            wp += take;
+            wl -= take;
+        }
+
+        if (wl > 0) {
+            err = esp_ota_write(ota_handle, wp, (size_t)wl);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
+                failed = true;
+                break;
+            }
         }
 
         remaining -= received;
@@ -442,6 +740,82 @@ esp_err_t version_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "git_sha", BUILD_GIT_SHA);
     cJSON_AddStringToObject(root, "git_branch", BUILD_GIT_BRANCH);
 
+    /* Board identity. The bench needs to tell a square build from a round one
+     * without reading the console, and the web UI's circular preview masks
+     * (phase 3) key on "shape". */
+    cJSON_AddStringToObject(root, "board", board_profile_id());
+    cJSON_AddStringToObject(root, "shape", board_profile_shape());
+
+    return send_json_response(req, root);
+}
+
+/* Panel variant select. The value lives in NVS namespace "board", key "panel",
+ * OUTSIDE app_config_t, because it describes the hardware rather than the
+ * user's configuration and has to survive a factory reset. board_profile_init()
+ * reads it once at boot, so a change needs a restart to take effect and the
+ * response says so rather than pretending it applied live. */
+esp_err_t panel_get_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    cJSON_AddNumberToObject(root, "panel", board_panel_nvs_get());
+    cJSON_AddStringToObject(root, "board", board_profile_id());
+    cJSON_AddStringToObject(root, "shape", board_profile_shape());
+    return send_json_response(req, root);
+}
+
+esp_err_t panel_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+
+    /* The square family has exactly one panel, so there is nothing to select
+     * and writing the key would only leave misleading NVS content behind. */
+    if (strcmp(board_profile_shape(), "round") != 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_sendstr(req, "{\"error\":\"panel select is round family only\"}");
+        return ESP_FAIL;
+    }
+
+    char body[64];
+    int received = httpd_req_recv(req, body, sizeof(body) - 1);
+    if (received <= 0) {
+        return send_400(req, "No body");
+    }
+    body[received] = '\0';
+
+    cJSON *json = cJSON_Parse(body);
+    if (!json) {
+        return send_400(req, "Invalid JSON");
+    }
+    const cJSON *item = cJSON_GetObjectItem(json, "panel");
+    const int panel = cJSON_IsNumber(item) ? item->valueint : 0;
+    cJSON_Delete(json);
+
+    if (panel != 1 && panel != 2) {
+        return send_400(req, "panel must be 1 (3.4in 800x800) or 2 (4.0in 720x720)");
+    }
+
+    const esp_err_t err = board_panel_nvs_set(panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "board/panel write failed: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "board/panel set to %d, restart required", panel);
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    cJSON_AddNumberToObject(root, "panel", panel);
+    cJSON_AddBoolToObject(root, "restart_required", true);
     return send_json_response(req, root);
 }
 

@@ -6,6 +6,7 @@
 #include "nina_idle_indicator.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "bsp/esp-bsp.h"
 #include "esp_lvgl_port.h"
 
 #include <string.h>
@@ -127,7 +128,7 @@ static inline lv_obj_t *root_obj(indicator_entry_t *ind)
 
 void nina_idle_indicator_set_active(bool idle_active)
 {
-    if (lvgl_port_lock(LVGL_LOCK_TIMEOUT_MS)) {
+    if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
         for (int i = 0; i < s_count; i++) {
             indicator_entry_t *ind = &s_indicators[i];
             lv_obj_t *root = root_obj(ind);
@@ -140,6 +141,6 @@ void nina_idle_indicator_set_active(bool idle_active)
                 lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
             }
         }
-        lvgl_port_unlock();
+        bsp_display_unlock();
     }
 }

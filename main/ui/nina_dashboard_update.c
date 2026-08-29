@@ -8,6 +8,7 @@
 #include "nina_layout_alt.h"
 #include "nina_empty_state.h"
 #include "nina_connection.h"
+#include "ui_dial.h"
 #include "app_config.h"
 #include "themes.h"
 #include "time_parse.h"
@@ -44,6 +45,14 @@ static inline void set_text_color_if_changed(lv_obj_t *obj, lv_color_t color, lv
 static inline void set_arc_color_if_changed(lv_obj_t *obj, lv_color_t color, lv_style_selector_t sel) {
     if (!lv_color_eq(lv_obj_get_style_arc_color(obj, sel), color))
         lv_obj_set_style_arc_color(obj, color, sel);
+}
+
+/* Set arc opacity only if it actually changed (review C minor M-4: a local
+ * style write always refreshes the object, and every invalidation on this
+ * display is a full-frame redraw). */
+static inline void set_arc_opa_if_changed(lv_obj_t *obj, lv_opa_t opa, lv_style_selector_t sel) {
+    if (lv_obj_get_style_arc_opa(obj, sel) != opa)
+        lv_obj_set_style_arc_opa(obj, opa, sel);
 }
 
 /* Set shadow color only if it actually changed */
@@ -139,6 +148,7 @@ static void auto_fit_target_name_font(lv_obj_t *label) {
 
 static void arc_start_exposure_anim(dashboard_page_t *p);
 static void subbar_interp_tick(dashboard_page_t *p);
+static void arc_interp_tick(dashboard_page_t *p);
 
 /* NINA-domain "now", derived from the page's cached Date-header epoch advanced
  * by monotonic time. Falls back to the device wall clock when the pair is
@@ -181,7 +191,27 @@ static void subbar_interp_tick(dashboard_page_t *p) {
 void arc_interp_timer_cb(lv_timer_t *timer) {
     dashboard_page_t *p = (dashboard_page_t *)lv_timer_get_user_data(timer);
     if (!p) return;
-    if (p->layout != 0) { subbar_interp_tick(p); return; }
+    /* Arc body FIRST, then the sub-bar tick (review C12 I-1). On round layout
+     * 0 both bodies carry the same backward-only wall-clock correction and
+     * both can re-anchor exp_anchor_us / exp_anchor_elapsed; running the arc
+     * first means the sub ring below always reads the anchor the arc just
+     * corrected, instead of re-anchoring itself and leaving the arc's long
+     * linear fill animation pointed at a now-stale end time. On the square
+     * bento layout p->layout is always 0 (arc dashboard, the only square
+     * layout), so this is the same arc_interp_tick() body running in the same
+     * place it always has: the reordering changes nothing there. */
+    arc_interp_tick(p);
+    /* subbar_interp_tick() returns immediately when there is no block row, so
+     * this is a no-op on the square bento layout and drives the round board's
+     * sub ring on layout 0. */
+    subbar_interp_tick(p);
+}
+
+/* Layout 0 only: the exposure arc's monotonic-anchor correction and long
+ * linear fill animation. Split out of arc_interp_timer_cb so the timer can
+ * run this before subbar_interp_tick(): see the call site. */
+static void arc_interp_tick(dashboard_page_t *p) {
+    if (p->layout != 0) return;
     if (!p->arc_exposure || p->arc_completing) return;
     if (p->exp_anchor_us == 0 || p->cached_total <= 0) return;
 
@@ -341,13 +371,17 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     } else {
         set_label_if_changed(p->lbl_instance_name, state_text);
     }
-    set_label_if_changed(p->lbl_target_name, "----");
-    auto_fit_target_name_font(p->lbl_target_name);
-    set_label_if_changed(p->lbl_seq_container, "----");
-    set_label_if_changed(p->lbl_seq_step, "----");
-    set_label_if_changed(p->lbl_exposure_total, "");
-    set_label_if_changed(p->lbl_loop_count, "");
-    set_label_if_changed(p->lbl_exposure_current, "--");
+    if (p->lbl_target_name) {
+        set_label_if_changed(p->lbl_target_name, "----");
+        auto_fit_target_name_font(p->lbl_target_name);
+    }
+    if (p->alt.lbl_target)      set_label_if_changed(p->alt.lbl_target, "----");
+    if (p->lbl_seq_container)   set_label_if_changed(p->lbl_seq_container, "----");
+    if (p->lbl_seq_step)        set_label_if_changed(p->lbl_seq_step, "----");
+    if (p->lbl_exposure_total)  set_label_if_changed(p->lbl_exposure_total, "");
+    if (p->lbl_loop_count)      set_label_if_changed(p->lbl_loop_count, "");
+    if (p->lbl_exposure_current) set_label_if_changed(p->lbl_exposure_current, "--");
+    if (p->subbar.cont)         nina_subbar_reset_elapsed(&p->subbar);
     /* Drop any active exposure anchor so a stale anchor can't keep the 200ms
      * timer driving the arc while this instance is disconnected. */
     lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
@@ -360,8 +394,8 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     p->gap_start_epoch = 0;
     p->cached_nina_epoch = 0;
     p->cached_nina_mono_us = 0;
-    lv_arc_set_value(p->arc_exposure, 0);
-    lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+    if (p->arc_exposure)     lv_arc_set_value(p->arc_exposure, 0);
+    if (p->row_filter_total) lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
     set_label_if_changed(p->lbl_rms_value, "--");
     set_text_color_if_changed(p->lbl_rms_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
@@ -372,13 +406,23 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     set_label_if_changed(p->lbl_hfr_value, "--");
     set_text_color_if_changed(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
     p->anim_hfr_x100 = 0;
-    set_label_if_changed(p->lbl_flip_value, "--");
-    set_label_if_changed(p->lbl_stars_value, "--");
-    set_label_if_changed(p->lbl_target_time_value, "--");
-    auto_fit_value_font(p->lbl_target_time_value);
-    set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
-    for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
-        lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
+    if (p->lbl_flip_value)  set_label_if_changed(p->lbl_flip_value, "--");
+    if (p->lbl_stars_value) set_label_if_changed(p->lbl_stars_value, "--");
+    if (p->lbl_target_time_value) {
+        set_label_if_changed(p->lbl_target_time_value, "--");
+        auto_fit_value_font(p->lbl_target_time_value);
+    }
+    if (p->lbl_target_time_header) {
+        set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
+    }
+    /* Shapes go home: both dots to the centre, the flip tick away. */
+    if (p->rms_dot) ui_dial_place_dot(p->rms_dot, p->rms_bull, 0.0f, DR_BEARING_RMS);
+    if (p->hfr_dot) ui_dial_place_dot(p->hfr_dot, p->hfr_bull, 0.0f, DR_BEARING_HFR);
+    if (p->ring_flip_tick) ui_dial_set_tick(p->ring_flip_tick, -1, UI_DIAL_FLIP_SPAN_MIN);
+    if (p->box_pwr[0]) {
+        for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
+            lv_obj_add_flag(p->box_pwr[i], LV_OBJ_FLAG_HIDDEN);
+        }
     }
 
     /* IDLE-04: hide the header and arc so only the branded overlay is visible.
@@ -407,10 +451,18 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
 }
 
 static void update_header(dashboard_page_t *p, const nina_client_t *d) {
-    // Telescope + camera on one line
+    /* Telescope + camera. Square puts them on one line in the header row; the
+     * round dashboard spine is a centred column with room for two, and the
+     * joined string wrapped mid-name there, so the break is explicit. */
     if (d->telescope_name[0] && d->camera_name[0]) {
         char buf[132];
-        snprintf(buf, sizeof(buf), "%s | %s", d->telescope_name, d->camera_name);
+        /* Two literal formats, not a ternary one: -Wformat-truncation can
+           only bound the result when it can see the separator. */
+        if (SCREEN_ROUND) {
+            snprintf(buf, sizeof(buf), "%s\n%s", d->telescope_name, d->camera_name);
+        } else {
+            snprintf(buf, sizeof(buf), "%s | %s", d->telescope_name, d->camera_name);
+        }
         set_label_if_changed(p->lbl_instance_name, buf);
     } else if (d->telescope_name[0]) {
         set_label_if_changed(p->lbl_instance_name, d->telescope_name);
@@ -420,15 +472,25 @@ static void update_header(dashboard_page_t *p, const nina_client_t *d) {
         set_label_if_changed(p->lbl_instance_name, "N.I.N.A.");
     }
 
-    set_label_if_changed(p->lbl_target_name, d->target_name[0] != '\0' ? d->target_name : "----");
-    auto_fit_target_name_font(p->lbl_target_name);
+    const char *tgt = (d->target_name[0] != '\0') ? d->target_name : "----";
+    if (p->lbl_target_name) {
+        set_label_if_changed(p->lbl_target_name, tgt);
+        auto_fit_target_name_font(p->lbl_target_name);
+    }
+    /* The round spine's target label has a fixed 40 px face: the auto-fit
+     * ladder would drop a long name below the round text floor. */
+    if (p->alt.lbl_target) set_label_if_changed(p->alt.lbl_target, tgt);
 }
 
 static void update_sequence_info(dashboard_page_t *p, const nina_client_t *d) {
-    set_label_if_changed(p->lbl_seq_container,
-        d->container_name[0] != '\0' ? d->container_name : "----");
-    set_label_if_changed(p->lbl_seq_step,
-        d->container_step[0] != '\0' ? d->container_step : "----");
+    if (p->lbl_seq_container) {
+        set_label_if_changed(p->lbl_seq_container,
+            d->container_name[0] != '\0' ? d->container_name : "----");
+    }
+    if (p->lbl_seq_step) {
+        set_label_if_changed(p->lbl_seq_step,
+            d->container_step[0] != '\0' ? d->container_step : "----");
+    }
 }
 
 static void arc_start_exposure_anim(dashboard_page_t *p) {
@@ -521,8 +583,10 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         p->gap_start_epoch = 0;  // Clear any gap timer
 
         // Show total exposure duration inside the arc
-        int total_sec = (int)d->exposure_total;
-        SET_LABEL_FMT_IF_CHANGED(p->lbl_exposure_current, 16, "%ds", total_sec);
+        if (p->lbl_exposure_current) {
+            int total_sec = (int)d->exposure_total;
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_exposure_current, 16, "%ds", total_sec);
+        }
 
         // Update filter label
         if (d->current_filter[0] != '\0' && strcmp(d->current_filter, "--") != 0) {
@@ -615,22 +679,31 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
 
         // Update exposure count labels
         if (d->exposure_iterations > 0) {
-            SET_LABEL_FMT_IF_CHANGED(p->lbl_loop_count, 32, "x %d/%d",
-                d->exposure_count, d->exposure_iterations);
+            /* Round mockup reads "5 / 10"; the square bento box keeps its
+             * shipped "x 5/10" (review C12 M-4, ruling: round only). */
+            if (p->ring_exposure) {
+                SET_LABEL_FMT_IF_CHANGED(p->lbl_loop_count, 32, "%d / %d",
+                    d->exposure_count, d->exposure_iterations);
+            } else {
+                SET_LABEL_FMT_IF_CHANGED(p->lbl_loop_count, 32, "x %d/%d",
+                    d->exposure_count, d->exposure_iterations);
+            }
         } else {
             set_label_if_changed(p->lbl_loop_count, "");
         }
 
-        if (d->exposure_total_count > 0) {
-            int total_secs = (int)(d->exposure_total_count * d->exposure_total);
-            char dur[16];
-            fmt_duration(dur, sizeof(dur), total_secs, FMT_DUR_HM_COMPACT);
-            SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_done_value, 32, "%d / %s",
-                d->exposure_total_count, dur);
-            set_text_color_if_changed(p->lbl_filter_done_value, lv_color_hex(filter_color), 0);
-            lv_obj_clear_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
-        } else {
-            lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+        if (p->row_filter_total && p->lbl_filter_done_value) {
+            if (d->exposure_total_count > 0) {
+                int total_secs = (int)(d->exposure_total_count * d->exposure_total);
+                char dur[16];
+                fmt_duration(dur, sizeof(dur), total_secs, FMT_DUR_HM_COMPACT);
+                SET_LABEL_FMT_IF_CHANGED(p->lbl_filter_done_value, 32, "%d / %s",
+                    d->exposure_total_count, dur);
+                set_text_color_if_changed(p->lbl_filter_done_value, lv_color_hex(filter_color), 0);
+                lv_obj_clear_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     } else {
         // No active exposure data — handle inter-exposure gap or idle state
@@ -661,7 +734,10 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                 p->cached_nina_mono_us = 0;
                 set_label_if_changed(p->lbl_exposure_total, "");
                 set_label_if_changed(p->lbl_loop_count, "");
-                set_label_if_changed(p->lbl_exposure_current, "--");
+                if (p->lbl_exposure_current) {
+                    set_label_if_changed(p->lbl_exposure_current, "--");
+                }
+                if (p->subbar.cont) nina_subbar_reset_elapsed(&p->subbar);
                 lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
 
                 lv_anim_t a;
@@ -673,7 +749,9 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                 lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
                 lv_anim_start(&a);
 
-                lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+                if (p->row_filter_total) {
+                    lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+                }
             }
             // else: within grace period — do nothing, arc stays where it is
         } else {
@@ -683,9 +761,14 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             p->exp_anchor_elapsed = 0;
             set_label_if_changed(p->lbl_exposure_total, "");
             set_label_if_changed(p->lbl_loop_count, "");
-            set_label_if_changed(p->lbl_exposure_current, "--");
+            if (p->lbl_exposure_current) {
+                set_label_if_changed(p->lbl_exposure_current, "--");
+            }
+            if (p->subbar.cont) nina_subbar_reset_elapsed(&p->subbar);
             lv_arc_set_value(p->arc_exposure, 0);
-            lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+            if (p->row_filter_total) {
+                lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
+            }
         }
     }
 }
@@ -771,48 +854,85 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
         set_text_color_if_changed(p->lbl_hfr_value, lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
         p->anim_hfr_x100 = 0;
     }
+
+    /* Bullseye dots: distance from centre is the value against its configured
+     * tolerance (ok_max), clamped by ui_dial_place_dot at 1.35 so an
+     * out-of-tolerance value stays on the board. The bearing is fixed per
+     * metric so a moving dot reads as a change in error, not in direction. */
+    if (p->rms_dot && p->rms_bull) {
+        threshold_config_t t;
+        app_config_get_rms_threshold_config(instance_idx, &t);
+        float lim = (t.ok_max > 0.01f) ? t.ok_max : 1.0f;
+        float ratio = (d->guider.rms_total > 0.0f) ? d->guider.rms_total / lim : 0.0f;
+        ui_dial_place_dot(p->rms_dot, p->rms_bull, ratio, DR_BEARING_RMS);
+    }
+    if (p->hfr_dot && p->hfr_bull) {
+        threshold_config_t t;
+        app_config_get_hfr_threshold_config(instance_idx, &t);
+        float lim = (t.ok_max > 0.01f) ? t.ok_max : 3.5f;
+        float ratio = (d->hfr > 0.0f) ? d->hfr / lim : 0.0f;
+        ui_dial_place_dot(p->hfr_dot, p->hfr_bull, ratio, DR_BEARING_HFR);
+    }
 }
 
 static void update_mount_and_image_stats(dashboard_page_t *p, const nina_client_t *d) {
     // Format flip time from "HH:MM:SS" to "Xh XXm"
+    int flip_mins = -1;
     if (d->meridian_flip[0] != '\0' && strcmp(d->meridian_flip, "--") != 0
         && strcmp(d->meridian_flip, "FLIPPING") != 0) {
         int hh = 0, mm = 0;
         if (sscanf(d->meridian_flip, "%d:%d", &hh, &mm) >= 2) {
-            SET_LABEL_FMT_IF_CHANGED(p->lbl_flip_value, 16, "%dh %02dm", hh, mm);
-        } else {
+            flip_mins = hh * 60 + mm;
+            if (p->lbl_flip_value) {
+                SET_LABEL_FMT_IF_CHANGED(p->lbl_flip_value, 16, "%dh %02dm", hh, mm);
+            }
+        } else if (p->lbl_flip_value) {
             set_label_if_changed(p->lbl_flip_value, d->meridian_flip);
         }
     } else if (d->meridian_flip[0] != '\0' && strcmp(d->meridian_flip, "--") != 0) {
-        set_label_if_changed(p->lbl_flip_value, d->meridian_flip);
-    } else {
+        if (strcmp(d->meridian_flip, "FLIPPING") == 0) flip_mins = 0;
+        if (p->lbl_flip_value) set_label_if_changed(p->lbl_flip_value, d->meridian_flip);
+    } else if (p->lbl_flip_value) {
         set_label_if_changed(p->lbl_flip_value, "--");
     }
 
-    if (d->stars >= 0) {
-        SET_LABEL_FMT_IF_CHANGED(p->lbl_stars_value, 16, "%d", d->stars);
-    } else {
-        set_label_if_changed(p->lbl_stars_value, "--");
+    /* The rim tick is the same countdown as a shape: twelve o'clock at flip,
+     * climbing counter-clockwise over a four hour window. */
+    if (p->ring_flip_tick) {
+        ui_dial_set_tick(p->ring_flip_tick, flip_mins, UI_DIAL_FLIP_SPAN_MIN);
     }
 
-    set_label_if_changed(p->lbl_target_time_value,
-        d->target_time_remaining[0] != '\0' ? d->target_time_remaining : "--");
-    auto_fit_value_font(p->lbl_target_time_value);
+    if (p->lbl_stars_value) {
+        if (d->stars >= 0) {
+            SET_LABEL_FMT_IF_CHANGED(p->lbl_stars_value, 16, "%d", d->stars);
+        } else {
+            set_label_if_changed(p->lbl_stars_value, "--");
+        }
+    }
+
+    if (p->lbl_target_time_value) {
+        set_label_if_changed(p->lbl_target_time_value,
+            d->target_time_remaining[0] != '\0' ? d->target_time_remaining : "--");
+        auto_fit_value_font(p->lbl_target_time_value);
+    }
 
     // Update header to reflect the binding constraint (horizon, dawn, time, etc.)
     // Show "+" suffix when multiple conditions are active (e.g. time + horizon)
-    if (d->target_time_reason[0] != '\0') {
-        if (d->target_condition_count > 1) {
-            SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s+", d->target_time_reason);
+    if (p->lbl_target_time_header) {
+        if (d->target_time_reason[0] != '\0') {
+            if (d->target_condition_count > 1) {
+                SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s+", d->target_time_reason);
+            } else {
+                SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s", d->target_time_reason);
+            }
         } else {
-            SET_LABEL_FMT_IF_CHANGED(p->lbl_target_time_header, 24, "%s", d->target_time_reason);
+            set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
         }
-    } else {
-        set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
     }
 }
 
 static void update_power(dashboard_page_t *p, const nina_client_t *d) {
+    if (!p->box_pwr[0]) return;    /* the round board draws no power row */
     int pwr_idx = 0;
     bool sw = d->power.switch_connected;
 
@@ -871,23 +991,31 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
     int64_t now_ms = esp_timer_get_time() / 1000;
     int64_t stale_ms = now_ms - d->last_successful_poll_ms;
 
+    /* The "Last update" label floats at the page root's top-right corner; on
+     * round that root is the full square panel, so the label sits well
+     * outside the visible circle. A dimmed ring is the round stale cue
+     * instead (below): the exposure ring on round layout 0, the sub-bar ledge
+     * ring on round layout 1. Either way, skip formatting and showing a label
+     * nobody can see (review C12 M-3, review area 2 I-1). */
     if (stale_ms > STALE_WARN_MS) {
-        int stale_sec = (int)(stale_ms / 1000);
-        if (stale_sec >= 120)
-            lv_label_set_text_fmt(p->lbl_stale, "Last update: %dm ago", stale_sec / 60);
-        else
-            lv_label_set_text_fmt(p->lbl_stale, "Last update: %ds ago", stale_sec);
+        if (!p->ring_exposure && !p->subbar.ring) {
+            int stale_sec = (int)(stale_ms / 1000);
+            if (stale_sec >= 120)
+                lv_label_set_text_fmt(p->lbl_stale, "Last update: %dm ago", stale_sec / 60);
+            else
+                lv_label_set_text_fmt(p->lbl_stale, "Last update: %ds ago", stale_sec);
 
-        /* Stale color: dim for warning, bright for severe */
-        uint32_t stale_color;
-        if (theme_is_red_night(current_theme)) {
-            stale_color = (stale_ms > STALE_DIM_MS) ? 0xff0000 : current_theme->text_color;
-        } else {
-            stale_color = (stale_ms > STALE_DIM_MS) ? 0xf87171 : 0xfbbf24;
+            /* Stale color: dim for warning, bright for severe */
+            uint32_t stale_color;
+            if (theme_is_red_night(current_theme)) {
+                stale_color = (stale_ms > STALE_DIM_MS) ? 0xff0000 : current_theme->text_color;
+            } else {
+                stale_color = (stale_ms > STALE_DIM_MS) ? 0xf87171 : 0xfbbf24;
+            }
+            set_text_color_if_changed(p->lbl_stale, lv_color_hex(stale_color), 0);
+
+            lv_obj_clear_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
         }
-        set_text_color_if_changed(p->lbl_stale, lv_color_hex(stale_color), 0);
-
-        lv_obj_clear_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_add_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
     }
@@ -899,6 +1027,20 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
         else
             lv_obj_add_flag(p->stale_overlay, LV_OBJ_FLAG_HIDDEN);
     }
+
+    /* Round: the stale cue is the exposure ring dimmed to 40 %, no text
+     * (addendum ruling for radial board 1). */
+    if (p->ring_exposure) {
+        set_arc_opa_if_changed(p->ring_exposure,
+            (stale_ms > STALE_WARN_MS) ? LV_OPA_40 : LV_OPA_COVER, LV_PART_INDICATOR);
+    }
+
+    /* Round layout 1 (Image-forward) has no exposure ring, so its stale cue is
+     * the sub-bar ledge ring dimming the same way. The setter is a no-op on the
+     * square flex-row sub bar and when the flag has not moved. */
+    if (p->subbar.ring && !p->ring_exposure) {
+        nina_subbar_set_stale(&p->subbar, stale_ms > STALE_WARN_MS);
+    }
 }
 
 /* Material Symbols codepoints (UTF-8 encoded) */
@@ -907,34 +1049,43 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
 #define ICON_GPP_MAYBE      "\xef\x80\x94"  /* U+F014 — shield with ?     */
 
 static void update_safety_icon(dashboard_page_t *p, const nina_client_t *data, int inst) {
-    if (!p->safety_icon) return;
+    if (!p->safety_icon && !p->ring_crown) return;
 
     if (!nina_connection_is_connected(inst)) {
-        lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
+        if (p->safety_icon) lv_obj_add_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
+        if (p->ring_crown) {
+            set_arc_color_if_changed(p->ring_crown, lv_color_hex(0x2a2a2a), LV_PART_MAIN);
+        }
         return;
     }
 
-    lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
+    if (p->safety_icon) lv_obj_clear_flag(p->safety_icon, LV_OBJ_FLAG_HIDDEN);
 
     int gb = app_config_get()->color_brightness;
+    const char *icon;
+    uint32_t color;
     if (data->safety_connected) {
         if (data->safety_is_safe) {
-            set_label_if_changed(p->safety_icon, ICON_VERIFIED_USER);
-            set_text_color_if_changed(p->safety_icon,
-                lv_color_hex(app_config_apply_brightness(
-                    theme_is_red_night(current_theme) ? 0x7f1d1d : 0x4CAF50, gb)), 0);
+            icon  = ICON_VERIFIED_USER;
+            color = theme_is_red_night(current_theme) ? 0x7f1d1d : 0x4CAF50;
         } else {
-            set_label_if_changed(p->safety_icon, ICON_GPP_BAD);
-            set_text_color_if_changed(p->safety_icon,
-                lv_color_hex(app_config_apply_brightness(
-                    theme_is_red_night(current_theme) ? 0xff0000 : 0xF44336, gb)), 0);
+            icon  = ICON_GPP_BAD;
+            color = theme_is_red_night(current_theme) ? 0xff0000 : 0xF44336;
         }
     } else {
-        set_label_if_changed(p->safety_icon, ICON_GPP_MAYBE);
-        uint32_t unknown_color = theme_is_red_night(current_theme)
-            ? current_theme->label_color : 0x999999;
-        set_text_color_if_changed(p->safety_icon,
-            lv_color_hex(app_config_apply_brightness(unknown_color, gb)), 0);
+        icon  = ICON_GPP_MAYBE;
+        color = theme_is_red_night(current_theme) ? current_theme->label_color : 0x999999;
+    }
+
+    uint32_t dim = app_config_apply_brightness(color, gb);
+    if (p->safety_icon) {
+        set_label_if_changed(p->safety_icon, icon);
+        set_text_color_if_changed(p->safety_icon, lv_color_hex(dim), 0);
+    }
+    /* Radial board 1: safety is the crown at twelve o'clock, read before
+     * anything else and needing no glyph. */
+    if (p->ring_crown) {
+        set_arc_color_if_changed(p->ring_crown, lv_color_hex(dim), LV_PART_MAIN);
     }
 }
 
@@ -1126,6 +1277,8 @@ void update_nina_dashboard_page(int instance, const nina_client_t *data) {
     update_header(p, data);
     update_sequence_info(p, data);
     update_exposure_arc(p, data, inst, gb);
+    /* The round board's sub ring; NULL on the square bento layout. */
+    if (p->subbar.cont) nina_subbar_update(&p->subbar, data, inst, gb);
     update_guider_stats(p, data, inst, gb);
     update_mount_and_image_stats(p, data);
     update_power(p, data);

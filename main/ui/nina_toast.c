@@ -38,7 +38,11 @@ static const char *TAG = "toast";
 /* Toast bar dimensions */
 #define TOAST_RADIUS        18
 #define TOAST_MARGIN_X      12
-#define TOAST_BOTTOM_Y      (-30)   /* Offset from bottom, above page dots */
+/* Offset from the bottom edge, above the page dots. On round the whole stack
+ * lifts by the safe inset so the bottom bar sits inside the circle: -30 on
+ * square, -135 at 720 round, -148 at 800 round. Used from y_for_position()
+ * and create_bar(), both runtime contexts, never a static initialiser. */
+#define TOAST_BOTTOM_Y      (-(30 + screen_safe_inset()))
 #define TOAST_BAR_HEIGHT    68      /* 16 pad + 28 font (2 lines) + 16 pad, room for wrapped hostnames */
 #define TOAST_STACK_GAP     6       /* Gap between stacked bars */
 #define DOT_SIZE            14
@@ -636,7 +640,8 @@ static void create_bar(int idx) {
 
     lv_obj_t *bar = lv_obj_create(s_screen);
     lv_obj_remove_style_all(bar);
-    lv_obj_set_width(bar, SCREEN_SIZE - 2 * TOAST_MARGIN_X);
+    /* 696 on square (720 - 2 * 12), 486 at 720 round, 540 at 800 round. */
+    lv_obj_set_width(bar, screen_size() - 2 * (TOAST_MARGIN_X + screen_safe_inset()));
     lv_obj_set_height(bar, TOAST_BAR_HEIGHT);
     lv_obj_set_align(bar, LV_ALIGN_BOTTOM_MID);
     lv_obj_set_style_translate_y(bar, TOAST_BOTTOM_Y, 0);

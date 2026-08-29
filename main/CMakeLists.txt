@@ -1,14 +1,15 @@
 set(LV_DEMO_DIR ../managed_components/lvgl__lvgl/demos)
 file(GLOB_RECURSE LV_DEMOS_SOURCES ${LV_DEMO_DIR}/*.c)
 
-idf_component_register(
-    SRCS main.c tasks.c axi_qos.c power_mgmt.c jpeg_utils.c stb_image.c image_red_remap.c perf_monitor.c ota_github.c
+set(nina_srcs
+    main.c tasks.c axi_qos.c power_mgmt.c jpeg_utils.c stb_image.c image_red_remap.c perf_monitor.c ota_github.c
          http_fetch.c poll_task.c image_page_poll.c radar_sites.c time_parse.c wifi_join.c
+         board_detect.c board_profile.c screen_geom.c
          nina_connection.c nina_client.c nina_api_fetchers.c nina_sequence.c nina_websocket.c
          net_diag.c net_trace.c allsky_client.c json_client.c ha_client.c adsb_client.c octoprint_client.c octoprint_appkeys.c goes_client.c weather_client.c telemetry.c moon_ephemeris.c moon_sphere.cpp moon_interaction.c spotify_auth.c spotify_client.c demo_data.c
          audio_alert.c web_test_audio.c voice_store.c web_handlers_voice.c
          app_config.c settings_table.c control_registry.c web_server.c web_route_auth.c web_handlers_config.c web_handlers_display.c web_handlers_system.c web_handlers_allsky.c web_handlers_json.c web_handlers_ha.c web_handlers_octoprint.c web_handlers_spotify.c web_handlers_image_display.c web_handlers_pages.c web_handlers_control.c web_handlers_auth.c web_handlers_wifi.c web_handlers_logs.c log_capture.c crash_log.c mqtt_ha.c
-         ui/page_registry.c ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_nav_arbiter.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/graph_downsample.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_allsky.c ui/nina_tile_grid.c ui/nina_json.c ui/nina_ha.c ui/nina_adsb.c ui/nina_octoprint.c ui/octoprint_layout_bento.c ui/octoprint_layout_glass.c ui/octoprint_layout_overlay.c ui/octoprint_layout_letterbox.c ui/nina_image_page.c ui/nina_subbar.c ui/nina_layout_image.c ui/nina_clock.c ui/nina_spotify.c ui/settings_hub.c ui/settings_wifi.c ui/themes.c ui/ui_styles.c ui/ui_helpers.c
+         ui/page_registry.c ui/nina_dashboard.c ui/nina_dashboard_update.c ui/nina_nav_arbiter.c ui/nina_thumbnail.c ui/nina_graph_overlay.c ui/graph_downsample.c ui/nina_graph_controls.c ui/nina_sysinfo.c ui/nina_summary.c ui/nina_allsky.c ui/nina_tile_grid.c ui/nina_json.c ui/nina_ha.c ui/nina_adsb.c ui/nina_octoprint.c ui/octoprint_layout_bento.c ui/octoprint_layout_glass.c ui/nina_image_page.c ui/nina_subbar.c ui/nina_layout_image.c ui/nina_clock.c ui/nina_spotify.c ui/settings_hub.c ui/settings_wifi.c ui/themes.c ui/ui_styles.c ui/ui_helpers.c
          ui/nina_toast.c ui/nina_event_log.c ui/nina_alerts.c ui/nina_safety.c ui/nina_session_stats.c ui/lv_font_material_safety.c ui/lv_font_material_icons_idle.c ui/lv_font_warning_128.c ui/lv_font_superscript_24.c ui/lv_font_playfair_228.c ui/lv_font_playfair_90.c ui/lv_font_overpass_27.c ui/lv_font_overpass_16.c ui/lv_font_montserrat_64.c ui/lv_font_montserrat_bold_22.c ui/lv_font_montserrat_bold_28.c ui/lv_font_montserrat_bold_56.c ui/lv_font_saira_black_300.c ui/lv_font_saira_black_110.c ui/lv_font_saira_black_66.c ui/lv_font_saira_thin_240.c ui/lv_font_saira_thin_84.c ui/lv_font_saira_light_46.c ui/lv_font_bodoni_black_150.c ui/lv_font_bodoni_ital_90.c ui/lv_font_bodoni_ital_44.c ui/lv_font_stencil_190.c ui/lv_font_hanken_black_96.c ui/lv_font_hanken_bold_44.c ui/lv_font_hanken_bold_64.c ui/lv_font_hanken_bold_28.c ui/lv_font_hanken_black_40.c
          ui/nina_setup_screen.c ui/nina_setup_hint.c ui/nina_idle_indicator.c
          ui/nina_info_overlay.c ui/nina_net_debug.c ui/nina_info_camera.c ui/nina_info_mount.c
@@ -17,6 +18,40 @@ idf_component_register(
          ui/nina_wait_overlay.c
          ui/nina_empty_state.c
          ${LV_DEMOS_SOURCES}
+)
+
+# Family source lists. A round-only source (a *_round.c builder, a round-only
+# lv_font_*.c) is compiled into the round binary and does not exist in the
+# square one; that is what keeps two page sets out of one 8 MB OTA slot.
+# CONFIG_* is available here: main/CMakeLists.txt already tests
+# CONFIG_NINA_FAMILY_ROUND below, in the family/name guard.
+set(nina_round_srcs
+    ui/ui_arclabel.c
+    ui/nina_adsb_round.c
+    ui/nina_layout_dashboard_round.c
+    ui/nina_layout_image_round.c
+    ui/nina_summary_round.c
+    ui/octoprint_layout_bento_round.c
+    ui/octoprint_layout_glass_round.c
+    ui/nina_clock_round.c
+    ui/nina_image_page_round.c
+    ui/settings_hub_round.c
+    ui/settings_wifi_round.c
+    ui/nina_graph_round.c
+    ui/lv_font_playfair_200.c
+)
+set(nina_square_srcs
+    ui/octoprint_layout_overlay.c
+    ui/octoprint_layout_letterbox.c
+)
+if(CONFIG_NINA_FAMILY_ROUND)
+    list(APPEND nina_srcs ${nina_round_srcs})
+else()
+    list(APPEND nina_srcs ${nina_square_srcs})
+endif()
+
+idf_component_register(
+    SRCS ${nina_srcs}
     INCLUDE_DIRS . ui ${LV_DEMO_DIR}
     # The 21 fragment_*.html tabs are embedded ONLY as their .gz twins (see
     # WEB_GZ_ASSETS below): the plain copies cost ~200 KB of flash and every
@@ -79,6 +114,27 @@ target_compile_options(
         -Wno-attributes      # conflicting section attrs in lv_color/lv_math (upstream LVGL issue)
         -Wno-unused-function  # unused atomic.h inlines in lv_freertos.c (upstream ESP-IDF issue)
 )
+
+# The root CMakeLists picks the project name from the SDKCONFIG_DEFAULTS string
+# before sdkconfig exists, so a menuconfig flip of the family can leave a round
+# image named nina-display. That name is esp_app_desc_t.project_name, which the
+# OTA family check reads, so a disagreement ships an image that lies about its
+# panel. CONFIG_* is available here; fail the build instead. The bare CMake
+# PROJECT_NAME is "esp-idf" inside a component, so read the build property that
+# actually lands in the image header.
+idf_build_get_property(nina_app_name PROJECT_NAME)
+if(CONFIG_NINA_FAMILY_ROUND AND NOT "${nina_app_name}" STREQUAL "nina-display-round")
+    message(FATAL_ERROR
+        "family/name mismatch: CONFIG_NINA_FAMILY_ROUND is set but the project "
+        "name is '${nina_app_name}' (expected 'nina-display-round'). Build with "
+        "-DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.round'.")
+endif()
+if(CONFIG_NINA_FAMILY_SQUARE AND NOT "${nina_app_name}" STREQUAL "nina-display")
+    message(FATAL_ERROR
+        "family/name mismatch: CONFIG_NINA_FAMILY_SQUARE is set but the project "
+        "name is '${nina_app_name}' (expected 'nina-display'). Build with "
+        "-DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.defaults.square'.")
+endif()
 
 # Custom LVGL malloc backend (routes lv_malloc -> PSRAM). Must be compiled INTO the
 # LVGL library, not main: lv_mem.c (inside liblvgl) references lv_*_core, and liblvgl

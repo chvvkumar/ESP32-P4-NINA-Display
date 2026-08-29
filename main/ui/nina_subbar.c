@@ -6,6 +6,11 @@
  * after every 10th block; completed = filter colour, in-flight = 20 % base plus
  * a left-anchored 55 % fill, remaining = flat 0x161616.
  *
+ * Ring mode (nina_subbar_create_ring, round layouts) builds the same blocks as
+ * lv_arc segments on one circle, spaced uniformly: the wider gap after every
+ * 10th block is a flex-row property. The done / in-flight / remaining decision,
+ * the block grouping and the in-flight fill are shared by both modes.
+ *
  * Every entry point runs with the LVGL display lock held by the caller.
  */
 
@@ -16,6 +21,7 @@
 
 #include "app_config.h"
 #include "themes.h"
+#include "ui_dial.h"
 #include "ui_helpers.h"
 
 #define SB_GAP_TIGHT      3
@@ -31,6 +37,9 @@ static uint32_t sb_block_color(const char *filter, int instance_idx, int gb);
 static void sb_rebuild_blocks(nina_subbar_t *sb, int target);
 static void sb_paint_blocks(nina_subbar_t *sb, int done, uint32_t color);
 static void sb_place_fill(nina_subbar_t *sb, int idx, uint32_t color);
+static void sb_block_geom(const nina_subbar_t *sb, int i, int *a0, int *a1);
+static void sb_style_block(const nina_subbar_t *sb, lv_obj_t *b, uint32_t color, lv_opa_t opa);
+static void sb_ring_fill_angles(nina_subbar_t *sb, float frac);
 
 /* Block colour: the active filter's configured colour, clamped to the theme's
  * progress colour on Red Night so no non-red hue reaches the panel. */
@@ -43,6 +52,57 @@ static uint32_t sb_block_color(const char *filter, int instance_idx, int gb) {
         return app_config_get_filter_color(filter, instance_idx);
     }
     return app_config_apply_brightness(current_theme->progress_color, gb);
+}
+
+/* ---- ring geometry ------------------------------------------------------ */
+
+/* Angles of block i, degrees clockwise from twelve o'clock. The gap between
+ * blocks is 5 degrees, or 18 % of the pitch when the pitch is small, which is
+ * the same proportion the flex row uses between its 3 px and 9 px gaps. The
+ * ring spaces every block alike: the wider gap the flex row puts after every
+ * NINA_SUBBAR_GROUP_EVERY block is a flex-row property. */
+static void sb_block_geom(const nina_subbar_t *sb, int i, int *a0, int *a1) {
+    int n = (sb->n_blocks > 0) ? sb->n_blocks : 1;
+    float pitch = sb->ring_span / (float)n;
+    float gap   = (pitch * 0.18f < 5.0f) ? (pitch * 0.18f) : 5.0f;
+    float start = sb->ring_gap * 0.5f + (float)i * pitch;
+    *a0 = (int)(start + 0.5f);
+    *a1 = (int)(start + pitch - gap + 0.5f);
+    if (*a1 <= *a0) *a1 = *a0 + 1;
+}
+
+/* Stale cue, ring mode only: every arc opacity scaled to 40 %. The flex row
+ * never sets sb->stale, so the square ledge keeps its shipped opacities. */
+static lv_opa_t sb_stale_opa(const nina_subbar_t *sb, lv_opa_t opa) {
+    if (!sb->stale) return opa;
+    return (lv_opa_t)(((uint32_t)opa * LV_OPA_40) / LV_OPA_COVER);
+}
+
+/* The one place a block's colour reaches pixels, in either mode. */
+static void sb_style_block(const nina_subbar_t *sb, lv_obj_t *b,
+                           uint32_t color, lv_opa_t opa) {
+    if (sb->ring) {
+        lv_obj_set_style_arc_color(b, lv_color_hex(color), LV_PART_MAIN);
+        lv_obj_set_style_arc_opa(b, sb_stale_opa(sb, opa), LV_PART_MAIN);
+    } else {
+        lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
+        lv_obj_set_style_bg_opa(b, opa, 0);
+    }
+}
+
+/* Open the in-flight arc to @p frac of the active block's sweep. */
+static void sb_ring_fill_angles(nina_subbar_t *sb, float frac) {
+    if (!sb->fill || sb->active_idx < 0) return;
+    int a0, a1;
+    sb_block_geom(sb, sb->active_idx, &a0, &a1);
+    int span = (int)((float)(a1 - a0) * frac + 0.5f);
+    if (span < 1) {
+        lv_obj_add_flag(sb->fill, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_arc_set_rotation(sb->fill, (270 + a0) % 360);
+    lv_arc_set_bg_angles(sb->fill, 0, span);
+    lv_obj_remove_flag(sb->fill, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* ── block row ───────────────────────────────────────────────────────────── */
@@ -71,28 +131,36 @@ static void sb_rebuild_blocks(nina_subbar_t *sb, int target) {
         if (n > NINA_SUBBAR_MAX_BLOCKS) n = NINA_SUBBAR_MAX_BLOCKS;
     }
 
-    for (int i = 0; i < n; i++) {
-        lv_obj_t *b = lv_obj_create(sb->cont);
-        lv_obj_remove_style_all(b);
-        lv_obj_remove_flag(b, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_width(b, 2);              /* 2 px floor; flex grow does the rest */
-        lv_obj_set_flex_grow(b, 1);
-        lv_obj_set_height(b, sb->block_h);
-        lv_obj_set_style_radius(b, SB_BLOCK_RADIUS, 0);
-        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-        lv_obj_set_style_clip_corner(b, true, 0);
-        /* 3 px between blocks, widening to 9 px after every 10th. */
-        if (i < n - 1) {
-            bool wide = (((i + 1) % NINA_SUBBAR_GROUP_EVERY) == 0);
-            lv_obj_set_style_margin_right(b, wide ? SB_GAP_WIDE : SB_GAP_TIGHT, 0);
-        }
-        sb->blocks[i] = b;
-    }
-
     sb->n_blocks   = n;
     sb->group_size = group;
     sb->active_idx = -1;
+    sb->ring_frac  = 0.0f;
+
+    for (int i = 0; i < n; i++) {
+        lv_obj_t *b;
+        if (sb->ring) {
+            int a0, a1;
+            sb_block_geom(sb, i, &a0, &a1);
+            b = ui_dial_arc(sb->cont, sb->ring_radius, sb->ring_width, a0, a1);
+        } else {
+            b = lv_obj_create(sb->cont);
+            lv_obj_remove_style_all(b);
+            lv_obj_remove_flag(b, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_remove_flag(b, LV_OBJ_FLAG_SCROLLABLE);
+            lv_obj_set_width(b, 2);              /* 2 px floor; flex grow does the rest */
+            lv_obj_set_flex_grow(b, 1);
+            lv_obj_set_height(b, sb->block_h);
+            lv_obj_set_style_radius(b, SB_BLOCK_RADIUS, 0);
+            lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+            lv_obj_set_style_clip_corner(b, true, 0);
+            /* 3 px between blocks, widening to 9 px after every 10th. */
+            if (i < n - 1) {
+                bool wide = (((i + 1) % NINA_SUBBAR_GROUP_EVERY) == 0);
+                lv_obj_set_style_margin_right(b, wide ? SB_GAP_WIDE : SB_GAP_TIGHT, 0);
+            }
+        }
+        sb->blocks[i] = b;
+    }
 }
 
 static void sb_paint_blocks(nina_subbar_t *sb, int done, uint32_t color) {
@@ -107,15 +175,12 @@ static void sb_paint_blocks(nina_subbar_t *sb, int done, uint32_t color) {
     for (int i = 0; i < sb->n_blocks; i++) {
         if (!sb->blocks[i]) continue;
         if (i < done_blocks) {
-            lv_obj_set_style_bg_color(sb->blocks[i], lv_color_hex(color), 0);
-            lv_obj_set_style_bg_opa(sb->blocks[i], LV_OPA_COVER, 0);
+            sb_style_block(sb, sb->blocks[i], color, LV_OPA_COVER);
         } else if (i == done_blocks) {
             /* In-flight: dim base, the fill rides on top. */
-            lv_obj_set_style_bg_color(sb->blocks[i], lv_color_hex(color), 0);
-            lv_obj_set_style_bg_opa(sb->blocks[i], SB_DIM_OPA, 0);
+            sb_style_block(sb, sb->blocks[i], color, SB_DIM_OPA);
         } else {
-            lv_obj_set_style_bg_color(sb->blocks[i], lv_color_hex(SB_REMAIN_COLOR), 0);
-            lv_obj_set_style_bg_opa(sb->blocks[i], LV_OPA_COVER, 0);
+            sb_style_block(sb, sb->blocks[i], SB_REMAIN_COLOR, LV_OPA_COVER);
         }
     }
 
@@ -127,6 +192,21 @@ static void sb_place_fill(nina_subbar_t *sb, int idx, uint32_t color) {
     if (idx < 0 || idx >= sb->n_blocks || !sb->blocks[idx]) {
         if (sb->fill) lv_obj_add_flag(sb->fill, LV_OBJ_FLAG_HIDDEN);
         sb->active_idx = -1;
+        return;
+    }
+    if (sb->ring) {
+        if (!sb->fill) {
+            sb->fill = ui_dial_arc(sb->cont, sb->ring_radius,
+                                   sb->ring_width, 0, 1);
+            sb->active_idx = idx;
+            sb->ring_frac  = 0.0f;
+        } else if (sb->active_idx != idx) {
+            sb->active_idx = idx;
+            sb->ring_frac  = 0.0f;
+        }
+        lv_obj_set_style_arc_opa(sb->fill, sb_stale_opa(sb, SB_FILL_OPA), LV_PART_MAIN);
+        lv_obj_set_style_arc_color(sb->fill, lv_color_hex(color), LV_PART_MAIN);
+        sb_ring_fill_angles(sb, sb->ring_frac);
         return;
     }
     if (!sb->fill) {
@@ -174,6 +254,50 @@ void nina_subbar_create(nina_subbar_t *sb, lv_obj_t *parent, int block_h) {
 
     sb_rebuild_blocks(sb, 0);
     nina_subbar_apply_theme(sb);
+}
+
+void nina_subbar_create_ring(nina_subbar_t *sb, lv_obj_t *parent,
+                             int radius, int width, int gap_deg) {
+    if (!sb || !parent || radius <= 0 || width <= 0) return;
+    memset(sb, 0, sizeof(*sb));
+    sb->block_h    = width;
+    sb->group_size = 1;
+    sb->active_idx = -1;
+    sb->cached_target = -1;
+    sb->cached_done   = -1;
+    sb->ring        = true;
+    sb->ring_radius = radius;
+    sb->ring_width  = width;
+    sb->ring_gap    = (float)gap_deg;
+    sb->ring_span   = 360.0f - (float)gap_deg;
+
+    int side = 2 * radius + width;
+    sb->cont = lv_obj_create(parent);
+    lv_obj_remove_style_all(sb->cont);
+    lv_obj_remove_flag(sb->cont, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(sb->cont, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(sb->cont, side, side);
+    lv_obj_center(sb->cont);
+    lv_obj_set_style_pad_all(sb->cont, 0, 0);
+
+    sb_rebuild_blocks(sb, 0);
+    nina_subbar_apply_theme(sb);
+}
+
+void nina_subbar_ring_set_radius(nina_subbar_t *sb, int radius) {
+    if (!sb || !sb->ring || !sb->cont || radius <= 0 || radius == sb->ring_radius) return;
+    sb->ring_radius = radius;
+    int side = 2 * radius + sb->ring_width;
+    lv_obj_set_size(sb->cont, side, side);
+    lv_obj_center(sb->cont);
+    /* The blocks are arcs sized from ring_radius at rebuild time: invalidate
+     * the target cache so the next update rebuilds and repaints them. */
+    sb->cached_target = -1;
+}
+
+void nina_subbar_reset_elapsed(nina_subbar_t *sb) {
+    if (!sb || !sb->elapsed_cb) return;
+    sb->elapsed_cb(sb->elapsed_ud, -1);
 }
 
 void nina_subbar_update(nina_subbar_t *sb, const nina_client_t *d,
@@ -229,10 +353,14 @@ void nina_subbar_set_progress(nina_subbar_t *sb, float frac) {
         if (group > 1 && sb->cached_done >= 0) {
             within = ((float)(sb->cached_done % group) + frac) / (float)group;
         }
-        int pct = (int)(within * 100.0f + 0.5f);
-        if (pct < 0) pct = 0;
-        if (pct > 100) pct = 100;
-        lv_obj_set_width(sb->fill, LV_PCT(pct));
+        if (within < 0.0f) within = 0.0f;
+        if (within > 1.0f) within = 1.0f;
+        if (sb->ring) {
+            sb->ring_frac = within;
+            sb_ring_fill_angles(sb, within);
+        } else {
+            lv_obj_set_width(sb->fill, LV_PCT((int)(within * 100.0f + 0.5f)));
+        }
     }
 
     if (sb->elapsed_cb && sb->cached_total > 0.0f) {
@@ -240,6 +368,13 @@ void nina_subbar_set_progress(nina_subbar_t *sb, float frac) {
         if (secs > 9999) secs = 9999;
         sb->elapsed_cb(sb->elapsed_ud, secs);
     }
+}
+
+void nina_subbar_set_stale(nina_subbar_t *sb, bool stale) {
+    if (!sb || !sb->ring || sb->stale == stale) return;
+    sb->stale = stale;
+    sb_paint_blocks(sb, (sb->cached_done > 0) ? sb->cached_done : 0,
+                    sb->cached_block_color);
 }
 
 void nina_subbar_apply_theme(nina_subbar_t *sb) {
