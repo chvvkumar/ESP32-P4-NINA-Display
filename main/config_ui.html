@@ -2996,7 +2996,18 @@
          here; they resolve to Grid on the device, so show that rather than
          leaving the select blank. Live layouts: 0 Grid, 2 Immersive
          image, 5 Floating overlay, 6 Letterbox. */
-      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;if(ol!==0&&ol!==2&&ol!==5&&ol!==6)ol=0;$('octoLayout').value=String(ol);}
+      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;if(ol!==0&&ol!==2&&ol!==5&&ol!==6)ol=0;$('octoLayout').value=String(ol);
+        /* Round panels have no Floating overlay and no Letterbox composition
+           (both builders resolve to Immersive image on the device and are not
+           even linked into the round binary), so drop the two options there.
+           The stored value is left alone: a board moved back to a square panel
+           gets its chosen layout again. */
+        fetchJsonMemo('/api/version').then(function(v){
+          var sel=$('octoLayout'); if(!sel||v.shape!=='round') return;
+          ['5','6'].forEach(function(k){var o=sel.querySelector('option[value="'+k+'"]');if(o)o.remove();});
+          if(ol===5||ol===6) sel.value='2';
+        }).catch(function(){});
+      }
       if($('octoImageSource')) $('octoImageSource').value=String(data.octoprint_image_source||0);
       if($('octoSnapshotUrl')) $('octoSnapshotUrl').value=data.octoprint_snapshot_url||'';
       if($('octoOverlayVisible')) $('octoOverlayVisible').checked=data.octoprint_overlay_visible!=null?!!data.octoprint_overlay_visible:true;

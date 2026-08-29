@@ -674,9 +674,11 @@ static void build_content(void)
 #if CONFIG_NINA_FAMILY_ROUND
     /* Round removals (spec addendum section 7): "Floating overlay" (5) and
      * "Letterbox" (6) have no round composition, so both resolve to the glass
-     * "Immersive image" builder. The stored config value is NOT rewritten and
-     * the web UI keeps offering them, so a board swapped back to a square panel
-     * gets its chosen layout again. */
+     * "Immersive image" builder. Neither square builder is even linked into the
+     * round binary any more (main/CMakeLists.txt nina_square_srcs) and the web
+     * UI drops both options once /api/version reports shape "round". The stored
+     * config value is still NOT rewritten, so a board swapped back to a square
+     * panel gets its chosen layout again. */
     if (idx == 5 || idx == 6) {
         idx = 2;
     }
