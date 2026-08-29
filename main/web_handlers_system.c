@@ -376,6 +376,19 @@ esp_err_t ota_post_handler(httpd_req_t *req)
                 /* Nothing has been written yet (OTA_WITH_SEQUENTIAL_WRITES
                  * erases nothing up front), so aborting here leaves the target
                  * slot exactly as it was. */
+                /* Drain the rest of the upload before answering: closing the
+                 * socket while the browser is still sending makes XHR report a
+                 * bare network error and the 409 body below is never read. */
+                int drain = remaining - received;
+                while (drain > 0) {
+                    int n = httpd_req_recv(req, buf, drain < OTA_BUF_SIZE ? drain : OTA_BUF_SIZE);
+                    if (n <= 0) {
+                        if (n == HTTPD_SOCK_ERR_TIMEOUT && ++timeout_count < 5) continue;
+                        break;
+                    }
+                    timeout_count = 0;
+                    drain -= n;
+                }
                 free(buf);
                 esp_ota_abort(ota_handle);
                 ota_remove_overlay();

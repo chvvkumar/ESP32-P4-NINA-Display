@@ -4263,13 +4263,15 @@
           status.textContent='Update complete! Rebooting...';
           showToast('Firmware updated. Rebooting...','success');
         }else{
-          status.textContent='Update failed (HTTP '+xhr.status+')';
-          showToast('OTA failed','error');
+          var reason='';
+          try{reason=JSON.parse(xhr.responseText).error||'';}catch(e){}
+          status.textContent=reason?('Update refused: '+reason):('Update failed (HTTP '+xhr.status+')');
+          showToast(reason||'OTA failed','error');
           btn.disabled=false;
         }
       });
       xhr.addEventListener('error',function(){
-        status.textContent='Upload error';
+        status.textContent='Upload error: the device closed the connection. Check that the file is the firmware for this panel.';
         showToast('OTA upload error','error');
         btn.disabled=false;
       });
