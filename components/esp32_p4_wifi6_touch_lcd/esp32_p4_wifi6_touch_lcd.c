@@ -682,12 +682,15 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
     ESP_GOTO_ON_ERROR(row->panel_new(io, &lcd_dev_config, &disp_panel), err, TAG,
                       "New LCD panel failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(disp_panel), err, TAG, "LCD panel reset failed");
-    /* Base 180 orientation baked into the panel's own init MADCTL write: the
-     * driver's mirror() only records the GS/SS bits until init() sends them,
-     * so nothing reaches the glass after the video stream starts. Written
-     * after the stream, the same bits left the 4C (reg 0x40 = 0x04 glass)
-     * scanning alternate rows with the previous frame (bench B17). The 4B
-     * row has base_rot_180 = 0 and is untouched. */
+    /* Base 180 orientation requested before init: the driver's mirror()
+     * sends MADCTL now (panel still in reset, harmless) and keeps the GS/SS
+     * bits in madctl_val, which init() re-sends as its own MADCTL write
+     * before the vendor table and before the video stream starts. So no
+     * MADCTL reaches the glass while it is streaming; the vendor bring-up
+     * never writes one either. This was tried against the 4C scan-line
+     * fault (bench B17) and was not the cause (the pixel clock was), but it
+     * is kept as the vendor's order. The 4B row has base_rot_180 = 0 and is
+     * untouched. */
     if (row->base_rot_180) {
         ESP_GOTO_ON_ERROR(esp_lcd_panel_mirror(disp_panel, true, true), err, TAG,
                           "LCD panel mirror failed");
@@ -824,8 +827,9 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config, esp_lcd_touch_handle_t
 /* Orientation sink for the round rows. esp_lvgl_port applies its rotation at
  * add time and on every lv_display_set_rotation() through
  * esp_lcd_panel_swap_xy()/esp_lcd_panel_mirror() on the control handle, and
- * on the JD9365 each of those is a MADCTL write after the video stream is up:
- * on the 4C that left alternate rows holding the previous frame (bench B17).
+ * on the JD9365 each of those is a MADCTL write after the video stream is up,
+ * which the vendor bring-up never does (bench B17; not the cause of the 4C
+ * scan-line fault, that was the pixel clock, but kept as the vendor's order).
  * The base 180 flip is baked into the panel's init MADCTL instead (see
  * bsp_display_new_with_handles), and user rotation runs on the PPA, so the
  * port's calls have nothing to do. Returning ESP_OK keeps the boot log quiet;
