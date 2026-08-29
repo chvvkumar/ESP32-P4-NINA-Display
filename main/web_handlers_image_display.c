@@ -85,6 +85,7 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "goes_region", cfg->goes_region);
     cJSON_AddNumberToObject(root, "goes_update_interval_s", cfg->goes_update_interval_s);
     cJSON_AddNumberToObject(root, "moon_bg_style", cfg->moon_bg_style);
+    cJSON_AddNumberToObject(root, "moon_round_size_pct", cfg->moon_round_size_pct);
     cJSON_AddNumberToObject(root, "moon_lat", cfg->moon_lat);
     cJSON_AddNumberToObject(root, "moon_lon", cfg->moon_lon);
     cJSON_AddNumberToObject(root, "solar_band", cfg->solar_band);
@@ -334,6 +335,8 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
 
     cJSON *bg = cJSON_GetObjectItem(root, "moon_bg_style");
     if (cJSON_IsNumber(bg)) { int v = bg->valueint; cur->moon_bg_style = (v >= 0 && v <= 3) ? (uint8_t)v : 0; }
+    cJSON *msz = cJSON_GetObjectItem(root, "moon_round_size_pct");
+    if (cJSON_IsNumber(msz)) { int v = msz->valueint; cur->moon_round_size_pct = (v >= 50 && v <= 150) ? (uint8_t)v : 100; }
     cJSON *mlat = cJSON_GetObjectItem(root, "moon_lat");
     if (cJSON_IsNumber(mlat)) cur->moon_lat = (float)mlat->valuedouble;
     cJSON *mlon = cJSON_GetObjectItem(root, "moon_lon");

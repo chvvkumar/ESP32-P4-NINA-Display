@@ -939,6 +939,7 @@ static void set_defaults(app_config_t *cfg) {
     // Fresh installs default ON; the migration dispatcher tail forces it OFF
     // for every upgrader (opt in for existing installs).
     cfg->telemetry_enabled = true;
+    cfg->moon_round_size_pct = 100;     // v79: round Moon disc fills the rim
 
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
@@ -3150,6 +3151,20 @@ static void migrate_from_v76(const void *raw, size_t raw_size, app_config_t *cfg
  *     through audio_muted (append-only rule), so
  *     offsetof(app_config_t, telemetry_enabled) is its exact meaningful size
  *     (asserted next to the v76 snapshot in app_config.h). --- */
+/* --- v78 -> v79 migration: appends moon_round_size_pct (round Moon disc
+ * size, percent of the rim diameter). The prefix through telemetry_enabled
+ * is the v78 layout byte for byte. --- */
+static void migrate_from_v78(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t v78_size = offsetof(app_config_t, moon_round_size_pct);
+    size_t copy = raw_size < v78_size ? raw_size : v78_size;
+    memcpy(cfg, raw, copy);
+    cfg->moon_round_size_pct = 100;
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v78 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v77(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3982,6 +3997,11 @@ static bool validate_config(app_config_t *cfg) {
     /* Anonymous telemetry (v78): canonicalize a stale blob byte to a strict
      * 0/1, same shape as audio_muted above. */
     cfg->telemetry_enabled = cfg->telemetry_enabled ? true : false;
+    /* moon_round_size_pct (v79): 50..150, anything else means the default. */
+    if (cfg->moon_round_size_pct < 50 || cfg->moon_round_size_pct > 150) {
+        cfg->moon_round_size_pct = 100;
+        fixed = true;
+    }
 
     /* ADS-B page (v68). The six numeric flights_* fields are SETTINGS_TABLE
      * rows, so settings_clamp_apply() above already applied their ranges
@@ -4113,6 +4133,14 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 78) {
+        /* v78 -> v79: appended moon_round_size_pct. tiles_loaded stays false:
+         * a v78 device already keeps its tiles in the "json_tiles"/"ha_tiles"
+         * NVS keys, so the tail loads them. */
+        migrate_from_v78(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 77) {
         /* v77 -> v78: appended telemetry_enabled. tiles_loaded stays false: a
          * v77 device already keeps its tiles in the "json_tiles"/"ha_tiles"

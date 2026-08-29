@@ -653,6 +653,7 @@ static const backup_field_t s_backup_fields[] = {
     {"custom_orientation",         "Custom Orientation",   "Custom Image", false, false},
     {"custom_update_interval_s",   "Custom Update Interval","Custom Image", false, false},
     {"moon_bg_style",              "Moon Background Style", "Moon", false, false},
+    {"moon_round_size_pct",        "Moon Disc Size (round)","Moon", false, false},   /* v79 */
     {"moon_lat",                   "Moon Latitude",        "Moon", false, false},
     {"moon_lon",                   "Moon Longitude",       "Moon", false, false},
     {"solar_band",                 "Solar Band",           "Solar", false, false},

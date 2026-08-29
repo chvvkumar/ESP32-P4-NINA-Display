@@ -11,6 +11,7 @@
  */
 
 #include "nina_image_page.h"
+#include "moon_sphere.h"   /* MOON_SPHERE_ORTHO_DEFAULT */
 #include "nina_image_page_internal.h"  /* caption style + the two overlay builders */
 #include "nina_wait_overlay.h"
 #include "nina_empty_state.h"
@@ -429,7 +430,7 @@ static void hide_moon_corner_labels(image_page_t *p);
  * instance creates these labels, so this is a no-op on the other three. */
 static void update_moon_corner_labels(image_page_t *p)
 {
-    if (!p->lbl_moon_age) return;
+    if (!p->lbl_moon_age && !p->moon_arc_top) return;
     /* The corner labels track overlay visibility. overlay_bar's HIDDEN flag is the
      * single source of truth (set by the initial config check and by
      * image_page_set_overlay_visible). Without this guard the live drag paths
@@ -442,10 +443,32 @@ static void update_moon_corner_labels(image_page_t *p)
     char age[20], next[20], rise[20], set[20];
     moon_overlay_info(age, sizeof(age), next, sizeof(next),
                       rise, sizeof(rise), set, sizeof(set));
-    set_label_if_changed(p->lbl_moon_age,  age);
-    set_label_if_changed(p->lbl_moon_next, next);
-    set_label_if_changed(p->lbl_moon_rise, rise);
-    set_label_if_changed(p->lbl_moon_set,  set);
+#if LV_USE_ARCLABEL
+    /* Round: two rim rows inside the age arc, phase name with age and next
+     * phase on top, rise and set below. lv_arclabel_set_text() re-lays out
+     * every glyph and this runs per drag frame, so write on change only. */
+    if (p->moon_arc_top) {
+        static char top_prev[96], bot_prev[64];
+        char name[24], pct[16], top[96], bot[64];
+        moon_caption(name, sizeof(name), pct, sizeof(pct));
+        snprintf(top, sizeof(top), "%s / %s / %s", name, age, next);
+        snprintf(bot, sizeof(bot), "%s / %s", rise, set);
+        if (strcmp(top, top_prev) != 0) {
+            lv_arclabel_set_text(p->moon_arc_top, top);
+            snprintf(top_prev, sizeof(top_prev), "%s", top);
+        }
+        if (p->moon_arc_bot && strcmp(bot, bot_prev) != 0) {
+            lv_arclabel_set_text(p->moon_arc_bot, bot);
+            snprintf(bot_prev, sizeof(bot_prev), "%s", bot);
+        }
+    }
+#endif
+    if (p->lbl_moon_age) {
+        set_label_if_changed(p->lbl_moon_age,  age);
+        set_label_if_changed(p->lbl_moon_next, next);
+        set_label_if_changed(p->lbl_moon_rise, rise);
+        set_label_if_changed(p->lbl_moon_set,  set);
+    }
     /* Illumination is a shape on round: the arc replaces the percentage that
      * lbl_timestamp carries on square. moon_caption() formats the percentage
      * as "NN%"; atoi stops at the '%'. */
@@ -457,10 +480,12 @@ static void update_moon_corner_labels(image_page_t *p)
         if (v > 100) v = 100;
         lv_arc_set_value(p->moon_illum_arc, v);
     }
-    lv_obj_clear_flag(p->lbl_moon_age,  LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(p->lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(p->lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(p->lbl_moon_set,  LV_OBJ_FLAG_HIDDEN);
+    if (p->lbl_moon_age) {
+        lv_obj_clear_flag(p->lbl_moon_age,  LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(p->lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(p->lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(p->lbl_moon_set,  LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 /* Hide the four moon corner labels (non-Moon instances and overlay-off state). */
@@ -477,6 +502,13 @@ static void hide_moon_corner_labels(image_page_t *p)
 static void moon_arc_apply_theme(image_page_t *p);
 
 #if !CONFIG_NINA_FAMILY_ROUND
+/* Square: the disc always fills the canvas with the renderer's own margin. */
+float image_page_moon_ortho(const image_page_t *p)
+{
+    (void)p;
+    return MOON_SPHERE_ORTHO_DEFAULT;
+}
+
 /* Square composition (unchanged pixels): a full-width invisible 68 px bar on the
  * bottom edge with the region caption flush left and the timestamp flush right,
  * plus the Moon instance's four corner labels stacked in the top corners, clear
@@ -1308,6 +1340,14 @@ void image_page_set_overlay_visible(image_page_t *p, bool visible)
     if (!p->overlay_bar) return;
     if (visible) lv_obj_clear_flag(p->overlay_bar, LV_OBJ_FLAG_HIDDEN);
     else         lv_obj_add_flag(p->overlay_bar, LV_OBJ_FLAG_HIDDEN);
+
+    /* Round Moon: the disc size follows the text (it shrinks to clear the rim
+     * rows while they show), so a toggle is a re-render. The poller reads the
+     * flag and image_page_moon_ortho() at its next wake. */
+    if (p->moon_arc_top && atomic_exchange(&p->moon_overlay_on, visible) != visible &&
+        atomic_load(&p->active)) {
+        image_page_wake(p);
+    }
 
     /* C2: the tap hides the captions, the four Moon labels and the lunar age
      * arc together. NULL on square and on every non-Moon source. */
@@ -3280,6 +3320,7 @@ static bool moon_params_changed(const app_config_t *prev, const app_config_t *cu
            cur->moon_spin_mode != prev->moon_spin_mode ||
            cur->moon_spin_return_s != prev->moon_spin_return_s ||
            cur->moon_drag_light_mode != prev->moon_drag_light_mode ||
+           cur->moon_round_size_pct != prev->moon_round_size_pct ||
            cur->moon_lat != prev->moon_lat ||
            cur->moon_lon != prev->moon_lon;
 }

@@ -96,6 +96,8 @@ typedef struct image_page {
      * page repaints both from the theme (moon_arc_apply_theme). NULL on square
      * and on the five non-Moon sources; every use is guarded. */
     lv_obj_t *moon_illum_arc;
+    lv_obj_t *moon_arc_top, *moon_arc_bot;  /* round Moon: rim text inside the age arc, else NULL */
+    _Atomic bool moon_overlay_on;           /* mirrors overlay_bar visibility for the poller */
     lv_obj_t *moon_illum_tick;
     /* Last text written to lbl_region [0] and lbl_timestamp [1]. lv_arclabel
      * has no text getter and its setter reallocates and invalidates on every
@@ -132,6 +134,10 @@ image_page_t *image_page_by_page_idx(int page_idx);          /* NULL if not an i
 void image_page_init(bool spawn_pollers);
 void image_page_ensure_task_running(image_page_t *p);      /* spawn if enabled in config; idempotent */
 void image_page_wake(image_page_t *p);                       /* xTaskNotifyGive the poller (config change) */
+/* Renderer half-extent for the Moon disc: MOON_SPHERE_ORTHO_DEFAULT on square;
+ * on round, the canvas over the disc diameter that moon_round_size_pct and
+ * the text visibility allow. The poller sets it before each render. */
+float image_page_moon_ortho(const image_page_t *p);
 
 /* ── Lifecycle (page-gated) ── */
 void image_page_set_active(image_page_t *p, bool active);   /* registry ops show/hide; display lock held */

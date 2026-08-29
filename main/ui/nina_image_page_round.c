@@ -26,6 +26,8 @@
 #include "nina_image_page_internal.h"
 #include "ui_round.h"
 #include "ui_arclabel.h"
+#include "app_config.h"
+#include <stdatomic.h>
 #include "screen_geom.h"
 #include "lvgl.h"
 
@@ -36,16 +38,11 @@ extern const lv_font_t lv_font_overpass_27;
 #define IMG_R_CAPTION_INSET   30   /* caption arclabel radius = Rs - 30 */
 #define IMG_R_ARC_INSET       12   /* moon rim arc centre line = Rs - 12 */
 #define IMG_ARC_W             16
-#define IMG_MOON_DISC_PX     432
-#define IMG_MOON_DISC_DY     (-12)
-#define IMG_MOON_TOP_W       366   /* review_impl_F1.md M-6: 342 left only 10 px of margin */
-#define IMG_MOON_TOP_DY     (-264)
-#define IMG_MOON_BOT_DY      232   /* review_impl_F1.md I-2: box width is now the chord at this
-                                     * row (see image_page_build_overlay_round), not a literal;
-                                     * 232 keeps it 5.5 px clear of the disc bottom (was 244/400) */
-#define IMG_MOON_NAME_DY     290
-#define IMG_MOON_ROW_H        45   /* 27 px line height 39 + 6 pad, as on square */
 #define IMG_MOON_TICK_H       16   /* fits between the arc object's own edges */
+#define IMG_MOON_TEXT_INSET    6   /* rim text outer edge, inside the age arc */
+#define IMG_MOON_TEXT_H       39   /* overpass_27 line height */
+#define IMG_MOON_TEXT_GAP     10   /* disc edge to the text's inner edge, text shown */
+#define IMG_MOON_TEXT_SPAN   150   /* degrees per rim row; 120 dots the three-item top row */
 #define IMG_CAP_ANGLE_START   90   /* six o'clock in lv_arclabel angles */
 #define IMG_CAP_ANGLE_SIZE    70   /* run left along the bottom rim */
 #define IMG_STAMP_DY         232   /* GOES class: bottom chord carrying HH:MM */
@@ -71,44 +68,6 @@ static lv_obj_t *round_layer(lv_obj_t *parent, int w, int h)
     return o;
 }
 
-static lv_obj_t *moon_chord_box(lv_obj_t *parent, int w, int dy)
-{
-    lv_obj_t *box = round_layer(parent, w, IMG_MOON_ROW_H);
-    lv_obj_align(box, LV_ALIGN_CENTER, 0, dy);
-    return box;
-}
-
-static lv_obj_t *moon_label(lv_obj_t *box, lv_align_t align)
-{
-    lv_obj_t *lbl = lv_label_create(box);
-    lv_obj_set_style_text_font(lbl, &lv_font_overpass_27, 0);
-    image_page_caption_style(lbl);
-    lv_obj_align(lbl, align, 0, 0);
-    lv_label_set_text(lbl, "");
-    lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
-    return lbl;
-}
-
-/* Rise/Set only: the bottom chord can be narrower than "Rise 12:34pm +1" (12h
- * clock with a day suffix, the worst case in fmt_moon_event()), so each label
- * is bounded to half the box and dots instead of running into its neighbour
- * (review_impl_F1.md I-2 / ESCALATION 1 ruling). Width, text align and long
- * mode are set before lv_obj_align so alignment sees the final box, matching
- * the lbl_timestamp pattern below. */
-static lv_obj_t *moon_label_capped(lv_obj_t *box, lv_align_t align, int w, lv_text_align_t txt_align)
-{
-    lv_obj_t *lbl = lv_label_create(box);
-    lv_obj_set_style_text_font(lbl, &lv_font_overpass_27, 0);
-    image_page_caption_style(lbl);
-    lv_obj_set_width(lbl, w);
-    lv_obj_set_style_text_align(lbl, txt_align, 0);
-    lv_label_set_long_mode(lbl, LV_LABEL_LONG_DOT);
-    lv_obj_align(lbl, align, 0, 0);
-    lv_label_set_text(lbl, "");
-    lv_obj_add_flag(lbl, LV_OBJ_FLAG_HIDDEN);
-    return lbl;
-}
-
 void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
 {
     const int rs = ui_rim_radius();
@@ -116,35 +75,41 @@ void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
     p->overlay_bar = round_layer(page_container, screen_size(), screen_size());
 
     if (p->src == IMG_SRC_MOON) {
-        /* The disc shrinks so the annulus can hold the labels. */
-        p->fit_px = IMG_MOON_DISC_PX;
-        p->fit_dy = IMG_MOON_DISC_DY;
+        /* The disc is the whole canvas; image_page_moon_ortho() sizes the
+         * sphere inside it, so the starfield reaches the glass. */
+        p->fit_px = 0;
+        p->fit_dy = 0;
+        atomic_store(&p->moon_overlay_on, false);
 
+        /* The caption call sites write lbl_region and lbl_timestamp; on round
+         * both stay hidden (the name rides the top rim row, the illumination
+         * is the arc). */
         p->lbl_region = lv_label_create(p->overlay_bar);
         lv_obj_set_style_text_font(p->lbl_region, &lv_font_overpass_27, 0);
         image_page_caption_style(p->lbl_region);
-        lv_obj_set_style_text_align(p->lbl_region, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_align(p->lbl_region, LV_ALIGN_CENTER, 0, IMG_MOON_NAME_DY);
         lv_label_set_text(p->lbl_region, "");
-
-        /* Illumination is the rim arc, so the percentage is never drawn. The
-         * handle stays live so every caption call site keeps working with no
-         * source test. */
+        lv_obj_add_flag(p->lbl_region, LV_OBJ_FLAG_HIDDEN);
         p->lbl_timestamp = lv_label_create(p->overlay_bar);
         lv_obj_set_style_text_font(p->lbl_timestamp, &lv_font_overpass_27, 0);
         image_page_caption_style(p->lbl_timestamp);
         lv_label_set_text(p->lbl_timestamp, "");
         lv_obj_add_flag(p->lbl_timestamp, LV_OBJ_FLAG_HIDDEN);
 
-        lv_obj_t *top = moon_chord_box(page_container, IMG_MOON_TOP_W, IMG_MOON_TOP_DY);
-        p->lbl_moon_age  = moon_label(top, LV_ALIGN_LEFT_MID);
-        p->lbl_moon_next = moon_label(top, LV_ALIGN_RIGHT_MID);
-
-        int bot_w = ui_chord_at_y(screen_center() + IMG_MOON_BOT_DY + IMG_MOON_ROW_H / 2);
-        lv_obj_t *bot = moon_chord_box(page_container, bot_w, IMG_MOON_BOT_DY);
-        int bot_cap_w = bot_w / 2 - 8;
-        p->lbl_moon_rise = moon_label_capped(bot, LV_ALIGN_LEFT_MID,  bot_cap_w, LV_TEXT_ALIGN_LEFT);
-        p->lbl_moon_set  = moon_label_capped(bot, LV_ALIGN_RIGHT_MID, bot_cap_w, LV_TEXT_ALIGN_RIGHT);
+        /* Two rim rows just inside the age arc, children of overlay_bar so the
+         * C2 tap hides them with it. Text comes from update_moon_corner_labels. */
+        int r_txt = rs - IMG_R_ARC_INSET - IMG_ARC_W / 2 - IMG_MOON_TEXT_INSET;
+        /* 150 degrees, not the wrapper's 120: the top row carries the phase
+         * name, the age and the next phase ("Waning Gibbous / Age 16.1d / New
+         * in 13d", 39 glyphs), which the shorter span dotted at 800. Same
+         * angle conventions as ui_arclabel_top()/_bottom(). */
+        p->moon_arc_top = ui_arclabel_create(p->overlay_bar, &lv_font_overpass_27, r_txt,
+                                             270 - IMG_MOON_TEXT_SPAN / 2, IMG_MOON_TEXT_SPAN,
+                                             true, LV_ARCLABEL_TEXT_ALIGN_CENTER);
+        if (p->moon_arc_top) image_page_caption_style(p->moon_arc_top);
+        p->moon_arc_bot = ui_arclabel_create(p->overlay_bar, &lv_font_overpass_27, r_txt,
+                                             90 - IMG_MOON_TEXT_SPAN / 2, IMG_MOON_TEXT_SPAN,
+                                             false, LV_ARCLABEL_TEXT_ALIGN_CENTER);
+        if (p->moon_arc_bot) image_page_caption_style(p->moon_arc_bot);
 
         /* Lunar age arc: track full circle, indicator from twelve o'clock
          * clockwise to the lit fraction. lv_arc puts its centre line at
@@ -204,4 +169,23 @@ void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
     lv_obj_set_style_text_align(p->lbl_timestamp, LV_TEXT_ALIGN_RIGHT, 0);
     lv_obj_align(p->lbl_timestamp, LV_ALIGN_CENTER, 0, IMG_STAMP_DY);
     lv_label_set_text(p->lbl_timestamp, "");
+}
+
+/* Disc diameter from moon_round_size_pct (percent of the rim diameter) while
+ * the text is hidden; with the text shown it is also capped so the disc clears
+ * the rim rows. Returned as the renderer's half-extent over a full-panel canvas,
+ * so the starfield fills the glass whatever the disc size. */
+float image_page_moon_ortho(const image_page_t *p)
+{
+    const int rs = ui_rim_radius();
+    int pct = app_config_get()->moon_round_size_pct;
+    if (pct < 50 || pct > 150) pct = 100;
+    int disc = 2 * rs * pct / 100;
+    if (atomic_load(&p->moon_overlay_on)) {
+        int r_txt = rs - IMG_R_ARC_INSET - IMG_ARC_W / 2 - IMG_MOON_TEXT_INSET;
+        int cap = 2 * (r_txt - IMG_MOON_TEXT_H - IMG_MOON_TEXT_GAP);
+        if (disc > cap) disc = cap;
+    }
+    if (disc < 100) disc = 100;
+    return (float)screen_size() / (float)disc;
 }

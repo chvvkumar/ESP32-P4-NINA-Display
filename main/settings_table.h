@@ -145,6 +145,7 @@
     INT       (custom_hflip,                 "custom_hflip",                 0,     0,     1) \
     /* -- Moon phase -- */ \
     INT_RESET (moon_bg_style,                "moon_bg_style",                0,     0,     3) \
+    INT       (moon_round_size_pct,          "moon_round_size_pct",          100,   50,    150)   /* v79 round Moon disc size, percent of the rim diameter */ \
     FLT       (moon_lat,                     "moon_lat",                     0.0f,  -90.0f, 90.0f)  /* no prior clamp; obviously-correct latitude bound */ \
     FLT       (moon_lon,                     "moon_lon",                     0.0f,  -180.0f,180.0f) /* no prior clamp; obviously-correct longitude bound */ \
     INT_RESET (solar_band,                   "solar_band",                   0,     0,     23) \

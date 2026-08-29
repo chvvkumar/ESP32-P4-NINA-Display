@@ -2404,6 +2404,7 @@
       data.moon_update_interval_s=parseInt($('moonInterval').value,10)||60;
       data.moon_bg_style=parseInt($('moonBg').value,10)||0;
       data.moon_drag_light_mode=parseInt($('moonDragLight').value,10)||0;
+      data.moon_round_size_pct=parseInt($('moon_round_size_pct').value,10)||100;
       data.moon_lat=currentMoonLat();
       data.moon_lon=currentMoonLon();
       data.moon_north_up=$('moon_north_up').checked?1:0;
@@ -2892,6 +2893,7 @@
       if($('moonInterval')) $('moonInterval').value=String(data.moon_update_interval_s||60);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
       if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
+      if($('moon_round_size_pct')){ $('moon_round_size_pct').value=String(data.moon_round_size_pct||100); updateMoonSizeReadout(); }
       if($('moon_north_up')) $('moon_north_up').checked=(data.moon_north_up==null)?true:!!data.moon_north_up;
       if($('moon_flip_u')) $('moon_flip_u').checked=!!data.moon_flip_u;
       if($('moon_flip_v')) $('moon_flip_v').checked=!!data.moon_flip_v;
@@ -4890,6 +4892,11 @@
           if(d&&d.error_msg) showToast(d.error_msg,'error');
         }).catch(function(){});
       }).catch(function(){});
+    }
+
+    function updateMoonSizeReadout(){
+      var el=$('moon_round_size_pct'); var out=$('moon_round_size_val');
+      if(el&&out) out.textContent=(parseInt(el.value,10)||100)+'%';
     }
 
     function updateMoonOrientReadout(which){

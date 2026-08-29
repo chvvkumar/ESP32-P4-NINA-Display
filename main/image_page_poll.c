@@ -1224,6 +1224,8 @@ static bool moon_poll_once(void *arg)
 
     /* The Moon renders locally; a manual request just means "render now". */
     atomic_exchange(&p->manual_fetch, false);
+    /* Disc size for every render below (drag frames included). */
+    moon_sphere_set_ortho(image_page_moon_ortho(p));
 
     time_t now;
     time(&now);
