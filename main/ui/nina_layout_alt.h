@@ -25,6 +25,15 @@
 
 /**
  * @brief Build the Image-forward widget tree.
+ *
+ * This entry point and the two below it are DEFINED PER FAMILY: the square
+ * bodies live in nina_layout_image.c behind #if !CONFIG_NINA_FAMILY_ROUND, the
+ * round ones (radial board 2) in nina_layout_image_round.c, which only the
+ * round build compiles (nina_round_srcs). There is no runtime dispatch; the
+ * linker takes the family's definitions. The retained-capture store and the
+ * three hooks at the end of this section stay in nina_layout_image.c, which is
+ * compiled on both families.
+ *
  * @param p           Page state; store widget pointers in p->alt
  * @param parent      The page root created by the spine (p->page)
  * @param page_index  NINA instance index, 0..MAX_NINA_INSTANCES-1
@@ -71,6 +80,41 @@ bool nina_layout_image_needs_capture(int instance);
  */
 void nina_layout_image_note_capture_request(int instance, bool asked);
 
+/**
+ * @brief Drop a retained capture that was remapped for the other Red Night state.
+ *
+ * Both family builders call this from their apply_theme; the capture store and
+ * the remap rule stay in nina_layout_image.c, which is compiled in both.
+ * LVGL lock held by caller.
+ */
+void nina_layout_image_note_theme_switch(int instance);
+
+/**
+ * @brief Re-attach a still-retained capture after a page rebuild.
+ *
+ * A rebuild that kept the frame (theme or URL edit rather than a page leave)
+ * shows it again instead of an empty background. No-op with no retained frame.
+ * LVGL lock held by caller.
+ */
+void nina_layout_image_reattach_capture(int instance);
+
+/* -- Layout 0 -- Dashboard, round family only ----------------------------- */
+
+/**
+ * @brief Build the radial Dashboard widget tree (round family only).
+ *
+ * Defined in nina_layout_dashboard_round.c, which is compiled only when
+ * CONFIG_NINA_FAMILY_ROUND is set. Fills the same dashboard_page_t handles the
+ * square grid fills where the content matches, plus the shape handles; every
+ * handle it leaves NULL is null-checked by nina_dashboard_update.c.
+ *
+ * @param p           Page state
+ * @param parent      The full-panel page root created by the spine (p->page)
+ * @param page_index  NINA instance index, 0..MAX_NINA_INSTANCES-1
+ */
+void nina_layout_dashboard_round_create(dashboard_page_t *p, lv_obj_t *parent,
+                                        int page_index);
+
 /* ── Shared ───────────────────────────────────────────────────────────────── */
 
 /**
@@ -94,6 +138,8 @@ typedef enum {
     NINA_TAP_FLIP,          /* mount overlay */
     NINA_TAP_SESSION,       /* session stats / time limit */
     NINA_TAP_FILTER,        /* filter detail */
+    NINA_TAP_HFR,           /* HFR graph; long press opens the autofocus curve */
+    NINA_TAP_EXPOSURE,      /* camera + weather overlay (the square arc box) */
 } nina_tap_target_t;
 
 /**

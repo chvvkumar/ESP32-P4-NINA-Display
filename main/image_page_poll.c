@@ -59,14 +59,14 @@ _Atomic bool moon_anim_request = false;
  * by goes_poll_task.
  *
  * Touch-frame pipeline (per frame):
- *   1. moon_sphere_render_into() the sphere at MOON_DRAG_SZ_TOUCH (240) into the
+ *   1. moon_sphere_render_into() the sphere at moon_drag_sz() (240) into the
  *      small color/z scratch (s_drag_color / s_drag_zbuf), CPU-written;
  *   2. ppa_scale_rgb565_into_noclear() hardware-upscales 240->720 (an EXACT 3.0x
  *      ratio: 720/240=3, representable on PPA's 1/16 scale grid so the whole 720
  *      output is filled with no edge-streak remainder, and no per-frame memset)
  *      into the ping-pong output buffer s_ppa_out[ping];
- *   3. image_page_show_borrowed(p, s_ppa_out[ping], 720, 720) points the
- *      LVGL descriptor straight at it (no copy) at scale 1.0; then flip ping.
+ *   3. image_page_show_borrowed(p, s_ppa_out[ping], moon_fit_sz(), moon_fit_sz()) points
+ *      the LVGL descriptor straight at it (no copy) at scale 1.0; then flip ping.
  * The PPA driver handles cache coherency for the BLOCKING transfer in BOTH
  * directions, so the output is coherent for LVGL read when the call returns — no
  * manual esp_cache_msync. The output is DOUBLE-BUFFERED (s_ppa_out[0]/[1]); PPA
@@ -94,13 +94,26 @@ _Atomic bool moon_anim_request = false;
  * interpolation reads black, not heap garbage"). See reference_lvgl_ppa_scale_limitation.md
  * (Gotcha 3/4): a clean PPA upscale needs BOTH the exact n/16 ratio AND guard rows.
  *
- *   - s_drag_color: (MOON_DRAG_SZ_TOUCH + GUARD_ROWS) * MOON_DRAG_SZ_TOUCH * 2  (CPU-written + guard)
- *   - s_drag_zbuf:  MOON_DRAG_SZ_TOUCH^2 * 2  depth buffer (not DMA-read by PPA; no guard needed)
+ *   - s_drag_color: (moon_drag_sz() + GUARD_ROWS) * moon_drag_sz() * 2  (CPU-written + guard)
+ *   - s_drag_zbuf:  moon_drag_sz()^2 * 2  depth buffer (not DMA-read by PPA; no guard needed)
  *   - s_ppa_out[2]: 720*720*2 each            PPA upscale output, ping-pong
  * If PPA scale fails or a buffer didn't allocate, the loop falls back to the
  * software-scale path (moon_sphere_render + image_page_show_scaled) so it
  * degrades gracefully instead of crashing. */
-#define MOON_DRAG_SZ_TOUCH  240          /* render size for the whole touch interaction (240->720 = exact 3.0x) */
+/* Render size for the whole touch interaction. The upscale to the DISPLAYED
+ * disc must land on the PPA n/16 grid exactly, so the divisor is chosen to
+ * divide the fitted width: 720/3 = 240 and 800/4 = 200 when the disc fills the
+ * panel, 432/3 = 144 when a round builder shrank it. */
+static inline int moon_fit_sz(void)
+{
+    return image_page_fit_px(image_page_get(IMG_SRC_MOON));
+}
+
+static inline int moon_drag_sz(void)
+{
+    int fit = moon_fit_sz();
+    return (fit % 3 == 0) ? fit / 3 : fit / 4;
+}
 #define MOON_DRAG_GUARD_ROWS 8           /* zeroed rows below s_drag_color: catch PPA upscale bottom over-read */
 #define MOON_DRAG_SECTORS   96           /* tessellation: longitude bands (kills quad faceting) */
 #define MOON_DRAG_STACKS    48           /* tessellation: latitude bands */
@@ -845,7 +858,7 @@ static bool anim_decode_headroom(image_page_t *p, bool newest)
      * let a decode fail. */
     const size_t transient = (p->src == IMG_SRC_CLOUDS) ? ANIM_DECODE_TRANSIENT_HW_BYTES
                                                         : ANIM_DECODE_TRANSIENT_BYTES;
-    const size_t need = (size_t)SCREEN_SIZE * SCREEN_SIZE * 2 + transient;
+    const size_t need = (size_t)screen_size() * screen_size() * 2 + transient;
     if (!newest) {
         if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= need) return true;
         ESP_LOGW(TAG, "%s backfill stopped: PSRAM headroom", p->name);
@@ -1211,6 +1224,8 @@ static bool moon_poll_once(void *arg)
 
     /* The Moon renders locally; a manual request just means "render now". */
     atomic_exchange(&p->manual_fetch, false);
+    /* Disc size for every render below (drag frames included). */
+    moon_sphere_set_ortho(image_page_moon_ortho(p));
 
     time_t now;
     time(&now);
@@ -1279,12 +1294,12 @@ static bool moon_poll_once(void *arg)
          * no-op when the buffers already exist, so a re-grab that loops back
          * into the drag while-loop never re-allocates. */
         if (!s_drag_color || !s_drag_zbuf || !s_ppa_out[0] || !s_ppa_out[1]) {
-            size_t row_bytes  = (size_t)MOON_DRAG_SZ_TOUCH * 2;
-            size_t color_sz   = ((size_t)MOON_DRAG_SZ_TOUCH + MOON_DRAG_GUARD_ROWS) * row_bytes;
+            size_t row_bytes  = (size_t)moon_drag_sz() * 2;
+            size_t color_sz   = ((size_t)moon_drag_sz() + MOON_DRAG_GUARD_ROWS) * row_bytes;
             color_sz = (color_sz + 127) & ~(size_t)127;   /* 248*480=119040, already 128-aligned */
-            size_t zbuf_sz    = (size_t)MOON_DRAG_SZ_TOUCH * row_bytes;
+            size_t zbuf_sz    = (size_t)moon_drag_sz() * row_bytes;
             zbuf_sz  = (zbuf_sz + 127) & ~(size_t)127;
-            size_t out_sz     = (size_t)SCREEN_SIZE * SCREEN_SIZE * 2;   /* 720*720*2 = 128-aligned */
+            size_t out_sz     = (size_t)screen_size() * screen_size() * 2;   /* 720*720*2 = 128-aligned */
             moon_drag_buffers_free();   /* drop any partial alloc first */
             s_drag_color = (uint16_t *)heap_caps_aligned_alloc(128, color_sz, MALLOC_CAP_SPIRAM);
             s_drag_zbuf  = (uint16_t *)heap_caps_aligned_alloc(128, zbuf_sz, MALLOC_CAP_SPIRAM);
@@ -1301,7 +1316,7 @@ static bool moon_poll_once(void *arg)
                  * rows stay zeroed and this never repeats. Offset/length
                  * are both 128-aligned (115200 / 3840). */
                 uint8_t *guard = (uint8_t *)s_drag_color +
-                                 (size_t)MOON_DRAG_SZ_TOUCH * row_bytes;
+                                 (size_t)moon_drag_sz() * row_bytes;
                 size_t   guard_bytes = (size_t)MOON_DRAG_GUARD_ROWS * row_bytes;
                 memset(guard, 0, guard_bytes);
                 esp_cache_msync(guard, guard_bytes, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
@@ -1404,7 +1419,7 @@ static bool moon_poll_once(void *arg)
         if (s_drag_color && s_drag_zbuf && s_ppa_out[0] && s_ppa_out[1]) {
             /* Render 240px into persistent scratch — NO per-frame alloc. */
             uint16_t *fimg = moon_sphere_render_into(
-                MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH, &live,
+                moon_drag_sz(), moon_drag_sz(), &live,
                 MOON_DRAG_SECTORS, MOON_DRAG_STACKS, cfg->moon_bg_style,
                 yaw, pitch, light, s_moon_light_mix, s_drag_color, s_drag_zbuf);
             if (fimg) {
@@ -1416,7 +1431,7 @@ static bool moon_poll_once(void *arg)
                 bool red = image_red_remap_active();
                 if (red) {
                     image_red_remap_rgb565_force(
-                        fimg, (size_t)MOON_DRAG_SZ_TOUCH * MOON_DRAG_SZ_TOUCH);
+                        fimg, (size_t)moon_drag_sz() * moon_drag_sz());
                 }
 
                 /* PPA hardware-upscale 240->720 (exact 3.0x) into the
@@ -1426,18 +1441,18 @@ static bool moon_poll_once(void *arg)
                  * coherent for LVGL read on return. */
                 int ping = s_ppa_ping;
                 uint8_t *out = ppa_scale_rgb565_into_noclear(
-                    (const uint8_t *)fimg, MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH,
-                    MOON_DRAG_SZ_TOUCH /* stride in pixels */,
-                    SCREEN_SIZE, SCREEN_SIZE,
+                    (const uint8_t *)fimg, moon_drag_sz(), moon_drag_sz(),
+                    moon_drag_sz() /* stride in pixels */,
+                    moon_fit_sz(), moon_fit_sz(),
                     (uint8_t *)s_ppa_out[ping],
-                    (size_t)SCREEN_SIZE * SCREEN_SIZE * 2, NULL);
+                    (size_t)screen_size() * screen_size() * 2, NULL);
                 if (out) {
                     /* Point the LVGL descriptor straight at the 720 buffer
                      * (no copy) at scale 1.0. Lock held only around the
                      * swap. The ping-pong guarantees we never overwrite the
                      * buffer LVGL is flushing. */
                     if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                        image_page_show_borrowed(p, s_ppa_out[ping], SCREEN_SIZE, SCREEN_SIZE);
+                        image_page_show_borrowed(p, s_ppa_out[ping], moon_fit_sz(), moon_fit_sz());
                         bsp_display_unlock();
                     }
                     s_ppa_ping ^= 1;   /* flip: PPA writes the other buffer next frame */
@@ -1450,7 +1465,7 @@ static bool moon_poll_once(void *arg)
                  * double-darken it; leaving `shown` false hands the frame to
                  * the fresh-render fallback below, which remaps exactly once. */
                 if (!shown && !red && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                    image_page_show_scaled(p, fimg, MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH);
+                    image_page_show_scaled(p, fimg, moon_drag_sz(), moon_drag_sz());
                     bsp_display_unlock();
                     shown = true;
                 }
@@ -1467,11 +1482,11 @@ static bool moon_poll_once(void *arg)
              * to the PPA path, not this degraded fallback. render_ex has no
              * mix input, so this path renders the configured mode directly
              * (lighting switches instead of crossfading; acceptable here). */
-            uint16_t *fimg = moon_sphere_render_ex(MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH, &live,
+            uint16_t *fimg = moon_sphere_render_ex(moon_drag_sz(), moon_drag_sz(), &live,
                                                    MOON_DRAG_SECTORS, MOON_DRAG_STACKS,
                                                    cfg->moon_bg_style, yaw, pitch, cfg_light);
             if (fimg) {
-                moon_commit(p, fimg, MOON_DRAG_SZ_TOUCH, MOON_DRAG_SZ_TOUCH);
+                moon_commit(p, fimg, moon_drag_sz(), moon_drag_sz());
             }
         }
 
@@ -1498,14 +1513,15 @@ static bool moon_poll_once(void *arg)
      * home and `continue` so the inner settle loop runs the snap-back +
      * resting commit exactly as the rubber-band path does. */
     if (freespin_hold) {
-        /* One crisp held-orientation frame at native 720. moon_sphere_render_ex
-         * owns its own PSRAM buffer; the commit takes ownership. */
+        /* One crisp held-orientation frame at moon_fit_sz() (native panel size on
+         * square, the shrunk 432 disc on round). moon_sphere_render_ex owns its
+         * own PSRAM buffer; the commit takes ownership. */
         float hy, hp; moon_drag_get(&hy, &hp);
-        uint16_t *hold_img = moon_sphere_render_ex(SCREEN_SIZE, SCREEN_SIZE, &live,
+        uint16_t *hold_img = moon_sphere_render_ex(moon_fit_sz(), moon_fit_sz(), &live,
                                                    96, 48, cfg->moon_bg_style,
                                                    hy, hp, (moon_light_mode_t)cfg->moon_drag_light_mode);
         if (hold_img && atomic_load(&p->active) && !moon_drag_active()) {
-            moon_commit(p, hold_img, SCREEN_SIZE, SCREEN_SIZE);
+            moon_commit(p, hold_img, moon_fit_sz(), moon_fit_sz());
         } else if (hold_img) {
             heap_caps_free(hold_img);
         }
@@ -1579,7 +1595,7 @@ static bool moon_poll_once(void *arg)
      * rest (not per-frame), so it is fine. update() copies it into an owned
      * buffer and crossfades it in at scale 1.0. */
     s_moon_state = live;
-    const int MOON_SZ = SCREEN_SIZE;
+    const int MOON_SZ = moon_fit_sz();
 
     /* ABORT-IF-TOUCH-RESUMED backstop. The grace window above makes this
      * rare, but a touch can land right at the grace boundary, AFTER we

@@ -256,6 +256,10 @@ target_compile_definitions(test_radar_wms PRIVATE
 add_nina_host_test(test_clouds_wms
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_clouds_wms.c
+        # clouds_wms.h derives CLOUDS_PX from screen_size(), which reads
+        # g_screen_size out of this file. The default there is 720, so every
+        # existing 720-based assertion in this test still holds.
+        ${NINA_REPO_ROOT}/main/screen_geom.c
 )
 
 # ---------------------------------------------------------------------------
@@ -283,4 +287,55 @@ add_nina_host_test(test_adsb_geom
 add_nina_host_test(test_image_fit
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_image_fit.c
+)
+
+# ---------------------------------------------------------------------------
+# test_clock_dial -- the Classic round clock face's 12-hour forecast dial
+# (main/ui/clock_dial.h): 30 degrees per hour, the entry for hour H at the
+# clock position of H % 12, each block spanning the hours until the next
+# entry (1 on Open-Meteo and Weather Underground, 3 on OpenWeatherMap after
+# a short first gap), and nothing past 12 hours from the first entry.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_clock_dial
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_clock_dial.c
+)
+
+# ---------------------------------------------------------------------------
+# test_board_detect -- the RDDID signature table and the controller match
+# (main/board_detect.c). Dependency free by design: no ESP-IDF, no FreeRTOS, no
+# LVGL, no NVS, so it compiles here directly. Everything that touches hardware
+# lives in main/board_profile.c, which is not host compiled.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_board_detect
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_board_detect.c
+        ${NINA_REPO_ROOT}/main/board_detect.c
+)
+
+# ---------------------------------------------------------------------------
+# test_screen_geom -- the panel safe area, the inscribed square and the inset
+# arithmetic for all three panel rows (main/screen_geom.c), plus the BSP
+# backlight curve (components/.../include/bsp/brightness_curve.h, header-only,
+# included by relative path so the BSP needs no host include dir).
+# screen_geom.h pulls in sdkconfig.h for the family macro, which the host shims
+# provide.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_screen_geom
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_screen_geom.c
+        ${NINA_REPO_ROOT}/main/screen_geom.c
+)
+
+# ---------------------------------------------------------------------------
+# test_ui_round -- the round layout geometry (main/ui/ui_round.h): rim radius,
+# chord widths and the page inset. Header-only and pure, so the only source it
+# needs beside the test is main/screen_geom.c, which backs the three globals it
+# reads. add_nina_host_test() already puts main/ and main/ui/ on the include
+# path and links m for sqrtf.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_ui_round
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_round.c
+        ${NINA_REPO_ROOT}/main/screen_geom.c
 )

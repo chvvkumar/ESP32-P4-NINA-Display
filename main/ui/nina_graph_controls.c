@@ -9,6 +9,11 @@
 #include <stdio.h>
 #include <string.h>
 
+/* Controls-builder seam. NULL on square, so the shipped body of
+ * rebuild_controls() runs; graph_round_fit() points it at
+ * graph_round_rebuild_controls on the round family. */
+graph_controls_builder_t graph_controls_builder = NULL;
+
 /* -- Callbacks ----------------------------------------------------------- */
 
 void back_btn_cb(lv_event_t *e) {
@@ -43,23 +48,8 @@ void point_btn_cb(lv_event_t *e) {
     graph_requested = true;
 }
 
-void scale_btn_cb(lv_event_t *e) {
-    int idx = (int)(intptr_t)lv_event_get_user_data(e);
-    if (idx < 0 || idx >= scale_btn_count) return;
-
-    int gb = app_config_get()->color_brightness;
-
-    for (int i = 0; i < scale_btn_count; i++) {
-        lv_obj_t *lbl = lv_obj_get_child(btn_scale[i], 0);
-        if (i == idx) {
-            lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(current_theme->progress_color), 0);
-            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
-        } else {
-            lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
-            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(get_control_text_color(gb)), 0);
-        }
-    }
-
+void graph_apply_scale(int idx)
+{
     selected_scale_idx = idx;
 
     /* Apply new Y range to the chart */
@@ -89,6 +79,42 @@ void scale_btn_cb(lv_event_t *e) {
         }
         lv_chart_refresh(chart);
     }
+}
+
+/* Round: the two control rows do not fit the bottom cap, so the Y-scale choice
+ * moves onto the plot's y-axis layer as a tap-cycle. One rule for both panel
+ * sizes; the square builder never attaches this callback, so square is
+ * unchanged. btn_scale[] is empty on round, hence the NULL guard in
+ * scale_btn_cb below. */
+void y_scale_cycle_cb(lv_event_t *e)
+{
+    LV_UNUSED(e);
+    int count = (current_type == GRAPH_TYPE_RMS) ? RMS_SCALE_COUNT : HFR_SCALE_COUNT;
+    if (count <= 0) return;
+    int idx = selected_scale_idx + 1;
+    if (idx >= count) idx = 0;
+    graph_apply_scale(idx);
+}
+
+void scale_btn_cb(lv_event_t *e) {
+    int idx = (int)(intptr_t)lv_event_get_user_data(e);
+    if (idx < 0 || idx >= scale_btn_count) return;
+
+    int gb = app_config_get()->color_brightness;
+
+    for (int i = 0; i < scale_btn_count; i++) {
+        if (!btn_scale[i]) continue;
+        lv_obj_t *lbl = lv_obj_get_child(btn_scale[i], 0);
+        if (i == idx) {
+            lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(current_theme->progress_color), 0);
+            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(0x000000), 0);
+        } else {
+            lv_obj_set_style_bg_color(btn_scale[i], lv_color_hex(app_config_apply_brightness(current_theme->bento_border, gb)), 0);
+            if (lbl) lv_obj_set_style_text_color(lbl, lv_color_hex(get_control_text_color(gb)), 0);
+        }
+    }
+
+    graph_apply_scale(idx);
 }
 
 /* -- Helper: create a pill button ---------------------------------------- */
@@ -131,6 +157,15 @@ lv_obj_t *make_pill_btn(lv_obj_t *parent, const char *text, bool selected,
 /* -- Controls row (rebuilt when switching graph type) --------------------- */
 
 void rebuild_controls(void) {
+    /* Seam, not a family conditional: graph_round_fit() installs the round
+     * builder here at create time, so this file carries no #if and the graph
+     * page keeps exactly one dispatch point (in nina_graph_overlay_create).
+     * On square the hook is NULL and the shipped body below runs. */
+    if (graph_controls_builder) {
+        graph_controls_builder();
+        return;
+    }
+
     int gb = app_config_get()->color_brightness;
 
     /* Delete old controls if any */

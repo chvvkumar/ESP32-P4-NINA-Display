@@ -44,7 +44,19 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
 .qc-btn{display:flex;align-items:center;gap:6px;color:var(--hint);font-size:.75rem;font-weight:500;font-family:inherit;padding:7px 12px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.02);cursor:pointer;transition:all .2s ease;white-space:nowrap}
 .qc-btn:hover{color:#f4f4f5;border-color:rgba(var(--a),.3);background:rgba(255,255,255,.04)}
 .qc-btn.muted{color:#60a5fa;border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.15)}
-.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible,.github-link:focus-visible,.qc-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* volume: one pill holding the mute icon, the slider and the readout */
+.qc-vol{display:flex;align-items:center;gap:6px;padding:3px 10px 3px 4px;border:1px solid rgba(255,255,255,.06);border-radius:10px;background:rgba(255,255,255,.02);transition:all .2s ease}
+.qc-vol:hover{border-color:rgba(var(--a),.3)}
+.qc-vol.muted{border-color:rgba(59,130,246,.35);background:rgba(59,130,246,.15)}
+.qc-vol .qc-btn{padding:5px 6px;border:0;background:none}
+.qc-vol .qc-btn:hover{background:none;border:0}
+.qc-vol.muted .qc-btn{color:#60a5fa}
+.qc-range{-webkit-appearance:none;appearance:none;width:86px;height:4px;border-radius:2px;background:rgba(255,255,255,.16);cursor:pointer}
+.qc-range::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--accent);border:0;cursor:pointer}
+.qc-range::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:var(--accent);border:0;cursor:pointer}
+.qc-vol.muted .qc-range{opacity:.4}
+.qc-vol-val{font-size:.72rem;color:var(--hint);font-variant-numeric:tabular-nums;min-width:34px;text-align:right}
+.deck-chip:focus-visible,.rig-row:focus-visible,.int-chip:focus-visible,.update-badge:focus-visible,.github-link:focus-visible,.qc-btn:focus-visible,.qc-range:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .nav-section:focus-visible,.nav-tab:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 .content{max-width:1180px;margin:0 auto;padding:24px 24px 60px}
 .card{background:var(--glass-bg);border:1px solid var(--glass-border);border-radius:var(--radius);padding:24px 28px;margin-bottom:20px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
@@ -256,10 +268,13 @@ body{font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sa
     GitHub
    </a>
    <span class="quick-controls" id="quickControls">
-    <button type="button" class="qc-btn" id="muteBtn" title="Mute all audio">
-     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path id="muteIconOn" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path id="muteIconOff" style="display:none" d="M16 9l6 6M22 9l-6 6"/></svg>
-     <span id="muteLabel">Mute</span>
-    </button>
+    <span class="qc-vol" id="volGroup">
+     <button type="button" class="qc-btn" id="muteBtn" title="Mute all audio" aria-label="Mute all audio">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path id="muteIconOn" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path id="muteIconOff" style="display:none" d="M16 9l6 6M22 9l-6 6"/></svg>
+     </button>
+     <input type="range" class="qc-range" id="volRange" min="0" max="100" step="5" value="90" title="Speaker volume" aria-label="Speaker volume">
+     <span class="qc-vol-val" id="volVal">--</span>
+    </span>
    </span>
   </div>
  </div>
@@ -1027,19 +1042,40 @@ autoRotateToggle.addEventListener('change', function (e) {
   });
 });
 
-/* ---- quick controls: global audio mute ---- */
-function renderMute(muted) {
- var btn = $('muteBtn');
- btn.classList.toggle('muted', !!muted);
- btn.title = muted ? 'Audio muted - click to unmute' : 'Mute all audio';
- $('muteLabel').textContent = muted ? 'Muted' : 'Mute';
- $('muteIconOn').style.display = muted ? 'none' : '';
- $('muteIconOff').style.display = muted ? '' : 'none';
+/* ---- quick controls: speaker volume + global audio mute ---- */
+/* One pill: the icon toggles audio_muted, the slider sets alert_voice_volume.
+   Both go through the Control API (deferred NVS save), and the audio path reads
+   mute and volume out of config at speak time, so both take effect at once.
+   The slider writes on 'change' (pointer release), not 'input', so one drag is
+   one request instead of twenty. */
+var volState = { muted: false, vol: 90 };
+function renderVol() {
+ $('volGroup').classList.toggle('muted', volState.muted);
+ $('muteBtn').title = volState.muted ? 'Audio muted - click to unmute' : 'Mute all audio';
+ $('muteIconOn').style.display = volState.muted ? 'none' : '';
+ $('muteIconOff').style.display = volState.muted ? '' : 'none';
+ $('volRange').value = volState.vol;
+ $('volVal').textContent = volState.vol + '%';
 }
 $('muteBtn').addEventListener('click', function () {
  getJSON('/api/control/toggle?name=audio_muted', { method: 'POST' })
-  .then(function (it) { renderMute(it.value); })
+  .then(function (it) { volState.muted = !!it.value; renderVol(); })
   .catch(function () {});
+});
+$('volRange').addEventListener('input', function () { $('volVal').textContent = this.value + '%'; });
+$('volRange').addEventListener('change', function () {
+ var v = parseInt(this.value, 10) || 0;
+ getJSON('/api/control/set?name=alert_voice_volume&value=' + v, { method: 'POST' })
+  .then(function (it) {
+   volState.vol = it.value;
+   /* Turning it up means the user wants to hear something: lift a standing mute. */
+   if (volState.muted && v > 0) {
+    return getJSON('/api/control/toggle?name=audio_muted', { method: 'POST' })
+     .then(function (m) { volState.muted = !!m.value; });
+   }
+  })
+  .then(renderVol)
+  .catch(function () { renderVol(); });
 });
 
 /* ---- 1s ticker: uptime + local override countdown only ---- */
@@ -1065,8 +1101,12 @@ getJSON('/api/version').then(function (v) {
  return getJSON('/api/pages').then(buildDeck).catch(function () {});
 }).then(function () {
  return getJSON('/api/control/get?name=audio_muted').then(function (it) {
-  renderMute(it.value);
- }).catch(function () {});
+  volState.muted = !!it.value;
+ }).catch(function () {}).then(function () {
+  return getJSON('/api/control/get?name=alert_voice_volume').then(function (it) {
+   volState.vol = it.value;
+  }).catch(function () {});
+ }).then(renderVol);
 }).then(function () {
  render();
  poll();

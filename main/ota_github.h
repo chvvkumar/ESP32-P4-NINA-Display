@@ -2,10 +2,48 @@
 
 #include "esp_err.h"
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * Bytes of the image that must be in hand before the family can be read:
+ * esp_image_header_t (24) + the first esp_image_segment_header_t (8) puts
+ * esp_app_desc_t at image offset 32, and project_name[32] sits at offset 48
+ * inside it, so the last interesting byte is 32 + 48 + 32 = 112.
+ */
+#define OTA_FAMILY_HDR_BYTES 112
+
+typedef enum {
+    OTA_FAMILY_ACCEPT = 0,   /* this family's image */
+    OTA_FAMILY_REFUSE,       /* the other family's image, do not write it */
+    OTA_FAMILY_NO_DESC,      /* no app descriptor where one must be; also refused */
+} ota_family_verdict_t;
+
+/**
+ * @brief Decide whether the first @p len bytes of an incoming image belong to
+ *        this firmware family.
+ *
+ * Shared by BOTH writers: the web upload handler and the GitHub download task.
+ * The asset name protects only the download path and is a CI naming convention,
+ * not a check on the device, so the structural gate lives here.
+ *
+ * Only OTA_FAMILY_ACCEPT may be written to flash. A buffer shorter than
+ * OTA_FAMILY_HDR_BYTES is refused, not deferred: both writers already hold the
+ * full prefix before they ask, so a short buffer means a caller skipped that.
+ * A missing app-descriptor magic is refused too, because nothing downstream
+ * catches it on this target: esp_image_verify() only checks the descriptor
+ * magic where SOC_MMU_PAGE_SIZE_CONFIGURABLE is defined (not on the ESP32-P4)
+ * or under CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK (off here), so an image with no
+ * descriptor would otherwise be written and booted unchecked.
+ */
+ota_family_verdict_t ota_family_check(const uint8_t *hdr, size_t len);
+
+/** @brief The project_name this build expects, for the refusal message. */
+const char *ota_family_expected_name(void);
 
 typedef struct {
     char tag[32];              // e.g., "v1.0.14"

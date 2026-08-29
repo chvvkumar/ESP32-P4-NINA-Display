@@ -322,6 +322,16 @@
         </div>
 
         <div class="api-ep">
+          <div class="api-ep-head"><span class="api-method">POST</span><span class="api-path">/api/ota-check</span><span class="api-badge auth">Auth</span></div>
+          <p class="api-purpose">Check the first bytes of a firmware .bin against this device's panel family before uploading it. Returns 200 when the file matches, 409 with an error message when it is built for the other panel shape or is not an application image. Nothing is written.</p>
+          <div class="api-snip-label">Request</div>
+          <div class="api-snip" data-curl="head -c 4096 firmware.bin | curl -b cookies.txt -X POST http://HOST/api/ota-check --data-binary @-">
+            <button type="button" class="api-copy" onclick="apiCopy(this)">Copy</button>
+            <pre>head -c 4096 firmware.bin | curl -b cookies.txt -X POST http://<span class="api-host">HOST</span>/api/ota-check --data-binary @-</pre>
+          </div>
+        </div>
+
+        <div class="api-ep">
           <div class="api-ep-head"><span class="api-method">GET</span><span class="api-path">/api/perf</span><span class="api-badge auth">Auth</span></div>
           <p class="api-purpose">Read performance metrics. Available only when debug_mode is enabled in config.</p>
           <div class="api-snip-label">Request</div>

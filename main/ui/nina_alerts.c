@@ -16,6 +16,7 @@
 #include "nina_dashboard_internal.h"
 #include "themes.h"
 #include "display_defs.h"
+#include "ui_round.h"       /* ui_rim_radius (round alert ring) */
 #include "app_config.h"
 #include "audio_alert.h"
 #include "esp_log.h"
@@ -35,6 +36,7 @@ _Static_assert(ALERT_VOICE_TYPE_RMS    == (1u << ALERT_RMS)  &&
 
 #define ALERT_COOLDOWN_MS   30000   /* 30 s between same-type alerts */
 #define FLASH_BORDER_W      8
+#define FLASH_BORDER_ROUND_W 16  /* round: ring stroke, radial batch 3 board 11 */
 #define FLASH_STEP_MS       150     /* Duration of each color step */
 #define FLASH_CYCLES        3       /* red-white-red = 3 steps per cycle, 3 cycles */
 #define ALERT_QUEUE_DEPTH   8       /* Pending flashes; deeper than 3 instances x 3 types can realistically breach at once */
@@ -164,9 +166,22 @@ void nina_alerts_init(lv_obj_t *screen) {
     /* Full-screen transparent overlay with thick border */
     s_flash_overlay = lv_obj_create(screen);
     lv_obj_remove_style_all(s_flash_overlay);
-    lv_obj_set_size(s_flash_overlay, SCREEN_SIZE, SCREEN_SIZE);
+    /* Square: a border on the panel perimeter, exactly as before.
+     * Round: the same object as a ring whose outer edge is the rim radius. A
+     * rectangular border on a circular panel touches the glass at four points
+     * and reads as nothing (spec B.5 row 38). SCREEN_ROUND is a compile-time
+     * 0 or 1, so only one arm is generated (addendum section 6 ruling 3). */
+    if (SCREEN_ROUND) {
+        const int d = 2 * ui_rim_radius();
+        lv_obj_set_size(s_flash_overlay, d, d);
+        lv_obj_center(s_flash_overlay);
+        lv_obj_set_style_radius(s_flash_overlay, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(s_flash_overlay, FLASH_BORDER_ROUND_W, 0);
+    } else {
+        lv_obj_set_size(s_flash_overlay, screen_size(), screen_size());
+        lv_obj_set_style_border_width(s_flash_overlay, FLASH_BORDER_W, 0);
+    }
     lv_obj_set_style_bg_opa(s_flash_overlay, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(s_flash_overlay, FLASH_BORDER_W, 0);
     lv_obj_set_style_border_color(s_flash_overlay, lv_color_hex(0xFF0000), 0);
     lv_obj_set_style_border_opa(s_flash_overlay, LV_OPA_TRANSP, 0);
     lv_obj_add_flag(s_flash_overlay, LV_OBJ_FLAG_FLOATING);

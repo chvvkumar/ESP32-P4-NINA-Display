@@ -117,7 +117,7 @@ static void stop_pulse(void) {
 void nina_wait_overlay_create(lv_obj_t *parent) {
     wait_overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(wait_overlay);
-    lv_obj_set_size(wait_overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(wait_overlay, screen_size(), screen_size());
     lv_obj_set_style_bg_color(wait_overlay, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(wait_overlay, LV_OPA_COVER, 0);
     lv_obj_add_flag(wait_overlay, LV_OBJ_FLAG_HIDDEN);

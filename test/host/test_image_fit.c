@@ -23,59 +23,62 @@ static void check_u32(const char *label, uint32_t got, uint32_t expect) {
     if (got != expect) fails++;
 }
 
-/* Every invariant image_fit_pick() promises, for one logical size. */
-static void check_pick(uint32_t lw, uint32_t lh) {
+/* Every invariant image_fit_pick() promises, for one logical size against one
+ * destination width. */
+static void check_pick_t(uint32_t lw, uint32_t lh, uint32_t target) {
     char label[96];
     image_fit_t f;
-    snprintf(label, sizeof(label), "pick %ux%u: succeeds", lw, lh);
-    if (!image_fit_pick(lw, lh, TARGET, &f)) {
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: succeeds", lw, lh, target);
+    if (!image_fit_pick(lw, lh, target, &f)) {
         check_bool(label, false, true);
         return;
     }
 
-    uint32_t n_up = (TARGET * 16u + lw - 1u) / lw;
+    uint32_t n_up = (target * 16u + lw - 1u) / lw;
     bool ceil_branch = (f.n16 == n_up);
-    uint32_t w_up = TARGET * 16u / n_up;
+    uint32_t w_up = target * 16u / n_up;
     uint32_t crop_permille = (lw > w_up) ? (lw - w_up) * 1000u / lw : 0u;
     /* Same exact comparison the header makes (products, not the floored
      * permille above, which is display only: 1080 rounds 30.5 down to 30). */
     bool over_budget = lw > w_up &&
                        (lw - w_up) * 1000u > IMAGE_FIT_MAX_CROP_PERMILLE * lw;
 
-    printf("  lw=%-5u lh=%-5u n16=%-4u block=%ux%u@(%u,%u) out=%ux%u dst_x=%-3u %s crop=%u.%u%%\n",
-           lw, lh, f.n16, f.block_w, f.block_h, f.block_x, f.block_y,
+    printf("  lw=%-5u lh=%-5u dst=%-4u n16=%-4u block=%ux%u@(%u,%u) out=%ux%u dst_x=%-3u %s crop=%u.%u%%\n",
+           lw, lh, target, f.n16, f.block_w, f.block_h, f.block_x, f.block_y,
            f.out_w, f.out_h, f.dst_x, ceil_branch ? "fill " : "bands",
            crop_permille / 10u, crop_permille % 10u);
 
     /* The upper bound is the uint8_t itself (the PPA register is 8 bit), so
      * only the lower one is worth asserting: a 0 scale would write nothing. */
-    snprintf(label, sizeof(label), "pick %ux%u: n16 >= 1", lw, lh);
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: n16 >= 1", lw, lh, target);
     check_bool(label, f.n16 >= 1u, true);
-    snprintf(label, sizeof(label), "pick %ux%u: out_w <= 720", lw, lh);
-    check_bool(label, f.out_w <= TARGET, true);
-    snprintf(label, sizeof(label), "pick %ux%u: out_h <= 720", lw, lh);
-    check_bool(label, f.out_h <= TARGET, true);
-    snprintf(label, sizeof(label), "pick %ux%u: out_w = block_w*n/16", lw, lh);
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: out_w <= dst", lw, lh, target);
+    check_bool(label, f.out_w <= target, true);
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: out_h <= dst", lw, lh, target);
+    check_bool(label, f.out_h <= target, true);
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: out_w = block_w*n/16", lw, lh, target);
     check_u32(label, f.out_w, f.block_w * f.n16 / 16u);
-    snprintf(label, sizeof(label), "pick %ux%u: out_h = block_h*n/16", lw, lh);
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: out_h = block_h*n/16", lw, lh, target);
     check_u32(label, f.out_h, f.block_h * f.n16 / 16u);
-    snprintf(label, sizeof(label), "pick %ux%u: block inside logical picture", lw, lh);
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: block inside logical picture", lw, lh, target);
     check_bool(label, f.block_x + f.block_w <= lw && f.block_y + f.block_h <= lh, true);
-    snprintf(label, sizeof(label), "pick %ux%u: block centred", lw, lh);
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: block centred", lw, lh, target);
     check_bool(label, f.block_x == (lw - f.block_w) / 2u &&
                       f.block_y == (lh - f.block_h) / 2u, true);
-    snprintf(label, sizeof(label), "pick %ux%u: dst_x centres the bands", lw, lh);
-    check_u32(label, f.dst_x, (TARGET - f.out_w) / 2u);
+    snprintf(label, sizeof(label), "pick %ux%u -> %u: dst_x centres the bands", lw, lh, target);
+    check_u32(label, f.dst_x, (target - f.out_w) / 2u);
     /* The whole point of the rule: when the round-up branch was taken, the
      * centre crop it paid for must be within budget. */
     if (ceil_branch) {
-        snprintf(label, sizeof(label), "pick %ux%u: fill branch crop <= 4%%", lw, lh);
+        snprintf(label, sizeof(label), "pick %ux%u -> %u: fill branch crop <= 4%%", lw, lh, target);
         check_bool(label, !over_budget, true);
     } else {
-        snprintf(label, sizeof(label), "pick %ux%u: bands branch was over budget", lw, lh);
+        snprintf(label, sizeof(label), "pick %ux%u -> %u: bands branch was over budget", lw, lh, target);
         check_bool(label, over_budget, true);
     }
 }
+
+static void check_pick(uint32_t lw, uint32_t lh) { check_pick_t(lw, lh, TARGET); }
 
 /* Map the logical trim back through each rotation and check it stays inside the
  * source crop window with the axes swapped where the rotation swaps them. */
@@ -204,6 +207,48 @@ int main(void) {
         check_u32 ("600x300 rot1: src_w = block_h (295)", w, f.block_h);
         check_u32 ("600x300 rot1: src_h = block_w (295)", h, f.block_w);
         check_bool("600x300 rot1: window inside source", x + w <= 600u && y + h <= 300u, true);
+    }
+
+    printf("\n== image_fit_pick: 800 px round panel (3.4C) ==\n");
+    {
+        const uint32_t sizes800[] = {500, 600, 720, 800, 900, 1024, 1080};
+        for (unsigned i = 0; i < sizeof(sizes800) / sizeof(sizes800[0]); i++) {
+            check_pick_t(sizes800[i], sizes800[i], 800u);
+        }
+        check_pick_t(600, 392, 800u);    /* the CONUS radar tile on an 800 panel */
+        check_pick_t(300, 600, 800u);    /* tall source, height needs its own trim */
+
+        image_fit_t f;
+        /* 800 wide on an 800 panel: 1.0x, no scale, no crop, no bands. */
+        check_bool("800x800 -> 800: picks", image_fit_pick(800, 800, 800u, &f), true);
+        check_u32 ("800x800 -> 800: n16 = 16", f.n16, 16u);
+        check_u32 ("800x800 -> 800: out_w = 800", f.out_w, 800u);
+        check_u32 ("800x800 -> 800: dst_x = 0", f.dst_x, 0u);
+        check_u32 ("800x800 -> 800: no crop", f.block_w, 800u);
+
+        /* 900 -> 800: ceil(12800/900) = 15, floor(12800/15) = 853, a 5.2 %
+         * crop, over the 4 % budget, so it bands at n = 14. */
+        check_bool("900x900 -> 800: picks", image_fit_pick(900, 900, 800u, &f), true);
+        check_u32 ("900x900 -> 800: n16 = 14", f.n16, 14u);
+        check_u32 ("900x900 -> 800: out_w = 787", f.out_w, 787u);
+        check_u32 ("900x900 -> 800: dst_x = 6", f.dst_x, 6u);
+        check_u32 ("900x900 -> 800: no crop", f.block_w, 900u);
+
+        /* 600 -> 800: ceil(12800/600) = 22, floor(12800/22) = 581, a 3.2 %
+         * crop, inside the budget, so it fills. */
+        check_bool("600x600 -> 800: picks", image_fit_pick(600, 600, 800u, &f), true);
+        check_u32 ("600x600 -> 800: n16 = 22", f.n16, 22u);
+        check_u32 ("600x600 -> 800: crop to 581", f.block_w, 581u);
+        check_u32 ("600x600 -> 800: block_x = 9", f.block_x, 9u);
+        check_u32 ("600x600 -> 800: out_w = 798", f.out_w, 798u);
+        check_u32 ("600x600 -> 800: dst_x = 1", f.dst_x, 1u);
+
+        /* The CONUS radar tile: the width fills as above and the height, being
+         * under the fit limit, is not trimmed at all. */
+        check_bool("600x392 -> 800: picks", image_fit_pick(600, 392, 800u, &f), true);
+        check_u32 ("600x392 -> 800: block_h = 392 (untrimmed)", f.block_h, 392u);
+        check_u32 ("600x392 -> 800: block_y = 0", f.block_y, 0u);
+        check_u32 ("600x392 -> 800: out_h = 539", f.out_h, 539u);
     }
 
     printf("\n%s (%d failures)\n", fails ? "FAILED" : "PASSED", fails);

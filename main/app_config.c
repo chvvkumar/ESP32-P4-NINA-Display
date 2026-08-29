@@ -16,6 +16,7 @@
 #include "settings_table.h"
 #include "themes.h"
 #include "voice_store.h"
+#include "board_profile.h"
 #include "ui/page_registry.h"
 
 static const char *TAG = "app_config";
@@ -807,7 +808,7 @@ typedef struct {
 static void clouds_set_defaults(app_config_t *cfg)
 {
     cfg->clouds_enabled = false;
-    cfg->clouds_show_overlay = true;
+    cfg->clouds_show_overlay = false;      /* guideline C2: image pages start with no text */
     cfg->clouds_update_interval_s = 900;   /* 15 min; GIBS publishes a new GOES frame every 10 min */
     cfg->clouds_frames = 6;                /* ~1 MB PSRAM per 720x720 frame */
     cfg->clouds_zoom = 7;                  /* ~600 km across at mid-latitudes */
@@ -938,6 +939,7 @@ static void set_defaults(app_config_t *cfg) {
     // Fresh installs default ON; the migration dispatcher tail forces it OFF
     // for every upgrader (opt in for existing installs).
     cfg->telemetry_enabled = true;
+    cfg->moon_round_size_pct = 100;     // v79: round Moon disc fills the rim
 
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
@@ -3149,6 +3151,20 @@ static void migrate_from_v76(const void *raw, size_t raw_size, app_config_t *cfg
  *     through audio_muted (append-only rule), so
  *     offsetof(app_config_t, telemetry_enabled) is its exact meaningful size
  *     (asserted next to the v76 snapshot in app_config.h). --- */
+/* --- v78 -> v79 migration: appends moon_round_size_pct (round Moon disc
+ * size, percent of the rim diameter). The prefix through telemetry_enabled
+ * is the v78 layout byte for byte. --- */
+static void migrate_from_v78(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t v78_size = offsetof(app_config_t, moon_round_size_pct);
+    size_t copy = raw_size < v78_size ? raw_size : v78_size;
+    memcpy(cfg, raw, copy);
+    cfg->moon_round_size_pct = 100;
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v78 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v77(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3981,6 +3997,11 @@ static bool validate_config(app_config_t *cfg) {
     /* Anonymous telemetry (v78): canonicalize a stale blob byte to a strict
      * 0/1, same shape as audio_muted above. */
     cfg->telemetry_enabled = cfg->telemetry_enabled ? true : false;
+    /* moon_round_size_pct (v79): 50..150, anything else means the default. */
+    if (cfg->moon_round_size_pct < 50 || cfg->moon_round_size_pct > 150) {
+        cfg->moon_round_size_pct = 100;
+        fixed = true;
+    }
 
     /* ADS-B page (v68). The six numeric flights_* fields are SETTINGS_TABLE
      * rows, so settings_clamp_apply() above already applied their ranges
@@ -4112,6 +4133,14 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 78) {
+        /* v78 -> v79: appended moon_round_size_pct. tiles_loaded stays false:
+         * a v78 device already keeps its tiles in the "json_tiles"/"ha_tiles"
+         * NVS keys, so the tail loads them. */
+        migrate_from_v78(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 77) {
         /* v77 -> v78: appended telemetry_enabled. tiles_loaded stays false: a
          * v77 device already keeps its tiles in the "json_tiles"/"ha_tiles"
@@ -5047,6 +5076,22 @@ void app_config_factory_reset(void) {
      * defers the wipe to the mount task instead of blocking here. */
     voice_store_wipe();
 
+    /* The panel variant is a property of the silicon, not of the user's
+     * configuration, so it survives a factory reset. Read it out first and
+     * write it back after the erase, but ONLY when the key really existed:
+     * board_panel_nvs_get() cannot tell "absent" from "1", so restoring
+     * unconditionally would write a board/panel key onto every square device
+     * that was factory reset, which is new NVS content for no reason. */
+    uint8_t saved_panel = 0;
+    bool have_saved_panel = false;
+    {
+        nvs_handle_t bh;
+        if (nvs_open("board", NVS_READONLY, &bh) == ESP_OK) {
+            have_saved_panel = (nvs_get_u8(bh, "panel", &saved_panel) == ESP_OK);
+            nvs_close(bh);
+        }
+    }
+
     /* Erase the entire NVS partition. This also removes the tiles keys
      * "json_tiles"/"ha_tiles" along with "config"; the app_config_init() below
      * re-runs tiles_caches_alloc() (alloc-guarded: reuses buffers, resets to "")
@@ -5062,6 +5107,11 @@ void app_config_factory_reset(void) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to re-initialize NVS: %s", esp_err_to_name(err));
         return;
+    }
+
+    if (have_saved_panel &&
+        board_panel_nvs_set((int)saved_panel) != ESP_OK) {
+        ESP_LOGW(TAG, "Could not restore the board/panel key after factory reset");
     }
 
     ESP_LOGI(TAG, "Factory reset complete - all settings erased");

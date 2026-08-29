@@ -139,6 +139,10 @@ typedef struct {
     /* temperatures ----------------------------------------------------- */
     octo_temp_el_t nozzle;
     octo_temp_el_t bed;
+    /* Round family only. One merged "215 / 60" reading for layouts that have
+     * chord for ONE temperature cell rather than two. When it is non-NULL the
+     * update path writes it; the two octo_temp_el_t elements stay unbuilt. */
+    lv_obj_t *lbl_temps;
 
     /* time ------------------------------------------------------------- */
     lv_obj_t *lbl_elapsed;
@@ -149,6 +153,12 @@ typedef struct {
     /* identity / state ------------------------------------------------- */
     lv_obj_t *lbl_state;        /* "PRINTING"                               */
     lv_obj_t *state_dot;        /* accent dot beside the state line         */
+    /* Round family only (NULL on every square layout). rim_crown is a fixed
+     * 40 degree arc at twelve o'clock painted with the state colour, and
+     * rim_state_arclabel carries the state TEXT on the top rim instead of
+     * lbl_state. The update path drives both only when they are non-NULL. */
+    lv_obj_t *rim_crown;
+    lv_obj_t *rim_state_arclabel;
     lv_obj_t *conn_chip;        /* link-down indicator; hidden when healthy  */
     lv_obj_t *conn_dot;
     lv_obj_t *lbl_conn;         /* "PRINTER OFFLINE"/error; hidden when OK   */
@@ -208,6 +218,15 @@ extern const octoprint_layout_ops_t octoprint_layout_bento;
 extern const octoprint_layout_ops_t octoprint_layout_glass;
 extern const octoprint_layout_ops_t octoprint_layout_overlay;
 extern const octoprint_layout_ops_t octoprint_layout_letterbox;
+
+/* Round-family builders. Defined in ui/octoprint_layout_bento_round.c and
+ * ui/octoprint_layout_glass_round.c, which are compiled into nina_round_srcs
+ * only (phase 2 sub-plan D). Declared here so the round dispatch in
+ * nina_octoprint.c has one place to name them. Grid is the inscribed pick and
+ * Immersive the radial one; layouts 5 and 6 have no round composition and
+ * resolve to Immersive (spec addendum section 7). */
+extern const octoprint_layout_ops_t octoprint_layout_bento_round;
+extern const octoprint_layout_ops_t octoprint_layout_glass_round;
 
 /* ── Shared widget factories (implemented in nina_octoprint.c) ─────────
  * These are the whole widget library. Layouts compose them; nothing else.

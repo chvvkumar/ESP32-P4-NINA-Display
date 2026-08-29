@@ -49,6 +49,18 @@ typedef struct {
     uint32_t cached_block_color;
     int      instance_idx;   /* owning NINA instance, for per-instance filter colours */
 
+    /* Ring mode (round layouts): the blocks are lv_arc segments on one circle
+     * instead of a flex row of lv_obj. Zero in the flex-row form, which is
+     * what the square family builds. Angles are degrees clockwise from twelve
+     * o'clock; ring_gap is left free at twelve for the caller's safety crown. */
+    bool  ring;
+    int   ring_radius;       /* block centre-line radius in px */
+    int   ring_width;        /* stroke in px */
+    float ring_span;         /* 360 - ring_gap */
+    float ring_gap;          /* reserved gap at twelve o'clock, degrees */
+    float ring_frac;         /* last in-flight fraction, so a repaint keeps it */
+    bool  stale;             /* ring mode only: arcs at 40 % while data is stale */
+
     nina_subbar_elapsed_cb_t elapsed_cb;
     void                    *elapsed_ud;
 } nina_subbar_t;
@@ -59,6 +71,34 @@ typedef struct {
  * @param block_h  Block height in px (12 on Image-forward)
  */
 void nina_subbar_create(nina_subbar_t *sb, lv_obj_t *parent, int block_h);
+
+/**
+ * @brief Build the ring form of the block row: N lv_arc segments on one circle.
+ *
+ * Same block count, colour rule, done / in-flight / remaining decision and
+ * in-flight fill as the flex row; the geometry differs, and the wider gap after
+ * every NINA_SUBBAR_GROUP_EVERY block is a flex-row property (the ring spaces
+ * its blocks uniformly). The container is 2*radius+width square and centred on
+ * @p parent, so @p parent must be the full-panel page root.
+ *
+ * @param sb       Caller-owned state, zeroed by this call
+ * @param radius   Block centre-line radius in px (ui_rim_radius() - k)
+ * @param width    Stroke width in px
+ * @param gap_deg  Angular gap left free at twelve o'clock for a safety crown
+ */
+void nina_subbar_create_ring(nina_subbar_t *sb, lv_obj_t *parent,
+                             int radius, int width, int gap_deg);
+
+/**
+ * @brief Move a ring to a new centre-line radius (ring mode only).
+ *
+ * Resizes and re-centres the container and forces the block row to rebuild on
+ * the next nina_subbar_update(). No-op when the radius is unchanged.
+ */
+void nina_subbar_ring_set_radius(nina_subbar_t *sb, int radius);
+
+/** @brief Push -1 to the elapsed callback (the layout's idle reset). */
+void nina_subbar_reset_elapsed(nina_subbar_t *sb);
 
 /**
  * @brief Push poll data into the block row.
@@ -77,6 +117,17 @@ void nina_subbar_set_elapsed_cb(nina_subbar_t *sb, nina_subbar_elapsed_cb_t cb, 
  * @param frac Interpolated exposure fraction, 0..1, from arc_interp_timer_cb.
  */
 void nina_subbar_set_progress(nina_subbar_t *sb, float frac);
+
+/**
+ * @brief Ring mode: dim every block to 40 % while the source data is stale.
+ *
+ * The round layouts have no room for the square "Last update" text label (it
+ * sits outside the disc), so the stale cue is the ring itself dimming, the same
+ * cue the round Dashboard gives on its exposure ring. No-op on the flex-row
+ * form, which is what the square family builds, and no-op when the flag is
+ * already at the requested value.
+ */
+void nina_subbar_set_stale(nina_subbar_t *sb, bool stale);
 
 /** @brief Re-colour every block in place. */
 void nina_subbar_apply_theme(nina_subbar_t *sb);

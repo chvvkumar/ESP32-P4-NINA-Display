@@ -83,6 +83,14 @@
 #define ARC_TRANSITION_MS   300
 #define ARC_GAP_GRACE_S     60
 
+/* Round dashboard board (radial board 1) bullseye bearings, degrees clockwise
+ * from twelve o'clock (radial.html). Single owner shared by the builder
+ * (nina_layout_dashboard_round.c) and the update path
+ * (nina_dashboard_update.c), which used to carry these as duplicated literals
+ * (review C12 M-1). */
+#define DR_BEARING_RMS      305
+#define DR_BEARING_HFR      125
+
 void arc_interp_timer_cb(lv_timer_t *timer);
 
 typedef struct {
@@ -96,30 +104,51 @@ typedef struct {
      * pieces (stale label/overlay, empty_state_cont, exposure clock) exist. */
     uint8_t layout;
 
-    /* Segmented sub-bar hero — layout 1 only. */
+    /* Segmented sub-bar hero: layout 1, and round layout 0's rim sub ring
+     * (nina_layout_dashboard_round.c). */
     nina_subbar_t subbar;
 
     /* Layout-specific widget pointers. Owned by the layout module that created
-     * the page (nina_layout_image.c); the spine only
-     * zeroes it. Add fields here rather than as loose dashboard_page_t members. */
+     * the page: nina_layout_image.c (layout 1, Image-forward) or
+     * nina_layout_dashboard_round.c (round layout 0's centre spine), which
+     * reuse lbl_target / row_vals / lbl_elapsed / lbl_unit / inst below; the
+     * spine only zeroes it. Add fields here rather than as loose
+     * dashboard_page_t members.
+     *
+     * OBJECT CLASS WARNING. lbl_target, lbl_seq_step and lbl_safety are plain
+     * lv_label objects only on layout 0 and on the SQUARE layout 1. On ROUND
+     * layout 1 (nina_layout_image_round.c) lbl_target and lbl_seq_step are
+     * lv_arclabel objects and lbl_safety is an lv_arc. The spine's
+     * set_label_if_changed() calls lv_label_get_text() on lbl_target, and they
+     * are safe today only because every one of them is reached after the
+     * layout guard has already returned: update_nina_dashboard_page() hands
+     * layout 1 to update_alt_layout_page() before the writes, and
+     * apply_theme_to_page() returns after nina_layout_alt_apply_theme() when
+     * p->layout != 0. LV_USE_ASSERT_OBJ is off on round, so a reshuffle of
+     * those guards would silently reinterpret an lv_arclabel as an lv_label.
+     * Never write these three from the spine outside a layout == 0 path. */
     struct {
-        lv_obj_t *lbl_target;       /* target name */
+        lv_obj_t *lbl_target;       /* target name (layout 1 and round layout 0);
+                                      * lv_arclabel on round layout 1 */
 
         /* Layout 1 — Image-forward (nina_layout_image.c) */
         lv_obj_t *cap_img;          /* full-bleed capture background */
         lv_obj_t *tile_ident;       /* top text group: identity (two rows) */
         lv_obj_t *tile_hero;        /* bottom group: value row + 12 px block ledge */
         lv_obj_t *row_seq;          /* row 1: identity | shield | step */
-        lv_obj_t *lbl_safety;
-        lv_obj_t *lbl_seq_step;
-        lv_obj_t *row_vals;         /* bottom value row (one 64 px baseline) */
+        lv_obj_t *lbl_safety;       /* lv_arc on round layout 1 */
+        lv_obj_t *lbl_seq_step;     /* lv_arclabel on round layout 1 */
+        lv_obj_t *row_vals;         /* bottom value row (one 64 px baseline); also
+                                      * round layout 0's elapsed+unit row */
         lv_obj_t *grp_left;         /* RMS + counter, tap = RMS graph */
         lv_obj_t *lbl_rms;          /* TOTAL RMS, hanken 48, threshold colour */
         lv_obj_t *lbl_count;        /* "done / target", hanken 28 */
-        lv_obj_t *lbl_elapsed;      /* "247s", hanken 64, written by the tick only */
+        lv_obj_t *lbl_elapsed;      /* "247s", hanken 64, written by the tick only;
+                                      * also round layout 0's elapsed digits */
         lv_obj_t *lbl_filter;       /* filter name, montserrat 24, filter colour */
+        lv_obj_t *lbl_unit;         /* elapsed unit "s", round layout 0 only */
         int       inst;             /* owning NINA instance index */
-        /* end Layout 1 */
+        /* end layout-specific block */
     } alt;
 
     // Header
@@ -154,6 +183,19 @@ typedef struct {
     lv_obj_t *lbl_hfr_title;
     lv_obj_t *lbl_flip_title;
     lv_obj_t *lbl_flip_value;
+
+    /* Round shape handles (radial board 1). NULL on the square family and on
+     * any layout that draws a number instead of a shape; every consumer in
+     * nina_dashboard_update.c null-checks them. ring_exposure aliases
+     * arc_exposure when the exposure arc IS the rim ring, which is how the
+     * stale cue knows it has a ring to dim. */
+    lv_obj_t *rms_bull;
+    lv_obj_t *rms_dot;
+    lv_obj_t *hfr_bull;
+    lv_obj_t *hfr_dot;
+    lv_obj_t *ring_exposure;
+    lv_obj_t *ring_crown;
+    lv_obj_t *ring_flip_tick;
 
     // Power Row
     lv_obj_t *box_pwr[MAX_POWER_WIDGETS];

@@ -44,7 +44,7 @@
  *
  * The container is created HIDDEN; call nina_empty_state_show() to
  * fade it in.  Position: optically centered at ~42% of parent height
- * (TOP_MID aligned, y-offset = SCREEN_SIZE * 42 / 100 minus half the
+ * (TOP_MID aligned, y-offset = screen_size() * 42 / 100 minus half the
  * container's rendered height so the visual midpoint lands at 42%).
  *
  * The container does NOT have LV_OBJ_FLAG_CLICKABLE -- it must not

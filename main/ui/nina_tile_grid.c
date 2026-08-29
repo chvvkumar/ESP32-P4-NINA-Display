@@ -17,10 +17,11 @@
  */
 
 #include "nina_tile_grid.h"
-#include "nina_dashboard_internal.h"  /* current_theme, OUTER_PADDING, GRID_GAP, SCREEN_SIZE */
+#include "nina_dashboard_internal.h"  /* current_theme, OUTER_PADDING, GRID_GAP, screen_size() */
 #include "nina_empty_state.h"
 #include "app_config.h"
 #include "themes.h"
+#include "ui_round.h"
 #include "ui_styles.h"
 #include "ui_helpers.h"
 #include "display_defs.h"
@@ -771,8 +772,11 @@ nina_tile_grid_t *nina_tile_grid_create(lv_obj_t *parent,
 
     g->root = lv_obj_create(parent);
     lv_obj_remove_style_all(g->root);
-    lv_obj_set_size(g->root, SCREEN_SIZE - 2 * OUTER_PADDING,
-                    SCREEN_SIZE - 2 * OUTER_PADDING);
+    /* 688 on square, 510 at 720 round, 564 at 800 round. Rows and tiles are
+     * flex_grow plus LV_PCT (:594-595, :664-665) and the per-row font already
+     * adapts through label_font_for_rows() (:607), so the shrink is absorbed. */
+    lv_obj_set_size(g->root, ui_page_root_size(), ui_page_root_size());
+    lv_obj_center(g->root);
     lv_obj_clear_flag(g->root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(g->root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(g->root, LV_FLEX_ALIGN_START,

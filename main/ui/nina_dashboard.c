@@ -35,6 +35,7 @@
 #include "nina_ota_prompt.h"
 #include "nina_wait_overlay.h"
 #include "ui_styles.h"
+#include "ui_round.h"
 #include "app_config.h"
 #include "themes.h"
 #include "tasks.h"
@@ -279,7 +280,9 @@ static void rms_click_cb(lv_event_t *e);
 static void hfr_click_cb(lv_event_t *e);
 static void exposure_arc_click_cb(lv_event_t *e);
 static void flip_click_cb(lv_event_t *e);
-static void stars_click_cb(lv_event_t *e);
+#if !CONFIG_NINA_FAMILY_ROUND
+static void stars_click_cb(lv_event_t *e);   /* square bento grid only */
+#endif
 static void sequence_click_cb(lv_event_t *e);
 static void filter_click_cb(lv_event_t *e);
 static void autofocus_long_press_cb(lv_event_t *e);
@@ -563,10 +566,15 @@ static void apply_theme_to_page(dashboard_page_t *p) {
     if (p->lbl_target_name) lv_obj_set_style_text_color(p->lbl_target_name, lv_color_hex(app_config_apply_brightness(current_theme->target_name_color, gb)), 0);
 
     if (p->lbl_seq_container) lv_obj_set_style_text_color(p->lbl_seq_container, lv_color_hex(app_config_apply_brightness(current_theme->header_text_color, gb)), 0);
-    if (p->lbl_seq_step) lv_obj_set_style_text_color(p->lbl_seq_step, lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    /* The radial board draws the step in the header colour (mockup); the bento
+     * grid draws it in the text colour. ring_exposure is the round marker. */
+    if (p->lbl_seq_step) lv_obj_set_style_text_color(p->lbl_seq_step, lv_color_hex(app_config_apply_brightness(p->ring_exposure ? current_theme->header_text_color : current_theme->text_color, gb)), 0);
 
     if (p->arc_exposure) {
-        lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(current_theme->bg_main), LV_PART_MAIN);
+        /* The bento arc hides its track against the card; the rim ring shows
+         * one, so it keeps the flat dark track the board draws. */
+        uint32_t track = p->ring_exposure ? 0x161616 : current_theme->bg_main;
+        lv_obj_set_style_arc_color(p->arc_exposure, lv_color_hex(track), LV_PART_MAIN);
         lv_obj_set_style_arc_opa(p->arc_exposure, LV_OPA_COVER, LV_PART_MAIN);
         lv_obj_set_style_shadow_width(p->arc_exposure, 0, LV_PART_INDICATOR);
     }
@@ -585,6 +593,33 @@ static void apply_theme_to_page(dashboard_page_t *p) {
 
     for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
         if (p->lbl_pwr_title[i]) lv_obj_set_style_text_color(p->lbl_pwr_title[i], lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    }
+
+    /* Round shape handles (radial board 1). All NULL on square. */
+    if (p->subbar.cont) nina_subbar_apply_theme(&p->subbar);
+    if (p->alt.lbl_target) {
+        lv_obj_set_style_text_color(p->alt.lbl_target,
+            lv_color_hex(app_config_apply_brightness(current_theme->target_name_color, gb)), 0);
+    }
+    if (p->alt.lbl_elapsed) {
+        lv_obj_set_style_text_color(p->alt.lbl_elapsed,
+            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), 0);
+    }
+    if (p->alt.lbl_unit) {
+        lv_obj_set_style_text_color(p->alt.lbl_unit,
+            lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
+    }
+    if (p->ring_flip_tick) {
+        lv_obj_set_style_arc_color(p->ring_flip_tick,
+            lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), LV_PART_MAIN);
+    }
+    if (p->rms_dot) {
+        lv_obj_set_style_bg_color(p->rms_dot,
+            lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
+    }
+    if (p->hfr_dot) {
+        lv_obj_set_style_bg_color(p->hfr_dot,
+            lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
     }
 
     if (p->empty_state_cont) {
@@ -650,7 +685,9 @@ void nina_dashboard_apply_theme(int theme_index) {
     lv_obj_invalidate(scr_dashboard);
 }
 
-/* Go back to summary page when bottom row is clicked */
+#if !CONFIG_NINA_FAMILY_ROUND
+/* Go back to summary page when bottom row is clicked. The round board draws no
+ * power row, so this has no caller there. */
 static void bottom_row_click_cb(lv_event_t *e) {
     LV_UNUSED(e);
     /* Task 4.1 / 6.1: route this USER tap through the arbiter like the other
@@ -660,6 +697,7 @@ static void bottom_row_click_cb(lv_event_t *e) {
     nina_dashboard_show_page_animated(PAGE_IDX_SUMMARY, 0, 0);
     nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000);
 }
+#endif
 
 /* Shared page furniture every layout gets: the amber "Last update" stale label,
  * the >2 min dim overlay and the branded disconnected empty state. Built after
@@ -686,8 +724,12 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 
     p->page = lv_obj_create(parent);
     lv_obj_remove_style_all(p->page);
-    lv_obj_set_size(p->page, SCREEN_SIZE - 2 * OUTER_PADDING, SCREEN_SIZE - 2 * OUTER_PADDING);
+    lv_obj_set_size(p->page, screen_size() - 2 * OUTER_PADDING, screen_size() - 2 * OUTER_PADDING);
     lv_obj_set_style_pad_gap(p->page, GRID_GAP, 0);
+
+    /* A full-bleed layout negates the parent's padding, whatever it is (16 on
+     * both families today). */
+    const int parent_pad = lv_obj_get_style_pad_left(parent, 0);
 
     if (p->layout == 1) {
         /* Image-forward is full-bleed: the capture reaches the screen edge.
@@ -696,13 +738,23 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
          * layout body so it builds against the real 720x720 root. The
          * shared overlays created below inherit the full-screen size, which
          * is what a full-bleed page wants. */
-        lv_obj_set_size(p->page, SCREEN_SIZE, SCREEN_SIZE);
-        lv_obj_set_pos(p->page, -OUTER_PADDING, -OUTER_PADDING);
+        lv_obj_set_size(p->page, screen_size(), screen_size());
+        lv_obj_set_pos(p->page, -parent_pad, -parent_pad);
         nina_layout_image_create(p, p->page, page_index);
         create_page_overlays(p, page_index);
         return;
     }
 
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Round Dashboard (radial board 1): full-bleed like layout 1, because the
+     * rim rings reach past the inset square. The square bento grid below is
+     * not compiled into the round binary. */
+    lv_obj_set_size(p->page, screen_size(), screen_size());
+    lv_obj_set_pos(p->page, -parent_pad, -parent_pad);
+    nina_layout_dashboard_round_create(p, p->page, page_index);
+    create_page_overlays(p, page_index);
+    return;
+#else
     static lv_coord_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
     static lv_coord_t row_dsc[] = {
         LV_GRID_FR(2), LV_GRID_FR(1), LV_GRID_FR(2),
@@ -1025,6 +1077,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
     }
 
     create_page_overlays(p, page_index);
+#endif
 }
 
 static void create_page_overlays(dashboard_page_t *p, int page_index) {
@@ -1099,7 +1152,14 @@ static void create_page_indicator(lv_obj_t *parent, int count) {
     indicator_cont = lv_obj_create(parent);
     lv_obj_remove_style_all(indicator_cont);
     lv_obj_set_size(indicator_cont, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(indicator_cont, LV_ALIGN_BOTTOM_MID, 0, -6);
+    /* Square: 6 px off the bottom edge. Round: seated in the gap between the
+     * exposure ring and the sub ring, which is where radial board 1 draws them.
+     * SCREEN_ROUND is a compile-time 0 or 1, so one branch folds away. */
+    if (SCREEN_ROUND) {
+        lv_obj_align(indicator_cont, LV_ALIGN_CENTER, 0, ui_rim_radius() - 26);
+    } else {
+        lv_obj_align(indicator_cont, LV_ALIGN_BOTTOM_MID, 0, -6);
+    }
     lv_obj_set_flex_flow(indicator_cont, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(indicator_cont, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(indicator_cont, 8, 0);
@@ -1222,11 +1282,14 @@ static void flip_click_cb(lv_event_t *e) {
     nina_info_overlay_show(INFO_OVERLAY_MOUNT, active_page);
 }
 
-/* Stars box: click to open image statistics info overlay */
+#if !CONFIG_NINA_FAMILY_ROUND
+/* Stars box: click to open image statistics info overlay. The round board
+ * drops STARS, so this has no caller there. */
 static void stars_click_cb(lv_event_t *e) {
     LV_UNUSED(e);
     nina_info_overlay_show(INFO_OVERLAY_IMAGESTATS, active_page);
 }
+#endif
 
 /* Sequence box: click to open sequence details info overlay */
 static void sequence_click_cb(lv_event_t *e) {
@@ -1259,6 +1322,14 @@ static void session_stats_click_cb(lv_event_t *e) {
 
 void nina_dashboard_bind_tap(lv_obj_t *obj, nina_tap_target_t which) {
     if (!obj) return;
+    if (which == NINA_TAP_HFR) {
+        /* Same pair the square HFR box carries: short click opens the HFR
+         * graph, long press opens the autofocus curve. */
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(obj, hfr_click_cb, LV_EVENT_SHORT_CLICKED, NULL);
+        lv_obj_add_event_cb(obj, autofocus_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
+        return;
+    }
     lv_event_cb_t cb;
     switch (which) {
         case NINA_TAP_CAPTURE:  cb = target_name_click_cb;   break;
@@ -1267,6 +1338,7 @@ void nina_dashboard_bind_tap(lv_obj_t *obj, nina_tap_target_t which) {
         case NINA_TAP_FLIP:     cb = flip_click_cb;          break;
         case NINA_TAP_SESSION:  cb = session_stats_click_cb; break;
         case NINA_TAP_FILTER:   cb = filter_click_cb;        break;
+        case NINA_TAP_EXPOSURE: cb = exposure_arc_click_cb; break;
         default:                return;
     }
     lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
@@ -1381,10 +1453,21 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
 
     main_cont = lv_obj_create(scr_dashboard);
     lv_obj_remove_style_all(main_cont);
-    lv_obj_set_size(main_cont, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(main_cont, screen_size(), screen_size());
     lv_obj_set_style_bg_color(main_cont, lv_color_hex(current_theme->bg_main), 0);
     lv_obj_set_style_bg_opa(main_cont, LV_OPA_COVER, 0);
+    /* Every page now carries its own round composition, so the universal page
+     * parent keeps the historical 16 px pad on both families. Pages that want
+     * the inscribed square ask ui_page_inset() for it; pages that want the whole
+     * disc negate this pad the way the image page always has. */
     lv_obj_set_style_pad_all(main_cont, OUTER_PADDING, 0);
+    /* Never a scroll host. A full-bleed page (image pages, Image-forward,
+     * OctoPrint Immersive) negates that pad and overhangs the content box by
+     * 16 px on the right and bottom; with the default SCROLLABLE flag a swipe
+     * chains up here, drags the whole page by that overhang and the throw
+     * settles at the limit, not at 0, so the page stays shifted after the
+     * gesture (bench B10 on the 3.4C). Pages switch by HIDDEN + translate_x. */
+    lv_obj_remove_flag(main_cont, LV_OBJ_FLAG_SCROLLABLE);
 
     /* Optional feature pages — created here ONLY if the feature is enabled in
      * config; otherwise on the first runtime enable (see
@@ -1869,7 +1952,7 @@ void nina_dashboard_show_page_animated(int page_index, int instance_count, int e
         lv_anim_start(&a);
     } else if ((effect == 2 || effect == 3) && old_obj) {
         /* Slide left (2) or slide right (3) */
-        int slide_dist = SCREEN_SIZE;
+        int slide_dist = screen_size();
         /* effect 2 = slide-left: old goes left, new enters from right
          * effect 3 = slide-right: old goes right, new enters from left */
         int old_end_x   = (effect == 2) ? -slide_dist : slide_dist;

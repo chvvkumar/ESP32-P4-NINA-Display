@@ -17,6 +17,7 @@
  */
 
 #include "settings_hub.h"
+#include "settings_hub_internal.h"     /* layout seam: published handles + factories */
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"   /* SYSINFO_PAGE_IDX, page_count, total_page_count */
 #include "page_registry.h"             /* Home Page roller options + page_ref_navigate */
@@ -25,7 +26,7 @@
 #include "ui_helpers.h"
 #include "ui_styles.h"
 #include "nina_toast.h"                /* demo-mode state feedback */
-#include "display_defs.h"              /* SCREEN_SIZE, display_rotation_apply */
+#include "display_defs.h"              /* screen_size(), display_rotation_apply */
 #include "wifi_join.h"                 /* notify-cb deregistration on leaving the WiFi family */
 #include "tasks.h"                     /* data_task_handle — demo tile wake */
 #include "power_mgmt.h"                /* app_reboot — single logged restart path */
@@ -43,7 +44,7 @@
 #include <string.h>
 
 /* ── Layout ──────────────────────────────────────────────────────────── */
-#define HUB_ROOT_SIZE   (SCREEN_SIZE - 2 * OUTER_PADDING)  /* 688, same as the tabview root */
+#define HUB_ROOT_SIZE   (screen_size() - 2 * OUTER_PADDING)  /* 688, same as the tabview root */
 #define HUB_HEADER_H     72
 #define HUB_BACK_W       96
 #define HUB_TILE_W      330   /* 2 x 330 + 20 gap + 2 x 4 pad = 688 */
@@ -59,6 +60,13 @@
 static lv_obj_t     *s_root    = NULL;  /* hub root container (lives in main_cont) */
 static lv_obj_t     *s_screen  = NULL;  /* current screen container inside s_root */
 static hub_screen_t  s_current = HUB_SCREEN_HUB;
+
+/* Handles the round fit pass needs. settings_hub_make_header() publishes the
+ * header for every screen that has one; a screen builder publishes its grid.
+ * settings_hub_goto() clears both before each build, so a screen without such
+ * an object leaves them NULL. Declared in settings_hub_internal.h. */
+lv_obj_t *hub_header_obj = NULL;
+lv_obj_t *hub_grid_obj   = NULL;
 
 /* Brightness screen */
 static lv_obj_t *s_bl_slider = NULL;
@@ -84,7 +92,7 @@ static lv_obj_t   *s_fr_yes       = NULL;
 static lv_timer_t *s_fr_timer     = NULL;  /* 3 s enable gate on the destructive button */
 
 /* Pages segmented map (buttonmatrix) */
-static const char *s_seg_map[] = {"MANUAL", "HOME PAGE", "CYCLE", ""};
+static const char *s_seg_map[] = {"MANUAL", SCREEN_ROUND ? "HOME" : "HOME PAGE", "CYCLE", ""};
 
 /* ── Forward declarations ────────────────────────────────────────────── */
 static void build_hub_screen(lv_obj_t *parent);
@@ -289,6 +297,9 @@ void settings_hub_goto(hub_screen_t screen)
     lv_obj_set_size(s_screen, LV_PCT(100), LV_PCT(100));
     lv_obj_clear_flag(s_screen, LV_OBJ_FLAG_SCROLLABLE);
 
+    hub_header_obj = NULL;
+    hub_grid_obj   = NULL;
+
     switch (screen) {
     case HUB_SCREEN_THEME:
         build_theme_screen(s_screen);
@@ -313,6 +324,12 @@ void settings_hub_goto(hub_screen_t screen)
         build_hub_screen(s_screen);
         break;
     }
+
+    /* One dispatch point for every settings screen, hub and WiFi alike: the
+     * round pass re-places what the builder above produced. */
+#if CONFIG_NINA_FAMILY_ROUND
+    settings_hub_round_fit(s_screen, screen);
+#endif
 }
 
 hub_screen_t settings_hub_current(void)
@@ -372,6 +389,11 @@ lv_obj_t *settings_hub_make_header(lv_obj_t *parent, const char *title)
                                    UI_THEME_COLOR(header_text_color));
     lv_obj_align(lbl_title, LV_ALIGN_CENTER, 0, 0);
 
+    /* Publish for the round fit pass: this factory is the single place every
+     * settings and WiFi screen gets its header from, so one write here covers
+     * all of them. No effect on square beyond the pointer itself. */
+    hub_header_obj = header;
+
     return header;
 }
 
@@ -379,12 +401,13 @@ lv_obj_t *settings_hub_make_header(lv_obj_t *parent, const char *title)
  *  Settings Hub screen — six tiles
  * ════════════════════════════════════════════════════════════════════════ */
 
-/* One 330x176 tile: big name label + status line, whole tile is the target. */
-static lv_obj_t *hub_make_tile(lv_obj_t *parent, const char *name,
-                               const char *status, lv_event_cb_t cb)
+/* One tile: big name label (child 0) + status line (child 1), whole tile is the
+ * target. Square passes HUB_TILE_W / HUB_TILE_H; the round fit pass resizes. */
+lv_obj_t *settings_hub_make_tile(lv_obj_t *parent, const char *name,
+                                 const char *status, lv_event_cb_t cb, int w, int h)
 {
     lv_obj_t *tile = lv_button_create(parent);
-    lv_obj_set_size(tile, HUB_TILE_W, HUB_TILE_H);
+    lv_obj_set_size(tile, w, h);
     lv_obj_set_style_radius(tile, 16, 0);
     lv_obj_set_style_bg_opa(tile, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(tile, 1, 0);
@@ -403,7 +426,7 @@ static lv_obj_t *hub_make_tile(lv_obj_t *parent, const char *name,
 
     if (status) {
         lv_obj_t *st = ui_label(tile, status, &lv_font_montserrat_24, UI_THEME_COLOR(label_color));
-        lv_obj_set_width(st, HUB_TILE_W - 24);
+        lv_obj_set_width(st, w - 24);
         lv_label_set_long_mode(st, LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_align(st, LV_TEXT_ALIGN_CENTER, 0);
     }
@@ -465,6 +488,7 @@ static void build_hub_screen(lv_obj_t *parent)
     lv_obj_t *grid = lv_obj_create(parent);
     lv_obj_remove_style_all(grid);
     lv_obj_set_width(grid, LV_PCT(100));
+    hub_grid_obj = grid;
     lv_obj_set_flex_grow(grid, 1);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_pad_column(grid, HUB_TILE_GAP, 0);
@@ -476,7 +500,8 @@ static void build_hub_screen(lv_obj_t *parent)
 
     /* THEME — current theme name + 4-swatch strip */
     const theme_t *th = themes_get(cfg->theme_index);
-    lv_obj_t *tile_theme = hub_make_tile(grid, "THEME", th ? th->name : "--", hub_tile_theme_cb);
+    lv_obj_t *tile_theme = settings_hub_make_tile(grid, "THEME", th ? th->name : "--",
+                                                  hub_tile_theme_cb, HUB_TILE_W, HUB_TILE_H);
     if (th) {
         lv_obj_t *strip = lv_obj_create(tile_theme);
         lv_obj_remove_style_all(strip);
@@ -496,22 +521,35 @@ static void build_hub_screen(lv_obj_t *parent)
         }
     }
 
-    /* BRIGHTNESS */
-    snprintf(buf, sizeof(buf), "SCREEN %d%%  TEXT %d%%", cfg->brightness, cfg->color_brightness);
-    hub_make_tile(grid, "BRIGHTNESS", buf, hub_tile_brightness_cb);
+    /* BRIGHTNESS. Round board 8's shortened status ("60% / 100%" style): the
+     * two-value line at 28 px only fits the narrower round A-row box next to
+     * the "%" digits, not next to "SCREEN"/"TEXT". Square is the shipped
+     * literal, unchanged. */
+    snprintf(buf, sizeof(buf), SCREEN_ROUND ? "%d%% / %d%%" : "SCREEN %d%%  TEXT %d%%",
+             cfg->brightness, cfg->color_brightness);
+    settings_hub_make_tile(grid, "BRIGHTNESS", buf, hub_tile_brightness_cb, HUB_TILE_W, HUB_TILE_H);
 
-    /* WIFI — live SSID + RSSI when the station link is up */
+    /* WIFI: live SSID + RSSI when the station link is up. Round board 8
+     * drops the RSSI (the SSID alone already reaches the tile's dotted-name
+     * bound); the two formats take a different argument count, so this is an
+     * if, not a format-string ternary. Square path is the shipped call,
+     * unchanged. */
     wifi_ap_record_t ap = {0};
     if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        snprintf(buf, sizeof(buf), "%.32s  %d dBm", (const char *)ap.ssid, (int)ap.rssi);
+        if (SCREEN_ROUND) {
+            snprintf(buf, sizeof(buf), "%.32s", (const char *)ap.ssid);
+        } else {
+            snprintf(buf, sizeof(buf), "%.32s  %d dBm", (const char *)ap.ssid, (int)ap.rssi);
+        }
     } else {
         snprintf(buf, sizeof(buf), "Not connected");
     }
-    hub_make_tile(grid, "WIFI", buf, hub_tile_wifi_cb);
+    settings_hub_make_tile(grid, "WIFI", buf, hub_tile_wifi_cb, HUB_TILE_W, HUB_TILE_H);
 
-    /* PAGES — nav mode summary */
+    /* PAGES: nav mode summary. Round board 8 drops "pages" off CYCLE and
+     * shortens the HOME PAGE label preview; square strings unchanged. */
     if (cfg->auto_rotate_enabled) {
-        snprintf(buf, sizeof(buf), "Cycle: %d pages",
+        snprintf(buf, sizeof(buf), SCREEN_ROUND ? "Cycle: %d" : "Cycle: %d pages",
                  hub_order2_count(cfg->auto_rotate_order2));
     } else if (s_pages_tab == 0) {
         /* MANUAL was chosen this hub session (both non-cycle tabs persist as
@@ -519,15 +557,20 @@ static void build_hub_screen(lv_obj_t *parent)
         snprintf(buf, sizeof(buf), "Manual");
     } else {
         const page_ref_entry_t *pe = page_ref_by_id((page_ref_t)cfg->active_page_override);
-        snprintf(buf, sizeof(buf), "Home: %.24s", pe ? pe->label : "Summary");
+        snprintf(buf, sizeof(buf), SCREEN_ROUND ? "Home: %.10s" : "Home: %.24s",
+                 pe ? pe->label : "Summary");
     }
-    hub_make_tile(grid, "PAGES", buf, hub_tile_pages_cb);
+    settings_hub_make_tile(grid, "PAGES", buf, hub_tile_pages_cb, HUB_TILE_W, HUB_TILE_H);
 
-    /* DEMO MODE — the tile is the toggle; the ON state must be unmistakable */
-    lv_obj_t *tile_demo = hub_make_tile(grid,
-                                        cfg->demo_mode ? "DEMO MODE ON" : "DEMO MODE",
-                                        cfg->demo_mode ? "Tap to exit" : "OFF",
-                                        hub_tile_demo_cb);
+    /* DEMO MODE: the tile is the toggle; the ON state must be unmistakable.
+     * Round board 8 names the tile "DEMO" in either state (the status line
+     * below already carries "OFF" / "Tap to exit", and the active header
+     * ring is the unmistakable cue); square keeps its two shipped literals. */
+    lv_obj_t *tile_demo = settings_hub_make_tile(grid,
+                                                 SCREEN_ROUND ? "DEMO"
+                                                     : (cfg->demo_mode ? "DEMO MODE ON" : "DEMO MODE"),
+                                                 cfg->demo_mode ? "Tap to exit" : "OFF",
+                                                 hub_tile_demo_cb, HUB_TILE_W, HUB_TILE_H);
     if (cfg->demo_mode && current_theme) {
         lv_obj_set_style_bg_color(tile_demo, lv_color_hex(current_theme->progress_color), 0);
         /* Dark text on the accent fill so the state reads at a glance. */
@@ -538,8 +581,10 @@ static void build_hub_screen(lv_obj_t *parent)
         }
     }
 
-    /* MORE */
-    hub_make_tile(grid, "MORE", "rotate / reboot / info", hub_tile_more_cb);
+    /* MORE. Round drops "/ info" (board 8); square keeps the shipped literal. */
+    settings_hub_make_tile(grid, "MORE",
+                           SCREEN_ROUND ? "rotate / reboot" : "rotate / reboot / info",
+                           hub_tile_more_cb, HUB_TILE_W, HUB_TILE_H);
 }
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -564,6 +609,86 @@ static void theme_card_cb(lv_event_t *e)
     nina_dashboard_apply_theme(idx);
 }
 
+/* One theme preview card. The two fake bento rects and the name line scale
+ * with the card height so a shorter card still holds all four rows: at
+ * h == HUB_CARD_H these resolve to the shipped 40, 26 and montserrat_24, and
+ * at the round picker's 140 they give 28, 18 and a 28 px name, which also
+ * clears the 27 px round text floor. */
+lv_obj_t *settings_hub_make_theme_card(lv_obj_t *parent, int idx, int active,
+                                       bool red_only, int w, int h)
+{
+    int r1_h = h * 40 / HUB_CARD_H;
+    int r2_h = h * 26 / HUB_CARD_H;
+    const lv_font_t *name_font = (h < HUB_CARD_H) ? &lv_font_montserrat_28
+                                                  : &lv_font_montserrat_24;
+
+    const theme_t *t = themes_get(idx);
+
+    /* Card painted in that theme's OWN palette (raw colors, not
+     * brightness-adjusted): the card is a preview, not UI chrome. */
+    lv_obj_t *card = lv_obj_create(parent);
+    lv_obj_remove_style_all(card);
+    lv_obj_set_size(card, w, h);
+    lv_obj_set_style_radius(card, 14, 0);
+    lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(card, hub_card_color(t->bg_main, red_only), 0);
+    if (idx == active) {
+        lv_obj_set_style_border_width(card, 4, 0);
+        lv_obj_set_style_border_color(card, hub_card_color(t->progress_color, red_only), 0);
+    } else {
+        lv_obj_set_style_border_width(card, 1, 0);
+        lv_obj_set_style_border_color(card, hub_card_color(t->bento_border, red_only), 0);
+    }
+    lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(card, 12, 0);
+    lv_obj_set_style_pad_row(card, 10, 0);
+
+    /* Accent bar */
+    lv_obj_t *bar = lv_obj_create(card);
+    lv_obj_remove_style_all(bar);
+    lv_obj_set_size(bar, LV_PCT(100), 6);
+    lv_obj_set_style_radius(bar, 3, 0);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(bar, hub_card_color(t->progress_color, red_only), 0);
+
+    /* Two fake bento rects */
+    lv_obj_t *r1 = lv_obj_create(card);
+    lv_obj_remove_style_all(r1);
+    lv_obj_set_size(r1, LV_PCT(100), r1_h);
+    lv_obj_set_style_radius(r1, 6, 0);
+    lv_obj_set_style_bg_opa(r1, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(r1, hub_card_color(t->bento_bg, red_only), 0);
+    lv_obj_set_style_border_width(r1, 1, 0);
+    lv_obj_set_style_border_color(r1, hub_card_color(t->bento_border, red_only), 0);
+
+    lv_obj_t *r2 = lv_obj_create(card);
+    lv_obj_remove_style_all(r2);
+    lv_obj_set_size(r2, LV_PCT(70), r2_h);
+    lv_obj_set_style_radius(r2, 6, 0);
+    lv_obj_set_style_bg_opa(r2, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(r2, hub_card_color(t->bento_border, red_only), 0);
+
+    /* Name label in that theme's text color; check glyph on the active card */
+    lv_obj_t *name = lv_label_create(card);
+    if (idx == active) {
+        lv_label_set_text_fmt(name, "%s %s", t->name, LV_SYMBOL_OK);
+    } else {
+        lv_label_set_text(name, t->name);
+    }
+    lv_obj_set_style_text_font(name, name_font, 0);
+    lv_obj_set_style_text_color(name, hub_card_color(t->text_color, red_only), 0);
+    lv_obj_set_width(name, LV_PCT(100));
+    lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
+
+    lv_obj_add_event_cb(card, theme_card_cb, LV_EVENT_CLICKED, (void *)(intptr_t)idx);
+
+    return card;
+}
+
 static void build_theme_screen(lv_obj_t *parent)
 {
     lv_obj_set_flex_flow(parent, LV_FLEX_FLOW_COLUMN);
@@ -573,6 +698,7 @@ static void build_theme_screen(lv_obj_t *parent)
     lv_obj_t *grid = lv_obj_create(parent);
     lv_obj_remove_style_all(grid);
     lv_obj_set_width(grid, LV_PCT(100));
+    hub_grid_obj = grid;
     lv_obj_set_flex_grow(grid, 1);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_style_pad_column(grid, 17, 0);
@@ -592,69 +718,7 @@ static void build_theme_screen(lv_obj_t *parent)
     bool red_only = theme_is_red_night(themes_get(active));
 
     for (int i = 0; i < count; i++) {
-        const theme_t *t = themes_get(i);
-
-        /* Card painted in that theme's OWN palette (raw colors, not
-         * brightness-adjusted): the card is a preview, not UI chrome. */
-        lv_obj_t *card = lv_obj_create(grid);
-        lv_obj_remove_style_all(card);
-        lv_obj_set_size(card, HUB_CARD_W, HUB_CARD_H);
-        lv_obj_set_style_radius(card, 14, 0);
-        lv_obj_set_style_bg_opa(card, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(card, hub_card_color(t->bg_main, red_only), 0);
-        if (i == active) {
-            lv_obj_set_style_border_width(card, 4, 0);
-            lv_obj_set_style_border_color(card, hub_card_color(t->progress_color, red_only), 0);
-        } else {
-            lv_obj_set_style_border_width(card, 1, 0);
-            lv_obj_set_style_border_color(card, hub_card_color(t->bento_border, red_only), 0);
-        }
-        lv_obj_add_flag(card, LV_OBJ_FLAG_CLICKABLE);
-        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
-        lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(card, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_all(card, 12, 0);
-        lv_obj_set_style_pad_row(card, 10, 0);
-
-        /* Accent bar */
-        lv_obj_t *bar = lv_obj_create(card);
-        lv_obj_remove_style_all(bar);
-        lv_obj_set_size(bar, LV_PCT(100), 6);
-        lv_obj_set_style_radius(bar, 3, 0);
-        lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(bar, hub_card_color(t->progress_color, red_only), 0);
-
-        /* Two fake bento rects */
-        lv_obj_t *r1 = lv_obj_create(card);
-        lv_obj_remove_style_all(r1);
-        lv_obj_set_size(r1, LV_PCT(100), 40);
-        lv_obj_set_style_radius(r1, 6, 0);
-        lv_obj_set_style_bg_opa(r1, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(r1, hub_card_color(t->bento_bg, red_only), 0);
-        lv_obj_set_style_border_width(r1, 1, 0);
-        lv_obj_set_style_border_color(r1, hub_card_color(t->bento_border, red_only), 0);
-
-        lv_obj_t *r2 = lv_obj_create(card);
-        lv_obj_remove_style_all(r2);
-        lv_obj_set_size(r2, LV_PCT(70), 26);
-        lv_obj_set_style_radius(r2, 6, 0);
-        lv_obj_set_style_bg_opa(r2, LV_OPA_COVER, 0);
-        lv_obj_set_style_bg_color(r2, hub_card_color(t->bento_border, red_only), 0);
-
-        /* Name label in that theme's text color; check glyph on the active card */
-        lv_obj_t *name = lv_label_create(card);
-        if (i == active) {
-            lv_label_set_text_fmt(name, "%s %s", t->name, LV_SYMBOL_OK);
-        } else {
-            lv_label_set_text(name, t->name);
-        }
-        lv_obj_set_style_text_font(name, &lv_font_montserrat_24, 0);
-        lv_obj_set_style_text_color(name, hub_card_color(t->text_color, red_only), 0);
-        lv_obj_set_width(name, LV_PCT(100));
-        lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
-        lv_obj_set_style_text_align(name, LV_TEXT_ALIGN_CENTER, 0);
-
-        lv_obj_add_event_cb(card, theme_card_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
+        settings_hub_make_theme_card(grid, i, active, red_only, HUB_CARD_W, HUB_CARD_H);
     }
 }
 
@@ -974,7 +1038,7 @@ static void pages_home_row_cb(lv_event_t *e)
     lv_obj_clear_flag(head, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *btn = lv_button_create(head);
-    lv_obj_set_size(btn, HUB_BACK_W, HUB_HEADER_H);
+    lv_obj_set_size(btn, SCREEN_ROUND ? HUB_BACK_W_ROUND : HUB_BACK_W, HUB_HEADER_H);
     lv_obj_align(btn, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_style_radius(btn, 14, 0);
     lv_obj_set_style_bg_opa(btn, LV_OPA_COVER, 0);
@@ -984,7 +1048,13 @@ static void pages_home_row_cb(lv_event_t *e)
         lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->bento_border), 0);
         lv_obj_set_style_bg_color(btn, lv_color_hex(current_theme->progress_color), LV_STATE_PRESSED);
     }
-    lv_obj_t *lbl_back = ui_label(btn, LV_SYMBOL_LEFT " BACK", &lv_font_montserrat_24,
+    /* Built after settings_hub_round_fit() has already run for this screen
+     * (the picker is a tap-triggered overlay, not part of the Pages screen's
+     * own tree), so the round sweep can never reach this label: raise it here
+     * with the one ternary the addendum's rule 3 allows. Square is the
+     * shipped montserrat_24, unchanged. */
+    lv_obj_t *lbl_back = ui_label(btn, LV_SYMBOL_LEFT " BACK",
+                                  SCREEN_ROUND ? &lv_font_montserrat_28 : &lv_font_montserrat_24,
                                   UI_THEME_COLOR(text_color));
     lv_obj_center(lbl_back);
     lv_obj_add_event_cb(btn, home_pick_cancel_cb, LV_EVENT_CLICKED, NULL);
@@ -1449,7 +1519,10 @@ static void hub_make_info_row(lv_obj_t *parent, const char *key, const char *val
     lv_obj_t *row = lv_obj_create(parent);
     lv_obj_remove_style_all(row);
     lv_obj_set_width(row, LV_PCT(100));
-    lv_obj_set_height(row, 40);
+    /* 40 px for a one-line value; a value that wraps (a dev build's version
+     * tag on the 564 px round chord) grows the row instead of being cut. */
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_style_min_height(row, 40, 0);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_left(row, 24, 0);
@@ -1457,7 +1530,12 @@ static void hub_make_info_row(lv_obj_t *parent, const char *key, const char *val
     lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
 
     ui_label(row, key, &lv_font_montserrat_24, UI_THEME_COLOR(label_color));
-    ui_label(row, value, &lv_font_montserrat_32, UI_THEME_COLOR(text_color));
+    /* The value takes whatever the key leaves and wraps inside it: a dev
+     * build's "snd-alpha-76-ge896e32-dirty" at 32 px ran back over the
+     * VERSION key on the 564 px round chord (bench B12 on the 3.4C). */
+    lv_obj_t *val = ui_label(row, value, &lv_font_montserrat_32, UI_THEME_COLOR(text_color));
+    lv_obj_set_flex_grow(val, 1);
+    lv_obj_set_style_text_align(val, LV_TEXT_ALIGN_RIGHT, 0);
 }
 
 static void build_more_screen(lv_obj_t *parent)

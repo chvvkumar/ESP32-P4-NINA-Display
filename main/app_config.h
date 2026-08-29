@@ -83,7 +83,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 78
+#define APP_CONFIG_VERSION 79
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -572,6 +572,14 @@ typedef struct {
                                        // secrets). Fresh installs default true;
                                        // the v78 migration forces false for
                                        // every upgrader (opt in).
+
+    // Added after v78 (round Moon disc size) -- must stay at end to preserve NVS binary compatibility
+    uint8_t  moon_round_size_pct;      // v79: round panels only. How much of the
+                                       // rim diameter the Moon disc fills when
+                                       // the page text is hidden, 50..150
+                                       // (default 100). With the text shown the
+                                       // disc is capped so it clears the rim
+                                       // rows. Square panels ignore it.
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -5966,6 +5974,10 @@ _Static_assert(offsetof(app_config_t, telemetry_enabled) ==
                    offsetof(app_config_t, audio_muted) +
                        sizeof(((app_config_t *)0)->audio_muted),
                "telemetry_enabled must directly follow audio_muted (v77 prefix rule)");
+_Static_assert(offsetof(app_config_t, moon_round_size_pct) ==
+                   offsetof(app_config_t, telemetry_enabled) +
+                       sizeof(((app_config_t *)0)->telemetry_enabled),
+               "moon_round_size_pct must directly follow telemetry_enabled (v78 prefix rule)");
 
 
 
