@@ -374,6 +374,51 @@ static void enqueue(const sentence_t *s) {
 }
 
 /* ── Playback ───────────────────────────────────────────────────────────── */
+/* esp_codec_dev's DEFAULT volume curve maps the 0-100 setting linearly onto
+ * -50..0 dB, which is 0.5 dB per step. That is technically a log taper, but the
+ * span is far too wide for a small panel speaker in a room: 50 % lands on
+ * -25 dB, about a fifth of full loudness, and 40 % on -30 dB, roughly an
+ * eighth, which is lost under ambient noise. Loudness halves about every 10 dB,
+ * so the default spends five perceptual halvings across the slider and wastes
+ * the bottom half of its travel.
+ *
+ * This curve spends 40 dB instead of 50 and bends at the midpoint, so half the
+ * slider is about half the loudness, which is what a volume control is expected
+ * to do. Piecewise linear in dB between the points below:
+ *
+ *     slider     0     20     40     50     60     80    100
+ *     dB       mute   -28    -16    -10     -8     -4      0
+ *
+ * A setting of 0 never reaches the curve: esp_codec_dev short-circuits it to
+ * -96 dB, so silence is still silence. The ES8311 DAC covers -95.5 dB upward in
+ * 0.5 dB steps, so every point here is representable.
+ *
+ * The curve changes only what the codec does with the number, never the number
+ * itself: alert_voice_volume stays the 0-100 the web UI and the Control API
+ * exchange, so no config migration is involved. */
+static const esp_codec_dev_vol_map_t s_vol_map[] = {
+    {   0, -40.0f },
+    {  50, -10.0f },
+    { 100,   0.0f },
+};
+
+/* Installed on the first successful open and remembered: esp_codec_dev copies
+ * the map onto the device handle, and the handle outlives every close. */
+static void codec_apply_vol_curve(void) {
+    static bool applied = false;
+    if (applied) return;
+    esp_codec_dev_vol_curve_t curve = {
+        .vol_map = (esp_codec_dev_vol_map_t *)s_vol_map,
+        .count   = (int)(sizeof(s_vol_map) / sizeof(s_vol_map[0])),
+    };
+    int rc = esp_codec_dev_set_vol_curve(s_codec, &curve);
+    if (rc != ESP_CODEC_DEV_OK) {
+        ESP_LOGW(TAG, "Volume curve rejected (%d); default -50..0 dB taper stands", rc);
+        return;   /* retried on the next open */
+    }
+    applied = true;
+}
+
 static bool codec_open(void) {
     if (s_codec_dead) return false;
     if (!s_codec) {
@@ -397,7 +442,11 @@ static bool codec_open(void) {
         return false;
     }
 
-    /* Volume must be set after open (the codec driver rejects it otherwise). */
+    /* Both of these are rejected before open, so they live here rather than in
+     * the one-time init above. The curve is stored on the device handle, which
+     * outlives the open/close cycle, so it is installed once. */
+    codec_apply_vol_curve();
+
     int vol = app_config_get()->alert_voice_volume;
     if (vol < 0)   vol = 0;
     if (vol > 100) vol = 100;
