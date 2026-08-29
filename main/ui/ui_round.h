@@ -8,7 +8,9 @@
  * screen_center(); no builder carries a literal panel width and none of them
  * branches on the family.
  *
- * The mockups pin the rim to Rs = 0.95 R, which is 342 px at 720 and 380 px at
+ * The mockups pinned the rim to Rs = 0.95 R; the 2026-08-29 bench on the 3.4C
+ * showed the whole logical circle is visible (a disc meets the glass at 106 % of
+ * 2 Rs), so Rs is now 0.985 R, which is 354 px at 720 and 394 px at
  * 800. Every rim ring and rim text radius is ui_rim_radius() minus an absolute
  * pixel offset taken from the mockup (12, 30, 40 or 68), so the two round sizes
  * share one stroke and one font and spend the extra diameter on chord width.
@@ -32,10 +34,10 @@ static inline int ui_page_root_size(void)
     return screen_size() - 2 * ui_page_inset();
 }
 
-/* Rim radius Rs = 0.95 R: 342 at 720, 380 at 800. 0 on square. */
+/* Rim radius Rs = 0.985 R: 354 at 720, 394 at 800. 0 on square. */
 static inline int ui_rim_radius(void)
 {
-    return screen_safe_radius() * 19 / 20;
+    return screen_safe_radius() * 197 / 200;
 }
 
 /* Half chord of the rim circle at vertical offset dy from the centre. 0 outside. */
