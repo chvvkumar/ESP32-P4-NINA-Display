@@ -9,6 +9,7 @@
 #include "esp_check.h"
 #include "esp_spiffs.h"
 #include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_interface.h"
 #include "esp_lcd_mipi_dsi.h"
 #include "esp_ldo_regulator.h"
 #include "esp_vfs_fat.h"
@@ -430,7 +431,11 @@ static const bsp_panel_row_t s_panel_rows[] = {
         .init_cmds = s_jd9365_init_4c,
         .init_cmds_size = sizeof(s_jd9365_init_4c) / sizeof(s_jd9365_init_4c[0]),
         .h_res = 720, .v_res = 720,
-        .lane_rate_mbps = 1500, .dpi_clock_mhz = 80,
+        /* 40, not the shared 80: with the shared porches 80 MHz scans the 720
+         * panel at about 132 Hz and the glass shows alternate rows holding the
+         * previous frame plus brightness flicker (bench B17); 40 MHz is about
+         * 66 Hz. PLL_F240M / 6, an exact divider. */
+        .lane_rate_mbps = 1500, .dpi_clock_mhz = 40,
         .hbp = 20, .hpw = 20, .hfp = 40,
         .vbp = 12, .vpw = 4,  .vfp = 24,
         .bright_floor_pct = 0,
@@ -677,6 +682,16 @@ esp_err_t bsp_display_new_with_handles(const bsp_display_config_t *config, bsp_l
     ESP_GOTO_ON_ERROR(row->panel_new(io, &lcd_dev_config, &disp_panel), err, TAG,
                       "New LCD panel failed");
     ESP_GOTO_ON_ERROR(esp_lcd_panel_reset(disp_panel), err, TAG, "LCD panel reset failed");
+    /* Base 180 orientation baked into the panel's own init MADCTL write: the
+     * driver's mirror() only records the GS/SS bits until init() sends them,
+     * so nothing reaches the glass after the video stream starts. Written
+     * after the stream, the same bits left the 4C (reg 0x40 = 0x04 glass)
+     * scanning alternate rows with the previous frame (bench B17). The 4B
+     * row has base_rot_180 = 0 and is untouched. */
+    if (row->base_rot_180) {
+        ESP_GOTO_ON_ERROR(esp_lcd_panel_mirror(disp_panel, true, true), err, TAG,
+                          "LCD panel mirror failed");
+    }
     ESP_GOTO_ON_ERROR(esp_lcd_panel_init(disp_panel), err, TAG, "LCD panel init failed");
 
     /* Return all handles */
@@ -806,6 +821,30 @@ esp_err_t bsp_touch_new(const bsp_touch_config_t *config, esp_lcd_touch_handle_t
 }
 
 #if (BSP_CONFIG_NO_GRAPHIC_LIB == 0)
+/* Orientation sink for the round rows. esp_lvgl_port applies its rotation at
+ * add time and on every lv_display_set_rotation() through
+ * esp_lcd_panel_swap_xy()/esp_lcd_panel_mirror() on the control handle, and
+ * on the JD9365 each of those is a MADCTL write after the video stream is up:
+ * on the 4C that left alternate rows holding the previous frame (bench B17).
+ * The base 180 flip is baked into the panel's init MADCTL instead (see
+ * bsp_display_new_with_handles), and user rotation runs on the PPA, so the
+ * port's calls have nothing to do. Returning ESP_OK keeps the boot log quiet;
+ * a NULL op would make esp_lcd log "not supported" on every call. */
+static esp_err_t orientation_sink_mirror(esp_lcd_panel_t *panel, bool x, bool y)
+{
+    (void)panel; (void)x; (void)y;
+    return ESP_OK;
+}
+static esp_err_t orientation_sink_swap_xy(esp_lcd_panel_t *panel, bool swap)
+{
+    (void)panel; (void)swap;
+    return ESP_OK;
+}
+static esp_lcd_panel_t s_orientation_sink = {
+    .mirror  = orientation_sink_mirror,
+    .swap_xy = orientation_sink_swap_xy,
+};
+
 static lv_display_t *bsp_display_lcd_init(const bsp_display_cfg_t *cfg)
 {
     assert(cfg != NULL);
@@ -818,19 +857,21 @@ static lv_display_t *bsp_display_lcd_init(const bsp_display_cfg_t *cfg)
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = lcd_panels.io,
         .panel_handle = lcd_panels.panel,
-        .control_handle = lcd_panels.control,
+        /* Round rows: the port's orientation writes go to the sink (see
+         * s_orientation_sink). Square: NULL, the port drives the panel as shipped. */
+        .control_handle = row->base_rot_180 ? &s_orientation_sink : NULL,
         .buffer_size = cfg->buffer_size,
         .double_buffer = cfg->double_buffer,
         .hres = bsp_display_get_h_res(),
         .vres = bsp_display_get_v_res(),
         .monochrome = false,
-        /* Base orientation as HARDWARE MADCTL state, applied once here by the
-         * port at add time. Not an LVGL rotation: the application pins LVGL at
-         * rotation 0 and does user rotation on the PPA. */
+        /* Base orientation is already in the panel's init MADCTL (see
+         * bsp_display_new_with_handles); a mirror here would make the port
+         * write MADCTL again after the stream is running. */
         .rotation = {
             .swap_xy  = false,
-            .mirror_x = (row->base_rot_180 != 0),
-            .mirror_y = (row->base_rot_180 != 0),
+            .mirror_x = false,
+            .mirror_y = false,
         },
 #if LVGL_VERSION_MAJOR >= 9
 #if CONFIG_BSP_LCD_COLOR_FORMAT_RGB888
