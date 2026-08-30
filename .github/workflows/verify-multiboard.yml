@@ -400,7 +400,7 @@ jobs:
 
       - name: Upload firmware artifacts
         if: steps.check_skip.outputs.skip != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: multiboard-verify-${{ steps.tag.outputs.short_sha }}
           path: firmware/

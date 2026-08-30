@@ -192,7 +192,7 @@ jobs:
 
       - name: Update PR title and body with summary
         if: steps.collect.outputs.skip_summary == 'false'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const fs = require('fs');
