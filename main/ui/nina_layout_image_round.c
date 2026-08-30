@@ -4,14 +4,14 @@
  *
  * A circle has no bottom edge, so the 12 px block ledge becomes the panel's
  * outermost ring, one block per sub, flush with the glass the way the OctoPrint
- * round layout puts its progress rim there, and its notch at twelve o'clock is
- * the safety crown, which is where the shield used to sit beside the step.
+ * round layout puts its progress rim there, closing the full circle with no
+ * notch; safety is a Material shield glyph in the value row instead.
  *
  * Everything the square layout kept on one baseline now reads as one bottom
  * stack, top to bottom, the same shape octoprint_layout_glass_round.c uses:
  *
  *   rim top     target name (arclabel, guideline G1)
- *   row         TOTAL RMS | sub counter | filter name, on one 64 px baseline
+ *   row         TOTAL RMS | shield | sub counter | filter name
  *   rule        hairline separating the row from the hero
  *   hero        elapsed seconds, centred, 64 px Hanken
  *   rim bottom  sequence step (arclabel), between the hero and the ring
@@ -36,11 +36,11 @@
 #include "app_config.h"
 #include "themes.h"
 #include "ui_arclabel.h"
-#include "ui_dial.h"
 #include "ui_round.h"
 
 LV_FONT_DECLARE(lv_font_hanken_bold_64);
 LV_FONT_DECLARE(lv_font_hanken_bold_28);
+LV_FONT_DECLARE(lv_font_material_safety);
 
 /* ---- design tokens ------------------------------------------------------ */
 
@@ -50,7 +50,6 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
  * replaces the old ui_rim_radius() - 12 inset, which left an 11 px black band
  * outside the ring. */
 #define IFR_W_LEDGE       14
-#define IFR_CROWN_DEG     40
 
 static inline int ifr_ring_r(void)  { return screen_center() - IFR_W_LEDGE / 2; }
 
@@ -63,11 +62,10 @@ static inline int ifr_text_r(void)
     return screen_center() - IFR_W_LEDGE - IFR_TEXT_GAP;
 }
 
-/* Bottom stack, measured upward from the step cell on the rim. IFR_STEP_H is
- * lv_font_montserrat_28's line height; the rest are gaps. At 720 this puts the
- * step cell at dy 310..340, the hero's baseline row at 234..300, the rule at
- * 224 and the value row's bottom at 214; at 800 each lands 40 px lower. */
-#define IFR_STEP_H        30
+/* Bottom stack, measured upward from the step cell on the rim. The step cell
+ * height comes from lv_font_get_line_height(IFR_FONT_STEP); the rest are
+ * gaps, so a font swap moves the whole stack instead of overlapping the rim
+ * text. */
 #define IFR_STEP_GAP      10    /* hero bottom to the step cell top */
 #define IFR_RULE_GAP      10    /* rule to the row above and the hero below */
 #define IFR_RULE_W         2
@@ -76,17 +74,21 @@ static inline int ifr_text_r(void)
 /* The value row's ends must stay inside the ring. ui_chord_half() measures on
  * ui_rim_radius() (Rs = 0.985 R), which is about 10 px wider than the ring's
  * inner edge now that the ring sits on the glass, so the pad covers that and
- * leaves margin: a worst case of RMS 99.99" (182 px) + counter 999 / 999
- * (122 px) + a filter name (about 170 px) is 474 px against the 512 px the
- * chord gives at 720. */
+ * leaves margin: a worst case of RMS 99.99" (about 80 px now that it is in
+ * the 28 px row font) + the 40 px shield + counter 999 / 999 (122 px) + a
+ * filter name (about 170 px) is about 412 px against the 512 px the chord
+ * gives at 720. */
 #define IFR_ROW_PAD       26
 
-#define IFR_CROWN_IDLE    0x2a2a2a
 #define IFR_TARGET_FG     0xf2f2f4
 
-#define IFR_FONT_TARGET   (&lv_font_montserrat_40)
-#define IFR_FONT_STEP     (&lv_font_montserrat_28)
-#define IFR_FONT_ELAPSED  (&lv_font_hanken_bold_64)   /* also the RMS value's font */
+#define IFR_ICON_SAFE     "\xee\xa3\xa8"  /* U+E8E8 verified_user */
+#define IFR_ICON_UNSAFE   "\xef\x80\x92"  /* U+F012 gpp_bad       */
+#define IFR_ICON_UNKNOWN  "\xef\x80\x94"  /* U+F014 gpp_maybe     */
+
+#define IFR_FONT_TARGET   (&lv_font_montserrat_28)
+#define IFR_FONT_STEP     (&lv_font_montserrat_24)
+#define IFR_FONT_ELAPSED  (&lv_font_hanken_bold_64)
 #define IFR_FONT_COUNT    (&lv_font_hanken_bold_28)
 #define IFR_FONT_FILTER   (&lv_font_montserrat_24)
 
@@ -106,7 +108,6 @@ static lv_obj_t *ifr_label(lv_obj_t *parent, const lv_font_t *font, const char *
 static lv_obj_t *ifr_value_label(lv_obj_t *parent);
 static void      ifr_set_text(lv_obj_t *lbl, const char *text);
 static void      ifr_set_arc_text(lv_obj_t *al, char *shadow, size_t n, const char *text);
-static void      ifr_set_arc_color(lv_obj_t *arc, uint32_t color);
 static void      ifr_elapsed_cb(void *ud, int secs);
 static void      ifr_theme_page(dashboard_page_t *p, int gb);
 
@@ -137,12 +138,11 @@ static lv_obj_t *ifr_label(lv_obj_t *parent, const lv_font_t *font, const char *
     return l;
 }
 
-/* Value-row label, always in the 64 px elapsed font. LVGL has no baseline, so
- * the row bottom-aligns its children (flex cross END); both callers use the
- * same font, so there is no other baseline to nudge onto (review C3 minor
- * M-3: the previous per-font translate_y was always zero here). */
+/* RMS value label, in the row's own font so it matches the other readings on
+ * that row. LVGL has no baseline, so the row bottom-aligns its children (flex
+ * cross END). */
 static lv_obj_t *ifr_value_label(lv_obj_t *parent) {
-    return ifr_label(parent, IFR_FONT_ELAPSED, "--");
+    return ifr_label(parent, IFR_FONT_COUNT, "--");
 }
 
 static void ifr_set_text(lv_obj_t *lbl, const char *text) {
@@ -158,17 +158,6 @@ static void ifr_set_arc_text(lv_obj_t *al, char *shadow, size_t n, const char *t
     if (strcmp(shadow, text) == 0) return;
     snprintf(shadow, n, "%s", text);
     lv_arclabel_set_text(al, text);
-}
-
-/* A local style write always refreshes the object and every invalidation on
- * this display is a full-frame redraw, so the per-poll crown paint compares
- * first (review C minor M-4). */
-static void ifr_set_arc_color(lv_obj_t *arc, uint32_t color) {
-    if (!arc) return;
-    lv_color_t c = lv_color_hex(color);
-    if (!lv_color_eq(lv_obj_get_style_arc_color(arc, LV_PART_MAIN), c)) {
-        lv_obj_set_style_arc_color(arc, c, LV_PART_MAIN);
-    }
 }
 
 /* Sole writer of the elapsed label: the 200 ms tick through the sub ring, and
@@ -213,16 +202,12 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     lv_image_set_src(p->alt.cap_img, NULL);
     nina_dashboard_bind_tap(p->alt.cap_img, NINA_TAP_CAPTURE);
 
-    /* 2: the ledge, now the outermost ring and flush with the glass, plus its
-     * crown at twelve o'clock. lbl_safety names the crown: the Material shield
-     * is not drawn here. */
+    /* 2: the ledge, now the outermost ring and flush with the glass, closing
+     * the full circle with no notch. Safety moves to a shield glyph in the
+     * value row (see lbl_safety below). */
     nina_subbar_create_ring(&p->subbar, parent, ifr_ring_r(),
-                            IFR_W_LEDGE, IFR_CROWN_DEG);
+                            IFR_W_LEDGE, 0);
     nina_subbar_set_elapsed_cb(&p->subbar, ifr_elapsed_cb, p);
-    p->alt.lbl_safety = ui_dial_arc(parent, ifr_ring_r(),
-                                    IFR_W_LEDGE, -IFR_CROWN_DEG / 2, IFR_CROWN_DEG / 2);
-    lv_obj_set_style_arc_color(p->alt.lbl_safety, lv_color_hex(IFR_CROWN_IDLE),
-                               LV_PART_MAIN);
 
     /* 3: identity on the rim (guideline G1). The target keeps twelve o'clock;
      * the sequence step moves to the BOTTOM rim, under the elapsed hero and
@@ -236,24 +221,25 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
      * hard-coding it, so a font swap moves the whole stack instead of
      * overlapping the rim text. */
     const int el_h      = lv_font_get_line_height(IFR_FONT_ELAPSED);
-    const int el_bottom = ifr_text_r() - IFR_STEP_H - IFR_STEP_GAP;
+    const int step_h    = lv_font_get_line_height(IFR_FONT_STEP);
+    const int el_bottom = ifr_text_r() - step_h - IFR_STEP_GAP;
     const int el_top    = el_bottom - el_h;
     const int rule_dy   = el_top - IFR_RULE_GAP;
     const int row_bottom = rule_dy - IFR_RULE_GAP;
     const int row_w     = 2 * ui_chord_half(row_bottom) - 2 * IFR_ROW_PAD;
+    const int row_h     = LV_MAX(lv_font_get_line_height(IFR_FONT_COUNT),
+                                 lv_font_get_line_height(&lv_font_material_safety));
 
-    /* Row: TOTAL RMS, the sub counter and the filter name on one 64 px
-     * baseline. The elapsed seconds used to hold this row's right slot and are
-     * now the hero below it, so the three readings that are left spread across
-     * the chord. Children are bottom aligned: LVGL has no baseline, and the
-     * three faces differ. */
+    /* Row: TOTAL RMS, the shield, the sub counter and the filter name, all in
+     * the row's own font. Children are bottom aligned: LVGL has no baseline,
+     * and the shield's face differs from the text faces. */
     p->alt.row_vals = lv_obj_create(parent);
     lv_obj_remove_style_all(p->alt.row_vals);
     lv_obj_remove_flag(p->alt.row_vals, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(p->alt.row_vals, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(p->alt.row_vals, row_w, el_h);
+    lv_obj_set_size(p->alt.row_vals, row_w, row_h);
     lv_obj_align(p->alt.row_vals, LV_ALIGN_TOP_MID, 0,
-                 screen_center() + row_bottom - el_h);
+                 screen_center() + row_bottom - row_h);
     lv_obj_set_style_pad_all(p->alt.row_vals, 0, 0);
     lv_obj_set_style_pad_gap(p->alt.row_vals, 0, 0);
     lv_obj_set_flex_flow(p->alt.row_vals, LV_FLEX_FLOW_ROW);
@@ -262,6 +248,8 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
 
     p->alt.lbl_rms = ifr_value_label(p->alt.row_vals);
     nina_dashboard_bind_tap(p->alt.lbl_rms, NINA_TAP_RMS);
+
+    p->alt.lbl_safety = ifr_label(p->alt.row_vals, &lv_font_material_safety, IFR_ICON_UNKNOWN);
 
     p->alt.lbl_count = ifr_label(p->alt.row_vals, IFR_FONT_COUNT, "--");
     lv_obj_set_style_text_align(p->alt.lbl_count, LV_TEXT_ALIGN_CENTER, 0);
@@ -342,13 +330,25 @@ void nina_layout_image_update(dashboard_page_t *p, const nina_client_t *d,
     p->alt.inst = instance_idx;
     bool red = ifr_red();
 
-    /* Safety is the rim crown, not a glyph beside the step. */
+    /* Shield glyph in the value row. */
     {
-        uint32_t crown;
-        if (!d->safety_connected)     crown = red ? current_theme->label_color : 0x999999;
-        else if (d->safety_is_safe)   crown = red ? 0x7f1d1d : 0x4CAF50;
-        else                          crown = red ? 0xff0000 : 0xF44336;
-        ifr_set_arc_color(p->alt.lbl_safety, ifr_dim(crown, gb));
+        const char *icon;
+        uint32_t icon_color;
+        if (!d->safety_connected) {
+            icon = IFR_ICON_UNKNOWN;
+            icon_color = red ? current_theme->label_color : 0x999999;
+        } else if (d->safety_is_safe) {
+            icon = IFR_ICON_SAFE;
+            icon_color = red ? 0x7f1d1d : 0x4CAF50;
+        } else {
+            icon = IFR_ICON_UNSAFE;
+            icon_color = red ? 0xff0000 : 0xF44336;
+        }
+        ifr_set_text(p->alt.lbl_safety, icon);
+        if (p->alt.lbl_safety) {
+            lv_obj_set_style_text_color(p->alt.lbl_safety,
+                lv_color_hex(ifr_dim(icon_color, gb)), 0);
+        }
     }
 
     if (instance_idx >= 0 && instance_idx < MAX_NINA_INSTANCES) {
