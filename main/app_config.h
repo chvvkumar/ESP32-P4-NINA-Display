@@ -553,8 +553,13 @@ typedef struct {
     // Added after v74 (per-instance NINA page layout) — must stay at end to preserve NVS binary compatibility
     uint8_t  nina_layout[MAX_NINA_INSTANCES];  // per-instance dashboard page layout:
                                        // 0 = Dashboard (arc, default),
-                                       // 1 = Image-forward.
-                                       // Values above 1 fall back to 0.
+                                       // 1 = Image-forward (square panels),
+                                       // 2 = Halo, 4 = Orbit (round panels).
+                                       // 3 is RETIRED and never reused.
+                                       // A binary that cannot draw an id shows
+                                       // the Dashboard without rewriting the
+                                       // stored value, so a panel swap restores
+                                       // the choice. 3 and above 4 reset to 0.
 
     // Added after v76 (global audio mute) — must stay at end to preserve NVS binary compatibility
     bool     audio_muted;              // v77: silence ALL sound (voice alerts,

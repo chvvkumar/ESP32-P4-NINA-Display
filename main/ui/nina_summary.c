@@ -1341,7 +1341,7 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                         sc->bar_completing = false;
                         sc->cached_nina_epoch = 0;
                         sc->cached_nina_mono_us = 0;
-                        if (sc->ring.cont) nina_subbar_set_progress(&sc->ring, 0.0f);
+                        if (sc->ring.cont) nina_subbar_park(&sc->ring);
                         if (sc->bar_progress) {
                             lv_anim_delete(sc->bar_progress, bar_anim_exec);
 
@@ -1362,7 +1362,7 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     sc->gap_start_epoch = 0;
                     sc->exp_anchor_us = 0;
                     sc->exp_anchor_elapsed = 0;
-                    if (sc->ring.cont) nina_subbar_set_progress(&sc->ring, 0.0f);
+                    if (sc->ring.cont) nina_subbar_park(&sc->ring);
                     if (sc->bar_progress) {
                         lv_anim_delete(sc->bar_progress, bar_anim_exec);
                         set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);

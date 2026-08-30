@@ -40,6 +40,7 @@ static void sb_place_fill(nina_subbar_t *sb, int idx, uint32_t color);
 static void sb_block_geom(const nina_subbar_t *sb, int i, int *a0, int *a1);
 static void sb_style_block(const nina_subbar_t *sb, lv_obj_t *b, uint32_t color, lv_opa_t opa);
 static void sb_ring_fill_angles(nina_subbar_t *sb, float frac);
+static float sb_within(const nina_subbar_t *sb, float frac);
 
 /* Block colour: the active filter's configured colour, clamped to the theme's
  * progress colour on Red Night so no non-red hue reaches the panel. */
@@ -60,14 +61,17 @@ static uint32_t sb_block_color(const char *filter, int instance_idx, int gb) {
  * blocks is 5 degrees, or 18 % of the pitch when the pitch is small, which is
  * the same proportion the flex row uses between its 3 px and 9 px gaps. The
  * ring spaces every block alike: the wider gap the flex row puts after every
- * NINA_SUBBAR_GROUP_EVERY block is a flex-row property. */
+ * NINA_SUBBAR_GROUP_EVERY block is a flex-row property. The n-1 gaps sit at
+ * the joints between blocks only, so the last block ends exactly at the far
+ * side of the crown opening and the ring's two ends mirror the rim arc's. */
 static void sb_block_geom(const nina_subbar_t *sb, int i, int *a0, int *a1) {
     int n = (sb->n_blocks > 0) ? sb->n_blocks : 1;
     float pitch = sb->ring_span / (float)n;
     float gap   = (pitch * 0.18f < 5.0f) ? (pitch * 0.18f) : 5.0f;
-    float start = sb->ring_gap * 0.5f + (float)i * pitch;
+    float w     = (sb->ring_span - gap * (float)(n - 1)) / (float)n;
+    float start = sb->ring_gap * 0.5f + (float)i * (w + gap);
     *a0 = (int)(start + 0.5f);
-    *a1 = (int)(start + pitch - gap + 0.5f);
+    *a1 = (int)(start + w + 0.5f);
     if (*a1 <= *a0) *a1 = *a0 + 1;
 }
 
@@ -88,6 +92,20 @@ static void sb_style_block(const nina_subbar_t *sb, lv_obj_t *b,
         lv_obj_set_style_bg_color(b, lv_color_hex(color), 0);
         lv_obj_set_style_bg_opa(b, opa, 0);
     }
+}
+
+/* Fraction of the active block the fill covers. In grouped mode the block
+ * spans several subs: the ones already done inside it plus the in-flight
+ * fraction. */
+static float sb_within(const nina_subbar_t *sb, float frac) {
+    int group = (sb->group_size > 0) ? sb->group_size : 1;
+    float within = frac;
+    if (group > 1 && sb->cached_done >= 0) {
+        within = ((float)(sb->cached_done % group) + frac) / (float)group;
+    }
+    if (within < 0.0f) within = 0.0f;
+    if (within > 1.0f) within = 1.0f;
+    return within;
 }
 
 /* Open the in-flight arc to @p frac of the active block's sweep. */
@@ -131,10 +149,12 @@ static void sb_rebuild_blocks(nina_subbar_t *sb, int target) {
         if (n > NINA_SUBBAR_MAX_BLOCKS) n = NINA_SUBBAR_MAX_BLOCKS;
     }
 
-    sb->n_blocks   = n;
-    sb->group_size = group;
-    sb->active_idx = -1;
-    sb->ring_frac  = 0.0f;
+    sb->n_blocks    = n;
+    sb->group_size  = group;
+    sb->active_idx  = -1;
+    sb->ring_frac   = 0.0f;
+    sb->last_frac   = 0.0f;
+    sb->hold_within = 0.0f;
 
     for (int i = 0; i < n; i++) {
         lv_obj_t *b;
@@ -195,14 +215,16 @@ static void sb_place_fill(nina_subbar_t *sb, int idx, uint32_t color) {
         return;
     }
     if (sb->ring) {
-        if (!sb->fill) {
-            sb->fill = ui_dial_arc(sb->cont, sb->ring_radius,
-                                   sb->ring_width, 0, 1);
-            sb->active_idx = idx;
-            sb->ring_frac  = 0.0f;
-        } else if (sb->active_idx != idx) {
-            sb->active_idx = idx;
-            sb->ring_frac  = 0.0f;
+        if (!sb->fill || sb->active_idx != idx) {
+            if (!sb->fill) {
+                sb->fill = ui_dial_arc(sb->cont, sb->ring_radius,
+                                       sb->ring_width, 0, 1);
+            }
+            sb->active_idx  = idx;
+            sb->ring_frac   = 0.0f;
+            /* The block identity changed: the hold has done its job. */
+            sb->hold_within = 0.0f;
+            sb->last_frac   = 0.0f;
         }
         lv_obj_set_style_arc_opa(sb->fill, sb_stale_opa(sb, SB_FILL_OPA), LV_PART_MAIN);
         lv_obj_set_style_arc_color(sb->fill, lv_color_hex(color), LV_PART_MAIN);
@@ -218,12 +240,17 @@ static void sb_place_fill(nina_subbar_t *sb, int idx, uint32_t color) {
         lv_obj_set_style_bg_opa(sb->fill, SB_FILL_OPA, 0);
         lv_obj_set_size(sb->fill, 0, LV_PCT(100));
         lv_obj_align(sb->fill, LV_ALIGN_LEFT_MID, 0, 0);
-        sb->active_idx = idx;
+        sb->active_idx  = idx;
+        sb->hold_within = 0.0f;
+        sb->last_frac   = 0.0f;
     } else if (sb->active_idx != idx) {
         lv_obj_set_parent(sb->fill, sb->blocks[idx]);
         lv_obj_align(sb->fill, LV_ALIGN_LEFT_MID, 0, 0);
         lv_obj_set_width(sb->fill, 0);
         sb->active_idx = idx;
+        /* The block identity changed: the hold has done its job. */
+        sb->hold_within = 0.0f;
+        sb->last_frac   = 0.0f;
     }
     lv_obj_set_style_bg_color(sb->fill, lv_color_hex(color), 0);
     lv_obj_remove_flag(sb->fill, LV_OBJ_FLAG_HIDDEN);
@@ -295,9 +322,19 @@ void nina_subbar_ring_set_radius(nina_subbar_t *sb, int radius) {
     sb->cached_target = -1;
 }
 
+/* Leaves the ratchet armed on purpose: the camera reports Idle between subs,
+ * which is exactly when the dashboard fires this reset, and the hold has to
+ * survive that gap to catch the next sub's restart on the same block. */
 void nina_subbar_reset_elapsed(nina_subbar_t *sb) {
     if (!sb || !sb->elapsed_cb) return;
     sb->elapsed_cb(sb->elapsed_ud, -1);
+}
+
+void nina_subbar_park(nina_subbar_t *sb) {
+    if (!sb) return;
+    sb->hold_within = 0.0f;
+    sb->last_frac   = 0.0f;
+    nina_subbar_set_progress(sb, 0.0f);
 }
 
 void nina_subbar_update(nina_subbar_t *sb, const nina_client_t *d,
@@ -346,15 +383,31 @@ void nina_subbar_set_progress(nina_subbar_t *sb, float frac) {
     if (frac > 1.0f) frac = 1.0f;
 
     if (sb->fill && sb->active_idx >= 0) {
-        /* In grouped mode the fill spans the group: the subs already done
-         * inside this block plus the in-flight fraction. */
-        float within = frac;
-        int group = (sb->group_size > 0) ? sb->group_size : 1;
-        if (group > 1 && sb->cached_done >= 0) {
-            within = ((float)(sb->cached_done % group) + frac) / (float)group;
+        float within = sb_within(sb, frac);
+
+        /* Two-tier lag: the done count arrives on the 15 s sequence poll while
+         * frac arrives on the 2 s camera poll, so the next exposure starts on
+         * the block the finished one still occupies. A near-complete fraction
+         * collapsing is that boundary, so hold the fill where it was drawn
+         * until the count catches up and sb_place_fill moves it on. A drop
+         * from a low value is a genuinely aborted sub and is drawn as is. The
+         * 0.9 floor leaves room for the last 200 ms tick of a short sub. */
+        if (sb->last_frac >= 0.9f && frac < sb->last_frac - 0.5f) {
+            sb->hold_within = sb_within(sb, sb->last_frac);
+            sb->hold_tick   = lv_tick_get();
         }
-        if (within < 0.0f) within = 0.0f;
-        if (within > 1.0f) within = 1.0f;
+        /* The count lands within the 15 s tier or not at all: past
+         * NINA_SUBBAR_HOLD_MS the restart is a retry of the same sub (abort,
+         * reconnect) and the fill must follow it. */
+        if (sb->hold_within > 0.0f
+            && lv_tick_elaps(sb->hold_tick) > NINA_SUBBAR_HOLD_MS) {
+            sb->hold_within = 0.0f;
+        }
+        if (sb->hold_within > 0.0f) {
+            if (within < sb->hold_within) within = sb->hold_within;
+            else                          sb->hold_within = 0.0f;
+        }
+
         if (sb->ring) {
             sb->ring_frac = within;
             sb_ring_fill_angles(sb, within);
@@ -362,6 +415,7 @@ void nina_subbar_set_progress(nina_subbar_t *sb, float frac) {
             lv_obj_set_width(sb->fill, LV_PCT((int)(within * 100.0f + 0.5f)));
         }
     }
+    sb->last_frac = frac;
 
     if (sb->elapsed_cb && sb->cached_total > 0.0f) {
         int secs = (int)(frac * sb->cached_total + 0.5f);

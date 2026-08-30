@@ -3977,13 +3977,21 @@ static bool validate_config(app_config_t *cfg) {
      * already normalizes it on the parse path. */
 
     /* Per-instance NINA page layout (v75): 0 = Dashboard (arc), 1 =
-     * Image-forward. Hand-written because it is an array
-     * field and SETTINGS_TABLE keys one scalar per name. RESET, not clamp -
-     * layouts are unordered names, so an unknown index falls back to the
-     * Dashboard the device has always shown, never to whichever layout sits
-     * at the far bound. */
+     * Image-forward, 2 = Halo, 3 = Meridian, 4 = Orbit. Hand-written because it
+     * is an array field and SETTINGS_TABLE keys one scalar per name. RESET, not
+     * clamp - layouts are unordered names, so an unknown index falls back to
+     * the Dashboard the device has always shown, never to whichever layout sits
+     * at the far bound.
+     *
+     * The accepted range widened from 0..1 to 0..4 with NO version bump and no
+     * struct change (same shape as v76 widening voice_notify_mask). Ids are
+     * global: 1 is a square board, 2 and 4 are round boards, and 3 is RETIRED
+     * and reset here so it can never be reused by accident. A binary that
+     * cannot draw an id resolves it to the Dashboard at page-build time
+     * (layout_for_family) WITHOUT rewriting the stored value, so moving a board
+     * between panel shapes gives the user their choice back. */
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
-        if (cfg->nina_layout[i] > 1) {
+        if (cfg->nina_layout[i] > 4 || cfg->nina_layout[i] == 3) {
             cfg->nina_layout[i] = 0;
             fixed = true;
         }

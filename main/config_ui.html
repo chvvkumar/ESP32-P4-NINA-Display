@@ -1359,8 +1359,10 @@
             '<select class="input" id="nina_layout_'+i+'" onchange="checkDirty()">'+
             '<option value="0">Dashboard</option>'+
             '<option value="1">Image-forward</option>'+
+            '<option value="2">Halo</option>'+
+            '<option value="4">Orbit</option>'+
             '</select>'+
-            '<div class="field-hint">How the page for this instance is drawn. Dashboard shows the exposure arc with the guider, focuser and sequence tiles. Image-forward shows the exposure readout and sub progress in large type over the latest captured image.</div></div>'+
+            '<div class="field-hint">How the page for this instance is drawn. Dashboard shows the exposure arc with the guider, focuser and sequence tiles, and is available on every screen. Image-forward puts the exposure readout and sub progress in large type over the latest captured image, and is a square-screen design. On a round screen every design shows the picture filling the whole circle, with the safety shield at the top and the exposure progress running around the rim: Dashboard keeps its dials and tiles for the readings view, Halo and Orbit each arrange the readings their own way. On all three, tapping the picture steps through four views, picture with all the readings, picture with just the rim progress, picture on its own, and readings on their own, then back to the start. Holding your finger on the picture opens the full, uncropped image full screen. Only the designs your screen can draw are offered here; the others are not shown, and a choice you made on another screen shape is kept for when you go back to it.</div></div>'+
             '</div>'+
             '<div class="subsection">'+
             '<div class="subsection-title">Notifications</div>'+
@@ -2879,6 +2881,22 @@
       $('nina_layout_0').value=String(data.nina_layout_1||0);
       $('nina_layout_1').value=String(data.nina_layout_2||0);
       $('nina_layout_2').value=String(data.nina_layout_3||0);
+      /* Each screen shape draws its own set: Halo (2) and Orbit (4) are round
+         designs, Image-forward (1) is a square one. HIDE and DISABLE the ones
+         this screen cannot draw rather than removing them: a removed option
+         blanks the select, and the save path's parseInt('')||0 would then
+         quietly rewrite a value the user picked on the other shape. Both
+         attributes are needed: iOS Safari still lists a hidden option in its
+         native picker, and disabled keeps it unpickable there. The stored value
+         is left alone either way, and the device draws the Dashboard for an
+         option it cannot render. */
+      fetchJsonMemo('/api/version').then(function(v){
+        var off=(v.shape==='round')?['1']:['2','4'];
+        for(var i=0;i<3;i++){
+          var sel=$('nina_layout_'+i); if(!sel) continue;
+          off.forEach(function(k){var o=sel.querySelector('option[value="'+k+'"]');if(o){o.hidden=true;o.disabled=true;}});
+        }
+      }).catch(function(){});
 
       for(var i=0;i<3;i++){
         var key='filter_colors_'+(i+1);

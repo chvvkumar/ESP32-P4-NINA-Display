@@ -83,23 +83,41 @@
 #define ARC_TRANSITION_MS   300
 #define ARC_GAP_GRACE_S     60
 
-/* Round dashboard board (radial board 1) bullseye bearings, degrees clockwise
- * from twelve o'clock (radial.html). Single owner shared by the builder
- * (nina_layout_dashboard_round.c) and the update path
- * (nina_dashboard_update.c), which used to carry these as duplicated literals
- * (review C12 M-1). */
-#define DR_BEARING_RMS      305
-#define DR_BEARING_HFR      125
+/* Round dashboard miniature trend graphs: value plotted as its ratio against
+ * the configured tolerance (ok_max), x100, clamped at DR_GRAPH_RANGE. Shared
+ * by the builder (nina_layout_dashboard_round.c) and the update path
+ * (nina_dashboard_update.c). */
+#define DR_GRAPH_RANGE      200
 
 void arc_interp_timer_cb(lv_timer_t *timer);
 
+struct dashboard_page_s;
+
+/* Sink for the interpolated exposure seconds a capture layout draws as its
+ * hero digits. Called from the 200 ms tick only, plus the idle reset, which
+ * passes -1. Layouts that already get their seconds through the sub bar's own
+ * elapsed callback leave alt.elapsed_cb NULL so the digits keep one writer. */
+typedef void (*nina_alt_elapsed_cb_t)(struct dashboard_page_s *p, int secs);
+
+/* An exposure ring's leading-edge cap and the ring geometry it rides: the
+ * centre-line radius, and the arc's start angle and span in degrees clockwise
+ * from twelve o'clock. lv_arc quantises its value to whole degrees, which is
+ * several px at these radii; see ui_dial_cap_create() in ui_dial.h. */
 typedef struct {
+    lv_obj_t *obj;
+    int       r;
+    int       a0;
+    int       sweep;
+} nina_arc_cap_t;
+
+typedef struct dashboard_page_s {
     lv_obj_t *page;
 
     /* Page layout for this instance, from app_config_t::nina_layout[i]:
      * 0 = arc dashboard (every field below the `alt` block applies),
-     * 1 = Image-forward (nina_layout_alt.h).
-     * On layout 1 the arc-path widgets are never created and the
+     * 1 = Image-forward, 2 = Halo, 4 = Orbit (nina_layout_alt.h; 2 and 4 are
+     * round family only; 3 is retired and validate_config resets it to 0).
+     * On any non-zero layout the arc-path widgets are never created and the
      * arc-path updaters never run — only `subbar`, `alt` and the shared
      * pieces (stale label/overlay, empty_state_cont, exposure clock) exist. */
     uint8_t layout;
@@ -115,21 +133,18 @@ typedef struct {
      * spine only zeroes it. Add fields here rather than as loose
      * dashboard_page_t members.
      *
-     * OBJECT CLASS WARNING. lbl_target and lbl_seq_step are plain lv_label
-     * objects only on layout 0 and on the SQUARE layout 1. On ROUND layout 1
-     * (nina_layout_image_round.c) they are lv_arclabel objects. lbl_safety is
-     * a plain lv_label on every layout. The spine's
-     * set_label_if_changed() calls lv_label_get_text() on lbl_target, and they
-     * are safe today only because every one of them is reached after the
-     * layout guard has already returned: update_nina_dashboard_page() hands
-     * layout 1 to update_alt_layout_page() before the writes, and
-     * apply_theme_to_page() returns after nina_layout_alt_apply_theme() when
-     * p->layout != 0. LV_USE_ASSERT_OBJ is off on round, so a reshuffle of
-     * those guards would silently reinterpret an lv_arclabel as an lv_label.
-     * Never write these two from the spine outside a layout == 0 path. */
+     * OBJECT CLASS. lbl_target, lbl_seq_step and lbl_safety are plain lv_label
+     * objects on EVERY layout and every family: no layout builds them as an
+     * lv_arclabel any more. The spine may still write them only on a
+     * layout == 0 path, because on every other layout the widget belongs to
+     * that layout module, which owns its text, its font and its geometry;
+     * update_nina_dashboard_page() hands a non-zero layout to
+     * update_alt_layout_page() before the arc-path writes, and
+     * apply_theme_to_page() returns after nina_layout_alt_apply_theme(). Keep
+     * it that way: a spine write outside the layout == 0 path would fight the
+     * layout for the same label. */
     struct {
-        lv_obj_t *lbl_target;       /* target name (layout 1 and round layout 0);
-                                      * lv_arclabel on round layout 1 */
+        lv_obj_t *lbl_target;       /* target name; plain lv_label everywhere */
 
         /* Layout 1 — Image-forward (nina_layout_image.c) */
         lv_obj_t *cap_img;          /* full-bleed capture background */
@@ -137,7 +152,7 @@ typedef struct {
         lv_obj_t *tile_hero;        /* bottom group: value row + 12 px block ledge */
         lv_obj_t *row_seq;          /* row 1: identity | shield | step */
         lv_obj_t *lbl_safety;       /* safety shield glyph; lv_label everywhere */
-        lv_obj_t *lbl_seq_step;     /* lv_arclabel on round layout 1 */
+        lv_obj_t *lbl_seq_step;     /* current step; plain lv_label everywhere */
         lv_obj_t *row_vals;         /* bottom value row (one 64 px baseline); also
                                       * round layout 0's elapsed+unit row */
         lv_obj_t *grp_left;         /* RMS + counter, tap = RMS graph */
@@ -148,6 +163,79 @@ typedef struct {
         lv_obj_t *lbl_filter;       /* filter name, montserrat 24, filter colour */
         lv_obj_t *lbl_unit;         /* elapsed unit "s", round layout 0 only */
         int       inst;             /* owning NINA instance index */
+
+        /* Shared by the capture layouts (1, 2 and 4).
+         * Every one of these is optional: the spine drives whichever the
+         * layout filled in and NULL-checks the rest, so a layout only creates
+         * what its board actually shows.
+         *
+         * Exposure progress: whichever of these two exists is driven by the
+         * 200 ms tick over the range 0..1000, and dimmed to 40 % while the
+         * source data is stale. A layout creates AT MOST one of them. */
+        lv_obj_t *arc_progress;     /* lv_arc, range 0..1000 */
+        lv_obj_t *bar_progress;     /* lv_bar, range 0..1000 */
+        /* The readings-only page's own exposure ring, when a layout draws one
+         * instead of keeping the shared overlay's rim arc. Driven and dimmed by
+         * the spine exactly like arc_progress; a layout may fill both, and the
+         * overlay hides its rim arc in NUMBERS only when this one exists. */
+        lv_obj_t *arc_progress_num; /* lv_arc, range 0..1000 */
+        /* Leading-edge caps for the two exposure rings, placed by the same
+         * 200 ms tick that sets the arc values and hidden by the idle reset.
+         * cap_progress rides arc_progress; cap_progress_num rides
+         * arc_progress_num, or round layout 0's own p->arc_exposure. Zeroed
+         * with the page, so a layout that draws no cap leaves them NULL. */
+        nina_arc_cap_t cap_progress;
+        nina_arc_cap_t cap_progress_num;
+        /* Interpolated exposure seconds, -1 = idle. ONE writer per page: on a
+         * round capture layout the shared overlay owns elapsed_cb and calls
+         * elapsed_hook after writing its own digits, so the layout's
+         * readings-only hero gets the same value from the same tick. A layout
+         * that runs without the overlay may take elapsed_cb itself. */
+        nina_alt_elapsed_cb_t elapsed_cb;
+        nina_alt_elapsed_cb_t elapsed_hook;
+
+        /* Composition groups the view-mode switch shows and hides. */
+        lv_obj_t *grp_top;
+        lv_obj_t *grp_mid;
+        lv_obj_t *grp_bottom;
+
+        /* Common readings the boards share. */
+        lv_obj_t *lbl_hero;         /* big elapsed digits (digit-subset face OK) */
+        lv_obj_t *lbl_hero_unit;    /* the "s" (and the idle "--"), full ASCII face */
+        lv_obj_t *lbl_hfr;
+        lv_obj_t *lbl_flip;
+        lv_obj_t *lbl_limit;
+        lv_obj_t *lbl_stars;
+        lv_obj_t *lbl_caption[6];   /* small captions under or over the values */
+
+        /* Two spare handles for whatever ring or strip a layout parks there,
+         * usually an lv_arc but not always (the Image-forward round board keeps
+         * its two scrims here). LAYOUT OWNED: the spine never dereferences
+         * either one, so do not assume an object class from the name. */
+        lv_obj_t *ring_rim;
+        lv_obj_t *ring_inner;
+
+        /* Shared round picture overlay (nina_round_overlay.h/.c), drawn over
+         * the capture on every round capture layout, the round Dashboard
+         * (layout 0) included. Owned by that module alone: neither the spine
+         * nor a layout may touch these. NULL on the square family. The rim
+         * exposure arc it draws is NOT duplicated here, it lives in
+         * arc_progress above, which is where the spine's tick reads it. */
+        struct {
+            lv_obj_t *crown;         /* safety shield glyph at twelve o'clock */
+            lv_obj_t *plate;         /* flat 30 % black plate under the stack */
+            lv_obj_t *lbl_name;      /* row 1: target name */
+            lv_obj_t *row_vals;      /* row 2: RMS | hero seconds | HFR */
+            lv_obj_t *lbl_rms_cap;
+            lv_obj_t *lbl_rms;
+            lv_obj_t *lbl_hero;      /* hero digits, hanken_bold_64 */
+            lv_obj_t *lbl_hero_unit; /* "s", and the idle "--" */
+            lv_obj_t *lbl_hfr_cap;
+            lv_obj_t *lbl_hfr;
+            lv_obj_t *row_meta;      /* row 3: filter name + sub counter */
+            lv_obj_t *lbl_filter;
+            lv_obj_t *lbl_count;
+        } ov;
         /* end layout-specific block */
     } alt;
 
@@ -189,12 +277,15 @@ typedef struct {
      * nina_dashboard_update.c null-checks them. ring_exposure aliases
      * arc_exposure when the exposure arc IS the rim ring, which is how the
      * stale cue knows it has a ring to dim. */
-    lv_obj_t *rms_bull;
-    lv_obj_t *rms_dot;
-    lv_obj_t *hfr_bull;
-    lv_obj_t *hfr_dot;
+    lv_obj_t *rms_chart;            /* miniature RMS trend graph */
+    lv_chart_series_t *rms_ser;
+    lv_obj_t *hfr_chart;            /* miniature HFR trend graph */
+    lv_chart_series_t *hfr_ser;
     lv_obj_t *ring_exposure;
-    lv_obj_t *ring_crown;
+    lv_obj_t *ring_crown;      /* no builder creates this any more (the round
+                                * Dashboard's crown was replaced by the shared
+                                * overlay's shield); update_safety_icon()
+                                * NULL-checks it, so it stays as a seam */
     lv_obj_t *ring_flip_tick;
 
     // Power Row

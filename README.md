@@ -213,6 +213,15 @@ Every section on an instance page is tappable:
 
 Polling: the visible instance is polled every 5 s by default (1-10 s); the others get a 10 s heartbeat. The Summary page polls all instances at full rate; non-NINA pages drop every instance to a slow idle poll.
 
+Each instance page can also use one of a few alternate layouts, chosen per instance in Pages > N.I.N.A. > Page Layout; a panel only offers the designs it can draw, and a design picked on the other panel shape is kept and used again if the panel is ever swapped.
+
+- **Dashboard** (default): the grid described above, with the exposure arc, guider, focuser and sequence tiles. On a round panel, Dashboard also fills the circle with the captured image the same way Halo and Orbit do, keeping its familiar dials for its own readings view.
+- **Image-forward** (square panels only): the captured image fills the middle of the screen, with the target name and exposure progress above it and the guiding, timing and filter readings below. Tap the image to open the full-screen preview.
+- **Halo** (round panels only): the captured image fills the whole circle, with a safety icon at the top and an exposure ring running around the rim just outside it, and the rest of the readings on a plate across the middle of the picture.
+- **Orbit** (round panels only): the captured image fills the whole circle the same way, with the readings arranged between two rings instead of a plate: an outer ring marks each completed exposure and an inner ring shows exposure progress around the numbers at the centre.
+
+On a round panel, all three designs, Dashboard included, share the same picture and the same tap behaviour: a short tap on the picture steps through four views and back to the start, the picture with every reading, the picture with just the safety icon and exposure ring, the picture on its own, and the readings on their own with no picture. Before the first picture arrives, or after leaving the page, it shows the readings on their own and the tap does nothing. A long press on the picture opens the full, uncropped image full screen. On a square panel, Dashboard has no picture at all, and Image-forward's picture is a plain tap to the full-screen preview with no cycle.
+
 ---
 
 ### Clock and Weather
