@@ -20,7 +20,11 @@
   <img src="https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/chvvkumar/ESP32-P4-NINA-Display/badges/firmware-metrics.json&query=$.ota_size&label=OTA%20Binary&logo=chip&color=green" alt="OTA Size">
 </p>
 
-A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the Waveshare ESP32-P4-WIFI6-Touch-LCD-4B (720x720). It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket and shows live session data for up to three NINA computers: exposure arcs, guiding RMS, filter status, sequence progress, power draw, and a Summary page across all instances. Beyond NINA it runs a clock page with weather, a full-screen 3D moon page, a Spotify Now Playing screen, an AllSky environmental panel, GOES satellite, Solar and custom image pages, an animated Weather Radar loop, a Cloud Cover satellite loop, JSON Display and Home Assistant tile pages, an OctoPrint 3D printer page, and an ADS-B page for aircraft overhead. Voice alerts through the onboard speaker announce threshold breaches, connection changes and session events.
+A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nighttime-imaging.eu/), built for the Waveshare ESP32-P4 touch panels: the square 4B and the round 3.4C and 4C. It polls the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI) over HTTP and WebSocket and shows live session data for up to three NINA computers: exposure arcs, guiding RMS, filter status, sequence progress, power draw, and a Summary page across all instances. Beyond NINA it runs a clock page with weather, a full-screen 3D moon page, a Spotify Now Playing screen, an AllSky environmental panel, GOES satellite, Solar and custom image pages, an animated Weather Radar loop, a Cloud Cover satellite loop, JSON Display and Home Assistant tile pages, an OctoPrint 3D printer page, and an ADS-B page for aircraft overhead. Voice alerts through the onboard speaker announce threshold breaches, connection changes and session events.
+
+<p align="center">
+  <img src="images/boards_hero.jpg" alt="Round and square panels running side by side" width="900">
+</p>
 
 <table align="center">
   <tr>
@@ -65,13 +69,34 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
 
 ## Hardware
 
-- [Waveshare ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416): currently the only tested board. The layout is tuned for its 720x720 display.
-- [3D Printed Stand](https://www.thingiverse.com/thing:7321463) (optional): a printable stand for the display, designed by [@chicago925](https://github.com/chicago925) ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
-- [3D Printed Mount](https://www.printables.com/model/1784141-waveshare-esp32-p4-wifi6-touch-lcd-4b-mount) (optional): a printable desk mount for the display, designed by the author.
+Three Waveshare ESP32-P4 touch panels are supported and tested. All three run the same features; the pages adapt to the panel shape and size.
 
-<p align="center">
-  <img src="images/3d_printed_stand.jpg" alt="3D printed stand holding the display" width="720">
-</p>
+| Board | Panel | Firmware |
+|-------|-------|----------|
+| [ESP32-P4-WIFI6-Touch-LCD-4B](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-4b.htm?sku=31416) | Square, 720x720 | `nina-display-*.bin` |
+| [ESP32-P4-WIFI6-Touch-LCD-3.4C](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-3.4c.htm?sku=31523) | Round, 3.4 inch, 800x800 | `nina-display-round-*.bin` |
+| [ESP32-P4-WIFI6-Touch-LCD-4C](https://www.waveshare.com/esp32-p4-wifi6-touch-lcd-3.4c.htm?sku=31522) | Round, 4 inch, 720x720 | `nina-display-round-*.bin` |
+
+One round build serves both round boards, so there is no separate 3.4C and 4C download. A round device assumes the 3.4C panel. On a 4C, set Panel Size once after flashing, on Device > Display > Hardware, then restart the device. The setting is stored outside the normal configuration and survives a factory reset. Square boards do not show the control.
+
+Uploading the wrong firmware family is refused: the device checks the image before accepting it and explains the mismatch on screen. A wrong image flashed over USB leaves the screen dark but keeps the web interface reachable, so the correct file can be uploaded.
+
+Optional printable stands:
+
+- 4B square: a [stand](https://www.thingiverse.com/thing:7321463) designed by [@chicago925](https://github.com/chicago925) ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)), and a [desk mount](https://www.printables.com/model/1784141-waveshare-esp32-p4-wifi6-touch-lcd-4b-mount) designed by the author.
+- 3.4C round: a [desk stand](https://www.printables.com/model/1352883-desk-stand-for-waveshare-esp32-p4-wifi6-touch-lcd).
+- 4C round: a [desk stand](https://www.printables.com/model/1520845-desk-stand-for-waveshare-esp32-p4-wifi6-touch-lcd).
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="images/3d_printed_stand.jpg" alt="Printed stand holding the square display" width="420"></td>
+    <td align="center"><img src="images/round_stand.jpg" alt="Printed stand for the round displays" width="420"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>4B square</em></td>
+    <td align="center"><em>3.4C and 4C round</em></td>
+  </tr>
+</table>
 
 ## Installation
 
@@ -81,12 +106,12 @@ A touchscreen dashboard for [N.I.N.A. astrophotography software](https://nightti
   <img src="images/NINA_Plugin.jpg" alt="ninaAPI plugin in the N.I.N.A. plugin manager" width="720">
 </p>
 
-2. Download `nina-display-factory.bin` from the [Releases page](https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases). No build environment is needed: open the [ESP Web Flasher](https://espressif.github.io/esptool-js/) in a Chromium-based browser, connect the board over USB, and flash the file at address `0x0000`. Each release lists the firmware files and the flashing address.
+2. Download the factory binary for your board from the [Releases page](https://github.com/chvvkumar/ESP32-P4-NINA-Display/releases): `nina-display-factory.bin` for the square 4B, `nina-display-round-factory.bin` for the round 3.4C and 4C. Each release lists the file for every board. No build environment is needed: open the [ESP Web Flasher](https://espressif.github.io/esptool-js/) in a Chromium-based browser, connect the board over USB, and flash the file at address `0x0000`.
 
 3. Later updates arrive over the air: Device > System > Firmware checks GitHub releases on a chosen channel (stable, pre-release or alpha) and installs them, or flashes a `.bin` you upload from your computer. If a new firmware fails to boot, the bootloader rolls back to the previous one.
 
 > [!NOTE]
-> If the board warns about outdated esp-hosted co-processor firmware, flash [`firmware/merged-flash.bin`](firmware/) to the ESP32-P4 at address `0x0000`. It updates the ESP32-C6 WiFi co-processor over the internal link and shows progress on screen. When it finishes, flash `nina-display-factory.bin` again.
+> If the board warns about outdated esp-hosted co-processor firmware, flash [`firmware/merged-flash.bin`](firmware/) to the ESP32-P4 at address `0x0000`. It updates the ESP32-C6 WiFi co-processor over the internal link and shows progress on screen. When it finishes, flash the factory binary for your board again.
 
 ## First-Time Setup
 
@@ -132,7 +157,7 @@ Optional pages can be enabled or disabled from the web UI; the Summary, Clock, S
 
 The Summary page shows a card for each connected NINA instance (offline instances are hidden; with none connected it shows a "No N.I.N.A. Instances Connected" message): name, active filter, target, progress, RMS, HFR, safety state and time to meridian flip; with one or two cards on screen each card also shows the sequence name, completed exposures and current step. Tap a card to jump to that instance's page.
 
-Each instance page is a 720x720 grid: header (instance name, colored green when connected and red when not, and the current target), sequence, an animated exposure arc colored by the active filter, filter and timing, guiding RMS, HFR, star count, mount flip time, time left on the target, and power (total current, total power, and each dew-heater or PWM channel). After 30 s without fresh data a Last update label appears; after 2 minutes the page dims.
+Each instance page is a full-screen grid: header (instance name, colored green when connected and red when not, and the current target), sequence, an animated exposure arc colored by the active filter, filter and timing, guiding RMS, HFR, star count, mount flip time, time left on the target, and power (total current, total power, and each dew-heater or PWM channel). After 30 s without fresh data a Last update label appears; after 2 minutes the page dims.
 
 Setup: Pages > N.I.N.A. (host or IP per instance; the plugin listens on port 1888).
 
@@ -523,7 +548,13 @@ curl -H "X-Auth-Password: <password>" -o screenshot.jpg http://<device-ip>/api/s
 
 ## Building from Source
 
-Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py build`, or use `build_firmware.ps1` on Windows to build and push an OTA update to one or more devices. See `CLAUDE.md` for the architecture, task layout and configuration conventions.
+Standard ESP-IDF 5.5.2 project. Each panel shape is a separate build. On Windows, `build_firmware.ps1 -Family square` and `build_firmware.ps1 -Family round` build the two families and can push an OTA update to one or more devices. With plain ESP-IDF:
+
+```
+idf.py -B build_square -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.square" -DSDKCONFIG=build_square/sdkconfig build
+idf.py -B build_round  -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.round"  -DSDKCONFIG=build_round/sdkconfig  build
+```
+ See `CLAUDE.md` for the architecture, task layout and configuration conventions.
 
 ## Troubleshooting
 
@@ -537,7 +568,7 @@ Standard ESP-IDF 5.5.2 project: activate the IDF environment and run `idf.py bui
 
 - [Christian Palm](https://github.com/christian-photo) for the [ninaAPI Advanced plugin](https://github.com/christian-photo/ninaAPI).
 - [@chicago925](https://github.com/chicago925) for the 3D printed stand ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
-- Waveshare for the ESP32-P4-WIFI6-Touch-LCD-4B board support package.
+- Waveshare for the ESP32-P4-WIFI6-Touch-LCD-4B, 3.4C and 4C board support packages.
 - [LVGL](https://lvgl.io/) and [stb_image](https://github.com/nothings/stb).
 - NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA GOES SUVI (rendered by Helioviewer) for the extreme-UV solar bands, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
 - Espressif esp-hosted and esp_wifi_remote for the ESP32-C6 WiFi link, [tgx](https://github.com/vindar/tgx) for the moon sphere renderer, and SVOX Pico TTS (esp-picotts) for the voice clips.

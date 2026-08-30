@@ -2005,6 +2005,37 @@
     function setWidgetStyle(v){postJson('/api/widget-style',{widget_style:parseInt(v)})}
     function setScreenRotation(v){postJson('/api/screen-rotation',{screen_rotation:parseInt(v)})}
 
+    /* Panel Size is not a config field: it writes straight to /api/panel
+       (NVS "board"/"panel"), so it is not part of populateConfig/
+       getConfigData and never rides along with a config Save. A restart is
+       required for the device to pick it up, so this only reports success
+       and never reboots the device itself. */
+    function setPanelSize(v){
+      var sel=$('panel_size_select');
+      var prev=sel?sel.dataset.prev:null;
+      postJson('/api/panel',{panel:parseInt(v)}).then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      }).then(function(){
+        if(sel) sel.dataset.prev=v;
+        showToast('Panel size saved. Restart the device for it to take effect.','success');
+      }).catch(function(){
+        if(sel){
+          /* prev is unset when the initial read never landed. Re-read rather
+             than leave the select showing a value the device rejected. */
+          if(prev!=null) sel.value=prev;
+          else fetch('/api/panel').then(function(r){
+            if(!r.ok) throw new Error('HTTP '+r.status);
+            return r.json();
+          }).then(function(p){
+            sel.value=String(p.panel===1?1:2);
+            sel.dataset.prev=sel.value;
+          }).catch(function(){});
+        }
+        showToast('Could not save panel size','error');
+      });
+    }
+
     function updateAggregationLabel(v){
       $('toast_aggregation_val').textContent=parseInt(v)===0?'Off':v+'s';
     }
@@ -3081,6 +3112,25 @@
       $('color_brightness_val').textContent=cb+'%';
       $('screen_sleep_enabled').checked=!!data.screen_sleep_enabled;
       $('screen_sleep_timeout').value=data.screen_sleep_timeout_s||60;
+      /* Panel Size lives in NVS outside app_config_t (board_profile), not in
+         the config blob this function otherwise reads, and only exists on
+         round boards. Shown/populated from separate device calls rather than
+         from `data`. */
+      return fetchJsonMemo('/api/version').then(function(v){
+        var f=$('panel_size_field');
+        if(!f) return;
+        if(v.shape!=='round'){ f.style.display='none'; return; }
+        f.style.display='';
+        return fetch('/api/panel').then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          return r.json();
+        }).then(function(p){
+          var sel=$('panel_size_select');
+          if(!sel) return;
+          sel.value=String(p.panel===1?1:2);
+          sel.dataset.prev=sel.value;
+        });
+      }).catch(function(){});
     }
 
     async function populateTab_behavior(data){
