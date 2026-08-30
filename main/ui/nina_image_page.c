@@ -1046,25 +1046,35 @@ void image_page_render_frame(image_page_t *p)
     } else {
         p->crossfade_active = true;
 
-        lv_anim_t a_in;
-        lv_anim_init(&a_in);
-        lv_anim_set_var(&a_in, p->img_back);
-        lv_anim_set_values(&a_in, 0, 255);
-        lv_anim_set_duration(&a_in, 500);
-        lv_anim_set_path_cb(&a_in, lv_anim_path_ease_in_out);
-        lv_anim_set_exec_cb(&a_in, anim_opa_cb);
-        lv_anim_set_user_data(&a_in, p);
-        lv_anim_set_completed_cb(&a_in, crossfade_done_cb);
-        lv_anim_start(&a_in);
+        /* Only ONE image animates; the other is held fully opaque underneath so
+         * the composite is a true lerp(old, new). Fading both at once darkens
+         * the midpoint (top*0.5 over bottom*0.5 over the black container is
+         * about 75% brightness) and reads as a pulse on every update - the same
+         * dip the Moon source works around by swapping instantly, above.
+         *
+         * Which object is on top alternates with front_is_a (child 0 = image A,
+         * child 1 = image B), and the child order must NOT be reordered here:
+         * crossfade_done_cb and release_lvgl index children 0 and 1. So pick the
+         * fade direction from the existing z-order instead:
+         *   front_is_a  -> img_back is child 1, on top: fade the NEW image IN.
+         *   !front_is_a -> img_front is child 1, on top: fade the OLD image OUT.
+         * Either way crossfade_done_cb retires img_front when the anim ends. */
+        bool back_on_top = p->front_is_a;
 
-        lv_anim_t a_out;
-        lv_anim_init(&a_out);
-        lv_anim_set_var(&a_out, p->img_front);
-        lv_anim_set_values(&a_out, 255, 0);
-        lv_anim_set_duration(&a_out, 500);
-        lv_anim_set_path_cb(&a_out, lv_anim_path_ease_in_out);
-        lv_anim_set_exec_cb(&a_out, anim_opa_cb);
-        lv_anim_start(&a_out);
+        lv_obj_set_style_opa(p->img_front, LV_OPA_COVER, 0);
+        lv_obj_set_style_opa(p->img_back,
+                             back_on_top ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, back_on_top ? p->img_back : p->img_front);
+        lv_anim_set_values(&a, back_on_top ? 0 : 255, back_on_top ? 255 : 0);
+        lv_anim_set_duration(&a, 1000);
+        lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+        lv_anim_set_exec_cb(&a, anim_opa_cb);
+        lv_anim_set_user_data(&a, p);
+        lv_anim_set_completed_cb(&a, crossfade_done_cb);
+        lv_anim_start(&a);
     }
 
     if (p->src == IMG_SRC_MOON) {
