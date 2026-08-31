@@ -331,7 +331,8 @@ esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out)
 esp_err_t image_fetch_custom(const char *url, const char *auth_header, image_frame_t *out)
 {
     if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
-    return fetch_image_into(url, "Custom", out, NULL, NULL, auth_header);
+    /* No source word for the Custom page: the caption is the stamp alone. */
+    return fetch_image_into(url, "", out, NULL, NULL, auth_header);
 }
 
 esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
@@ -341,5 +342,5 @@ esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
     *out_src = NULL;
     *out_src_len = 0;
     if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
-    return fetch_image_into(url, "Custom", out, out_src, out_src_len, NULL);
+    return fetch_image_into(url, "", out, out_src, out_src_len, NULL);
 }
