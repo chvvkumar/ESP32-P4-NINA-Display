@@ -82,13 +82,27 @@ static void set_caption_if_changed(image_page_t *p, int slot, const char *text)
     if (!text) text = "";
     if (strcmp(p->caption_shadow[slot], text) == 0) return;
     strlcpy(p->caption_shadow[slot], text, sizeof(p->caption_shadow[slot]));
+#if CONFIG_NINA_FAMILY_ROUND && LV_USE_ARCLABEL
+    /* Round GOES class: ONE centred bottom-rim arclabel (lbl_region) carries
+     * both slots joined, so either slot's write re-renders the pair from the
+     * two shadows. lbl_timestamp exists but stays hidden. GOES and Solar join
+     * with " - " (name and time are two facts); Radar and Clouds with a
+     * space (the site or channel and its stamp read as one phrase); an empty
+     * slot contributes nothing, so Custom shows the stamp alone. */
+    if (p->lbl_region && lv_obj_check_type(p->lbl_region, &lv_arclabel_class)) {
+        const char *a = p->caption_shadow[IMG_CAP_REGION];
+        const char *b = p->caption_shadow[IMG_CAP_STAMP];
+        const char *sep = (p->src == IMG_SRC_GOES || p->src == IMG_SRC_SOLAR) ? " - " : " ";
+        char joined[136];
+        if (a[0] && b[0]) snprintf(joined, sizeof(joined), "%s%s%s", a, sep, b);
+        else              snprintf(joined, sizeof(joined), "%s%s", a, b);
+        ui_arclabel_set_text(p->lbl_region, joined);
+        return;
+    }
+#endif
 #if LV_USE_ARCLABEL
     if (lv_obj_check_type(lbl, &lv_arclabel_class)) {
-#if CONFIG_NINA_FAMILY_ROUND
-        ui_arclabel_set_text(lbl, text);
-#else
         lv_arclabel_set_text(lbl, text);
-#endif
         return;
     }
 #endif
@@ -1799,7 +1813,7 @@ void image_page_label(image_page_t *p, char *out, size_t sz)
         case IMG_SRC_GOES:   if (c->goes_region[0]) strlcpy(out, goes_region_name(c->goes_region), sz); break;
         case IMG_SRC_MOON:   strlcpy(out, "Moon", sz); break;
         case IMG_SRC_SOLAR:  strlcpy(out, solar_band_label(c->solar_band), sz); break;
-        case IMG_SRC_CUSTOM: strlcpy(out, "Custom", sz); break;
+        case IMG_SRC_CUSTOM: break;   /* no source name: the stamp alone is the caption */
         case IMG_SRC_RADAR: {
             char token[16];
             image_page_radar_token(c, token, sizeof(token));
@@ -2407,20 +2421,21 @@ static void ring_show_idx(image_page_t *p, int idx, bool fade)
     image_page_label(p, label, sizeof(label));
     set_caption_if_changed(p, IMG_CAP_REGION, label);
 
-    /* A stamped frame shows its own time (local clock); the newest carries the
-     * "Latest" prefix. Unstamped rings (radar style 0, and a styles-1/2 site
-     * with no advertised time list): the newest frame is stamped with the wall
-     * clock and the history frames show their position in the loop instead of a
-     * time we would be inventing. */
+    /* A stamped frame shows its own time (local clock), the newest one too:
+     * the "Latest" word was dropped at the user's request, the newest frame is
+     * the one that holds. Unstamped rings (radar style 0, and a styles-1/2
+     * site with no advertised time list): the newest frame is stamped with the
+     * wall clock and the history frames show their position in the loop
+     * instead of a time we would be inventing. */
     char ts[32];
     struct tm ti;
     if (s->stamp != 0) {
         time_t t = (time_t)s->stamp;
         localtime_r(&t, &ti);
-        strftime(ts, sizeof(ts), idx == 0 ? "Latest %H:%M" : "%H:%M", &ti);
+        strftime(ts, sizeof(ts), "%H:%M", &ti);
     } else if (idx == 0) {
         time_t now; time(&now); localtime_r(&now, &ti);
-        strftime(ts, sizeof(ts), "Latest %H:%M", &ti);
+        strftime(ts, sizeof(ts), "%H:%M", &ti);
     } else {
         snprintf(ts, sizeof(ts), "Loop %d/%d", count - idx, count);
     }

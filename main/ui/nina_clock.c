@@ -78,7 +78,11 @@ extern const lv_font_t lv_font_playfair_228;
 extern const lv_font_t lv_font_playfair_90;
 extern const lv_font_t lv_font_overpass_27;
 extern const lv_font_t lv_font_overpass_16;
-LV_FONT_DECLARE(lv_font_saira_black_300)
+#if CONFIG_NINA_FAMILY_ROUND
+LV_FONT_DECLARE(lv_font_saira_black_230)   /* Broadside time, round column */
+#else
+LV_FONT_DECLARE(lv_font_saira_black_300)   /* Broadside time, square */
+#endif
 LV_FONT_DECLARE(lv_font_saira_black_110)
 LV_FONT_DECLARE(lv_font_saira_black_66)
 LV_FONT_DECLARE(lv_font_saira_thin_240)
@@ -1219,7 +1223,17 @@ static void build_layout_broadside(void) {
      * (720 - 68 + 24), 534 at 720 round, 588 at 800 round. */
     lv_obj_set_size(hero, screen_size() - 2 * LV_MAX(34, ui_page_inset()) + 24, 212);
 
-    lbl_time = make_label(hero, &lv_font_saira_black_300, BS_BONE, -4, "");
+    /* Round: the 300 px digits run 589 px for "10:52" (603 for "10:08"),
+     * wider than the 534 px hero at 720 and the 588 px hero at 800, so the
+     * PM overlapped or the glass cut the last digit. The 230 px face keeps
+     * the widest four-digit time at 458 px, clear of the PM column (69 px)
+     * hugging the hero's right edge on the 4C. */
+#if CONFIG_NINA_FAMILY_ROUND
+    const lv_font_t *time_font = &lv_font_saira_black_230;
+#else
+    const lv_font_t *time_font = &lv_font_saira_black_300;
+#endif
+    lbl_time = make_label(hero, time_font, BS_BONE, -4, "");
     lv_obj_align(lbl_time, LV_ALIGN_LEFT_MID, -6, 0);
 
     lbl_ampm = make_label(hero, &lv_font_saira_thin_84, BS_SIG, 8, "");

@@ -3,13 +3,13 @@
  * @brief Round composition of the image page captions (inscribed board 6) and
  *        of the Moon instance (radial board 7), guideline G1 and C2.
  *
- * GOES class (GOES, Solar, Custom, Radar, Clouds): both caption labels are rim
- * arclabels at Rs - 10, split at six o'clock, each over its own translucent
- * band from ui_arclabel_add_band(). The region name trails to the left of six
- * o'clock; the timestamp leads out to the right. The per-frame HH:MM stamp of
- * the Radar and Cloud Cover loops now re-lays out an arclabel on every
- * playback step, by the user's explicit decision (the earlier Branch B chord
- * label fallback is gone). No chip, no bar background, no rim frame ring.
+ * GOES class (GOES, Solar, Custom, Radar, Clouds): one rim arclabel at
+ * Rs - 10 centred on six o'clock over a translucent band from
+ * ui_arclabel_add_band(), carrying the source name and the stamp joined by
+ * set_caption_if_changed() (nina_image_page.c). The per-frame HH:MM stamp of
+ * the Radar and Cloud Cover loops re-lays out that arclabel on every playback
+ * step, by the user's explicit decision. No chip, no bar background, no rim
+ * frame ring.
  *
  * Moon: the disc gives ground (432 px, centred 12 px above the panel centre) so
  * the freed annulus can hold the four labels on two chords; illumination stops
@@ -44,10 +44,9 @@ extern const lv_font_t lv_font_overpass_27;
 #define IMG_MOON_TEXT_H       39   /* overpass_27 line height */
 #define IMG_MOON_TEXT_GAP     10   /* disc edge to the text's inner edge, text shown */
 #define IMG_MOON_TEXT_SPAN   150   /* degrees per rim row; 120 dots the three-item top row */
-#define IMG_CAP_BAND_PAD       6   /* band padding beyond the glyph cell, GOES-class captions */
-#define IMG_CAP_REGION_START  92   /* region arclabel start angle; trailing ends 2 deg left of six o'clock */
-#define IMG_CAP_SPAN          88   /* degrees run by each of the two GOES-class rim captions */
-#define IMG_CAP_STAMP_START    0   /* timestamp arclabel start angle; leading begins 2 deg right of six o'clock */
+#define IMG_CAP_BAND_PAD       6   /* band padding beyond the glyph cell, GOES-class caption */
+#define IMG_CAP_SPAN         150   /* degrees of the one centred bottom-rim caption; holds
+                                    * "Upper Mississippi Valley - Updated 18:11" at 720 */
 
 /* A transparent full-panel container that never eats a tap. overlay_bar must be
  * full panel on round because ui_arclabel_create() centres its arc on the
@@ -144,16 +143,16 @@ void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
         return;
     }
 
-    /* GOES class: both captions are rim arclabels split at six o'clock. Angles
-     * are lv_arclabel angles (0 = three o'clock, clockwise positive, six
-     * o'clock 90), drawn counter-clockwise so the glyphs read left to right
-     * along the bottom of the circle. The region name is TRAILING, which ends
-     * the run exactly on angle_start, so it finishes 2 degrees left of six
-     * o'clock and grows left through the 92..180 span. */
+    /* GOES class: ONE rim caption centred on six o'clock, counter-clockwise so
+     * it reads left to right along the bottom, over a translucent band. It
+     * carries the source name and the stamp joined by set_caption_if_changed()
+     * in nina_image_page.c ("SUVI 131 - Updated 18:10", "Radar KLSX 18:08",
+     * "Updated 23:04" for Custom). lbl_timestamp is kept as a hidden plain
+     * label so the caption call sites still have a slot to write. */
     p->lbl_region = ui_arclabel_create(p->overlay_bar, &lv_font_overpass_27,
                                        rs - IMG_R_CAPTION_INSET,
-                                       IMG_CAP_REGION_START, IMG_CAP_SPAN, false,
-                                       LV_ARCLABEL_TEXT_ALIGN_TRAILING);
+                                       90 - IMG_CAP_SPAN / 2, IMG_CAP_SPAN, false,
+                                       LV_ARCLABEL_TEXT_ALIGN_CENTER);
     /* NULL when the widget allocation failed; the styler dereferences. */
     if (p->lbl_region) {
         image_page_caption_style(p->lbl_region);
@@ -161,17 +160,11 @@ void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
     }
     /* No lv_arclabel_set_text("") here: ui_arclabel_create() already set it. */
 
-    /* The timestamp is LEADING, which starts the run at angle_start +
-     * angle_size (88), so it begins 2 degrees right of six o'clock and grows
-     * right toward three o'clock. */
-    p->lbl_timestamp = ui_arclabel_create(p->overlay_bar, &lv_font_overpass_27,
-                                          rs - IMG_R_CAPTION_INSET,
-                                          IMG_CAP_STAMP_START, IMG_CAP_SPAN, false,
-                                          LV_ARCLABEL_TEXT_ALIGN_LEADING);
-    if (p->lbl_timestamp) {
-        image_page_caption_style(p->lbl_timestamp);
-        ui_arclabel_add_band(p->lbl_timestamp, IMG_CAP_BAND_PAD);
-    }
+    p->lbl_timestamp = lv_label_create(p->overlay_bar);
+    lv_obj_set_style_text_font(p->lbl_timestamp, &lv_font_overpass_27, 0);
+    image_page_caption_style(p->lbl_timestamp);
+    lv_label_set_text(p->lbl_timestamp, "");
+    lv_obj_add_flag(p->lbl_timestamp, LV_OBJ_FLAG_HIDDEN);
 }
 
 /* Disc diameter from moon_round_size_pct (percent of the rim diameter) while

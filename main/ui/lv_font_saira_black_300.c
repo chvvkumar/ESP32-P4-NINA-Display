@@ -10,8 +10,15 @@
 #include "lvgl.h"
 #endif
 
+/* Square family only: the round Broadside uses lv_font_saira_black_230,
+ * the 300 px digits do not fit the inset round column. */
+#include "sdkconfig.h"
 #ifndef LV_FONT_SAIRA_BLACK_300
+#ifdef CONFIG_NINA_FAMILY_ROUND
+#define LV_FONT_SAIRA_BLACK_300 0
+#else
 #define LV_FONT_SAIRA_BLACK_300 1
+#endif
 #endif
 
 #if LV_FONT_SAIRA_BLACK_300
