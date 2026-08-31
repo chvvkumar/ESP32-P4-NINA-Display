@@ -321,6 +321,17 @@ void nina_layout_image_apply_theme(dashboard_page_t *p) {
     ifr_theme_page(p, app_config_get()->color_brightness);
 }
 
+/* ---- view mode ---------------------------------------------------------- */
+
+/* Layout 1 is not selectable on a round panel any more (layout_for_family
+ * resolves a stored 1 to the Dashboard there), so this board has one
+ * composition and nothing to switch. The definition stays because the spine
+ * dispatches to it on every family. */
+void nina_layout_image_set_view(dashboard_page_t *p, nina_view_mode_t mode) {
+    LV_UNUSED(p);
+    LV_UNUSED(mode);
+}
+
 /* ---- update ------------------------------------------------------------- */
 
 void nina_layout_image_update(dashboard_page_t *p, const nina_client_t *d,

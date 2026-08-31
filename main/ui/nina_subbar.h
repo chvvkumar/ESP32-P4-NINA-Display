@@ -30,6 +30,10 @@
 /* Wider gap after every Nth block so a 40- or 60-sub night stays countable. */
 #define NINA_SUBBAR_GROUP_EVERY 10
 
+/** Longest the sub-boundary hold waits for the done count (ms): twice the
+ *  15 s sequence tier. Past this the restart is a retry of the same sub. */
+#define NINA_SUBBAR_HOLD_MS 30000
+
 typedef void (*nina_subbar_elapsed_cb_t)(void *ud, int secs);
 
 typedef struct {
@@ -60,6 +64,17 @@ typedef struct {
     float ring_gap;          /* reserved gap at twelve o'clock, degrees */
     float ring_frac;         /* last in-flight fraction, so a repaint keeps it */
     bool  stale;             /* ring mode only: arcs at 40 % while data is stale */
+    bool  hide_single;       /* ring mode only: hide the whole ring when the target is
+                              * exactly one sub (the exposure ring already tells that
+                              * story); a layout sets it after create_ring */
+    bool  ring_shown;        /* ring mode only: the layout's view-switch state, set
+                              * through nina_subbar_set_shown(); true at create */
+    bool  single;            /* last rebuild's target was exactly one sub */
+
+    /* Sub-boundary ratchet (see nina_subbar_set_progress). */
+    float last_frac;         /* frac seen on the previous set_progress call */
+    float hold_within;       /* fill held here while the done count catches up; <= 0 = no hold */
+    uint32_t hold_tick;      /* lv_tick_get() when the hold armed; expires after NINA_SUBBAR_HOLD_MS */
 
     nina_subbar_elapsed_cb_t elapsed_cb;
     void                    *elapsed_ud;
@@ -97,8 +112,22 @@ void nina_subbar_create_ring(nina_subbar_t *sb, lv_obj_t *parent,
  */
 void nina_subbar_ring_set_radius(nina_subbar_t *sb, int radius);
 
-/** @brief Push -1 to the elapsed callback (the layout's idle reset). */
+/** @brief Push -1 to the elapsed callback (the layout's idle reset). The
+ *         sub-boundary hold stays armed: this fires in the inter-exposure gap. */
 void nina_subbar_reset_elapsed(nina_subbar_t *sb);
+
+/** @brief Genuine idle park: drop the sub-boundary hold and draw the fill at 0. */
+void nina_subbar_park(nina_subbar_t *sb);
+
+/**
+ * @brief Ring mode: the layout's own show/hide for the ring (its view switch).
+ *
+ * The ring is drawn only when the layout wants it shown AND hide_single is not
+ * suppressing it, so a view switch and a target-count change never fight over
+ * the container's HIDDEN flag. Layouts that toggle the ring per view must go
+ * through this instead of flagging sb->cont themselves.
+ */
+void nina_subbar_set_shown(nina_subbar_t *sb, bool shown);
 
 /**
  * @brief Push poll data into the block row.
@@ -114,6 +143,13 @@ void nina_subbar_set_elapsed_cb(nina_subbar_t *sb, nina_subbar_elapsed_cb_t cb, 
 
 /**
  * @brief Advance the in-flight fill and report elapsed seconds to the callback.
+ *
+ * The drawn fill is ratcheted across a sub boundary: the completed count comes
+ * from the 15 s sequence poll while @p frac comes from the 2 s camera poll, so
+ * a new exposure restarts on the block the finished one still occupies. The
+ * fill holds at its last extent until the count catches up and moves it on;
+ * the elapsed callback always sees the raw fraction, so the digits restart.
+ *
  * @param frac Interpolated exposure fraction, 0..1, from arc_interp_timer_cb.
  */
 void nina_subbar_set_progress(nina_subbar_t *sb, float frac);

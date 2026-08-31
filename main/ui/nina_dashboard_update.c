@@ -6,9 +6,13 @@
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
 #include "nina_layout_alt.h"
+#if CONFIG_NINA_FAMILY_ROUND
+#include "nina_round_overlay.h"
+#endif
 #include "nina_empty_state.h"
 #include "nina_connection.h"
 #include "ui_dial.h"
+#include "ui_text_fit.h"
 #include "app_config.h"
 #include "themes.h"
 #include "time_parse.h"
@@ -55,76 +59,33 @@ static inline void set_arc_opa_if_changed(lv_obj_t *obj, lv_opa_t opa, lv_style_
         lv_obj_set_style_arc_opa(obj, opa, sel);
 }
 
+/* Set background color only if it actually changed. NULL-safe: the exposure
+ * rings' leading-edge caps do not exist on every layout. */
+static inline void set_bg_color_if_changed(lv_obj_t *obj, lv_color_t color) {
+    if (!obj) return;
+    if (!lv_color_eq(lv_obj_get_style_bg_color(obj, 0), color))
+        lv_obj_set_style_bg_color(obj, color, 0);
+}
+
+/* Set background opacity only if it actually changed. NULL-safe, same reason */
+static inline void set_bg_opa_if_changed(lv_obj_t *obj, lv_opa_t opa) {
+    if (!obj) return;
+    if (lv_obj_get_style_bg_opa(obj, 0) != opa)
+        lv_obj_set_style_bg_opa(obj, opa, 0);
+}
+
 /* Set shadow color only if it actually changed */
 static inline void set_shadow_color_if_changed(lv_obj_t *obj, lv_color_t color, lv_style_selector_t sel) {
     if (!lv_color_eq(lv_obj_get_style_shadow_color(obj, sel), color))
         lv_obj_set_style_shadow_color(obj, color, sel);
 }
 
-/* ── Font-ladder fit, with a per-label memo ────────────────────────────
- * The ladder costs up to 7 lv_text_get_size() glyph walks, and it used to run
- * on every poll cycle even though its inputs (label text, parent content
- * width, letter spacing) change rarely. Memoise the pick per label object.
- * Only two labels per NINA page use this, so 8 slots never evict in practice
- * (linear scan, slot 0 as the fallback victim).
- * ponytail: the memo keys on the first 63 chars of the text; two names that
- * differ only past char 63 share a pick, which is the smallest font either
- * way. The chosen font is re-applied on a hit, so a recycled label pointer
- * (page rebuild) can never keep a stale font. */
-#define FIT_CACHE_SLOTS 8
-
-typedef struct {
-    const lv_obj_t  *label;
-    const lv_font_t *pick;
-    int32_t          avail;
-    int32_t          letter_space;
-    char             text[64];
-} fit_cache_t;
-
-static fit_cache_t s_fit_cache[FIT_CACHE_SLOTS];
-
-static fit_cache_t *fit_cache_slot(const lv_obj_t *label) {
-    fit_cache_t *empty = NULL;
-    for (int i = 0; i < FIT_CACHE_SLOTS; i++) {
-        if (s_fit_cache[i].label == label) return &s_fit_cache[i];
-        if (!s_fit_cache[i].label && !empty) empty = &s_fit_cache[i];
-    }
-    return empty ? empty : &s_fit_cache[0];
-}
-
-static void auto_fit_font(lv_obj_t *label, const lv_font_t *const *fonts, int nfonts) {
-    const char *text = lv_label_get_text(label);
-    int32_t letter_space = lv_obj_get_style_text_letter_space(label, 0);
-    int32_t avail = lv_obj_get_content_width(lv_obj_get_parent(label));
-
-    fit_cache_t *slot = fit_cache_slot(label);
-    const lv_font_t *pick;
-
-    if (slot->label == label && slot->pick &&
-        slot->avail == avail && slot->letter_space == letter_space &&
-        strncmp(slot->text, text, sizeof(slot->text) - 1) == 0) {
-        pick = slot->pick;
-    } else {
-        pick = fonts[nfonts - 1];
-        for (int i = 0; i < nfonts; i++) {
-            lv_point_t size;
-            lv_text_get_size(&size, text, fonts[i], letter_space, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-            if (size.x <= avail) {
-                pick = fonts[i];
-                break;
-            }
-        }
-        slot->label        = label;
-        slot->pick         = pick;
-        slot->avail        = avail;
-        slot->letter_space = letter_space;
-        strncpy(slot->text, text, sizeof(slot->text) - 1);
-        slot->text[sizeof(slot->text) - 1] = '\0';
-    }
-
-    if (lv_obj_get_style_text_font(label, 0) != pick)
-        lv_obj_set_style_text_font(label, pick, 0);
-}
+/* ── Font-ladder fit ───────────────────────────────────────────────────
+ * The ladder and its per-label memo now live in ui_text_fit.c, so the round
+ * layouts can fit a name row against a chord width instead of a parent's
+ * content width. The two wrappers below keep this page's behaviour exactly as
+ * it was: same ladders, same "available width is the parent's content width"
+ * rule, font applied and nothing else touched. */
 
 /* Pick the largest font that fits the label's parent width */
 static void auto_fit_value_font(lv_obj_t *label) {
@@ -132,7 +93,8 @@ static void auto_fit_value_font(lv_obj_t *label) {
         &lv_font_montserrat_48, &lv_font_montserrat_36,
         &lv_font_montserrat_32, &lv_font_montserrat_28,
     };
-    auto_fit_font(label, fonts, (int)(sizeof(fonts) / sizeof(fonts[0])));
+    ui_fit_label_font(label, fonts, (int)(sizeof(fonts) / sizeof(fonts[0])),
+                      lv_obj_get_content_width(lv_obj_get_parent(label)));
 }
 
 /* Pick the largest font that fits the label's parent width (wider ladder for target names) */
@@ -143,12 +105,15 @@ static void auto_fit_target_name_font(lv_obj_t *label) {
         &lv_font_montserrat_24, &lv_font_montserrat_20,
         &lv_font_montserrat_16,
     };
-    auto_fit_font(label, fonts, (int)(sizeof(fonts) / sizeof(fonts[0])));
+    ui_fit_label_font(label, fonts, (int)(sizeof(fonts) / sizeof(fonts[0])),
+                      lv_obj_get_content_width(lv_obj_get_parent(label)));
 }
 
 static void arc_start_exposure_anim(dashboard_page_t *p);
-static void subbar_interp_tick(dashboard_page_t *p);
+static void arc_exec_cb(void *var, int32_t v);
+static void alt_interp_tick(dashboard_page_t *p);
 static void arc_interp_tick(dashboard_page_t *p);
+static void alt_reset_elapsed(dashboard_page_t *p);
 
 /* NINA-domain "now", derived from the page's cached Date-header epoch advanced
  * by monotonic time. Falls back to the device wall clock when the pair is
@@ -162,11 +127,16 @@ static int64_t page_now_nina(const dashboard_page_t *p) {
     return (int64_t)time(NULL);
 }
 
-/* Layouts 1 and 2 have no arc: drive the segmented sub bar from the same
- * monotonic anchor, the same backward-only wall correction and the same
- * 200 ms cadence the arc uses. No second timer exists. */
-static void subbar_interp_tick(dashboard_page_t *p) {
-    if (!p->subbar.cont) return;
+/* The capture layouts have no exposure arc of their own: drive whatever they
+ * did build (the segmented sub bar, an exposure ring, an exposure bar, the hero
+ * seconds) from the same monotonic anchor, the same backward-only wall
+ * correction and the same 200 ms cadence the arc uses. No second timer exists,
+ * and each sink is optional, so a layout only pays for what it draws. */
+static void alt_interp_tick(dashboard_page_t *p) {
+    if (!p->subbar.cont && !p->alt.arc_progress && !p->alt.arc_progress_num
+        && !p->alt.bar_progress && !p->alt.elapsed_cb) {
+        return;
+    }
     if (p->exp_anchor_us == 0 || p->cached_total <= 0.0f || !p->cached_is_exposing) return;
 
     float elapsed = p->exp_anchor_elapsed +
@@ -185,7 +155,53 @@ static void subbar_interp_tick(dashboard_page_t *p) {
 
     if (elapsed < 0.0f) elapsed = 0.0f;
     if (elapsed > p->cached_total) elapsed = p->cached_total;
-    nina_subbar_set_progress(&p->subbar, elapsed / p->cached_total);
+
+    const float frac = elapsed / p->cached_total;
+    if (p->subbar.cont) nina_subbar_set_progress(&p->subbar, frac);
+    if (p->alt.arc_progress) {
+        lv_arc_set_value(p->alt.arc_progress, (int32_t)(frac * 1000.0f));
+    }
+    if (p->alt.arc_progress_num) {
+        lv_arc_set_value(p->alt.arc_progress_num, (int32_t)(frac * 1000.0f));
+    }
+    /* The bands above only fill whole degrees; the caps ride the exact fraction
+     * so the leading edge advances smoothly instead of stepping (ui_dial.h).
+     * On round layout 0 cap_progress_num rides p->arc_exposure, whose
+     * animations place it themselves through arc_exec_cb from the animated
+     * value; placing it from this frac too put it a few degrees off the band. */
+    ui_dial_cap_place(p->alt.cap_progress.obj, p->alt.cap_progress.r,
+                      p->alt.cap_progress.a0, p->alt.cap_progress.sweep, frac);
+    if (p->layout != 0) {
+        ui_dial_cap_place(p->alt.cap_progress_num.obj, p->alt.cap_progress_num.r,
+                          p->alt.cap_progress_num.a0, p->alt.cap_progress_num.sweep,
+                          frac);
+    }
+    if (p->alt.bar_progress) {
+        lv_bar_set_value(p->alt.bar_progress, (int32_t)(frac * 1000.0f), LV_ANIM_OFF);
+    }
+    if (p->alt.elapsed_cb) {
+        int secs = (int)elapsed;
+        if (secs > 9999) secs = 9999;      /* same cap the sub bar applies */
+        p->alt.elapsed_cb(p, secs);
+    }
+}
+
+/* The idle reset every "no exposure running" site shares: park the sub bar, the
+ * exposure ring or bar and the hero digits together, through the same single
+ * writer each of them has while an exposure is running. */
+static void alt_reset_elapsed(dashboard_page_t *p) {
+    if (!p) return;
+    if (p->subbar.cont)      nina_subbar_reset_elapsed(&p->subbar);
+    if (p->alt.elapsed_cb)   p->alt.elapsed_cb(p, -1);
+    if (p->alt.arc_progress) lv_arc_set_value(p->alt.arc_progress, 0);
+    if (p->alt.arc_progress_num) lv_arc_set_value(p->alt.arc_progress_num, 0);
+    /* Zero hides the caps, so nothing is left sitting on an empty ring. */
+    ui_dial_cap_place(p->alt.cap_progress.obj, p->alt.cap_progress.r,
+                      p->alt.cap_progress.a0, p->alt.cap_progress.sweep, 0.0f);
+    ui_dial_cap_place(p->alt.cap_progress_num.obj, p->alt.cap_progress_num.r,
+                      p->alt.cap_progress_num.a0, p->alt.cap_progress_num.sweep,
+                      0.0f);
+    if (p->alt.bar_progress) lv_bar_set_value(p->alt.bar_progress, 0, LV_ANIM_OFF);
 }
 
 void arc_interp_timer_cb(lv_timer_t *timer) {
@@ -201,10 +217,24 @@ void arc_interp_timer_cb(lv_timer_t *timer) {
      * layout), so this is the same arc_interp_tick() body running in the same
      * place it always has: the reordering changes nothing there. */
     arc_interp_tick(p);
-    /* subbar_interp_tick() returns immediately when there is no block row, so
-     * this is a no-op on the square bento layout and drives the round board's
-     * sub ring on layout 0. */
-    subbar_interp_tick(p);
+    /* alt_interp_tick() returns immediately when the page built none of the
+     * sinks it drives, so this is a no-op on the square bento layout and drives
+     * the round board's sub ring on layout 0. */
+    alt_interp_tick(p);
+}
+
+/* The one exec callback every arc_exposure animation uses (fill, completion
+ * snap, gap fade, idle drop). Sets the value and, when the round board hung
+ * its leading-edge cap descriptor on the arc's user data, places the cap from
+ * that SAME value, so band and cap can never disagree the way they did when
+ * the cap was placed from the 200 ms tick's own fraction (a ball a couple of
+ * degrees ahead of the band, or buried under it). Square never sets the user
+ * data, so this is plain lv_arc_set_value there. */
+static void arc_exec_cb(void *var, int32_t v) {
+    lv_obj_t *arc = (lv_obj_t *)var;
+    lv_arc_set_value(arc, v);
+    nina_arc_cap_t *c = (nina_arc_cap_t *)lv_obj_get_user_data(arc);
+    if (c) ui_dial_cap_place(c->obj, c->r, c->a0, c->sweep, (float)v / (float)ARC_RANGE);
 }
 
 /* Layout 0 only: the exposure arc's monotonic-anchor correction and long
@@ -254,7 +284,7 @@ static void arc_interp_tick(dashboard_page_t *p) {
     /* The long linear anim is the smooth source of truth; do NOT restart on
      * small drift. Only restart if no anim is running (e.g. a prior shorter
      * estimate ended the anim early) and we still have time left. */
-    lv_anim_t *existing = lv_anim_get(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+    lv_anim_t *existing = lv_anim_get(p->arc_exposure, arc_exec_cb);
     if (!existing && elapsed < p->cached_total) {
         arc_start_exposure_anim(p);
     }
@@ -381,10 +411,10 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     if (p->lbl_exposure_total)  set_label_if_changed(p->lbl_exposure_total, "");
     if (p->lbl_loop_count)      set_label_if_changed(p->lbl_loop_count, "");
     if (p->lbl_exposure_current) set_label_if_changed(p->lbl_exposure_current, "--");
-    if (p->subbar.cont)         nina_subbar_reset_elapsed(&p->subbar);
+    alt_reset_elapsed(p);
     /* Drop any active exposure anchor so a stale anchor can't keep the 200ms
      * timer driving the arc while this instance is disconnected. */
-    lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+    lv_anim_delete(p->arc_exposure, arc_exec_cb);
     p->exp_anchor_us = 0;
     p->exp_anchor_elapsed = 0;
     p->cached_is_exposing = false;
@@ -394,7 +424,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     p->gap_start_epoch = 0;
     p->cached_nina_epoch = 0;
     p->cached_nina_mono_us = 0;
-    if (p->arc_exposure)     lv_arc_set_value(p->arc_exposure, 0);
+    if (p->arc_exposure)     arc_exec_cb(p->arc_exposure, 0);
     if (p->row_filter_total) lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
     set_label_if_changed(p->lbl_rms_value, "--");
@@ -415,9 +445,9 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     if (p->lbl_target_time_header) {
         set_label_if_changed(p->lbl_target_time_header, "TIME LIMIT");
     }
-    /* Shapes go home: both dots to the centre, the flip tick away. */
-    if (p->rms_dot) ui_dial_place_dot(p->rms_dot, p->rms_bull, 0.0f, DR_BEARING_RMS);
-    if (p->hfr_dot) ui_dial_place_dot(p->hfr_dot, p->hfr_bull, 0.0f, DR_BEARING_HFR);
+    /* Shapes go home: both trend graphs cleared, the flip tick away. */
+    if (p->rms_chart) lv_chart_set_all_values(p->rms_chart, p->rms_ser, LV_CHART_POINT_NONE);
+    if (p->hfr_chart) lv_chart_set_all_values(p->hfr_chart, p->hfr_ser, LV_CHART_POINT_NONE);
     if (p->ring_flip_tick) ui_dial_set_tick(p->ring_flip_tick, -1, UI_DIAL_FLIP_SPAN_MIN);
     if (p->box_pwr[0]) {
         for (int i = 0; i < MAX_POWER_WIDGETS; i++) {
@@ -512,7 +542,7 @@ static void arc_start_exposure_anim(dashboard_page_t *p) {
     lv_anim_set_var(&a, p->arc_exposure);
     lv_anim_set_values(&a, current, ARC_RANGE - 1);
     lv_anim_set_time(&a, remaining_ms);
-    lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+    lv_anim_set_exec_cb(&a, arc_exec_cb);
     lv_anim_set_path_cb(&a, lv_anim_path_linear);
     lv_anim_start(&a);
 }
@@ -525,10 +555,13 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     }
     set_arc_color_if_changed(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
     set_shadow_color_if_changed(p->arc_exposure, lv_color_hex(filter_color), LV_PART_INDICATOR);
+    /* Round layout 0's leading-edge cap rides this ring, so it takes the same
+     * filter colour. NULL on the square bento layout, which draws no cap. */
+    set_bg_color_if_changed(p->alt.cap_progress_num.obj, lv_color_hex(filter_color));
 
     // Detect filter change — reset arc state
     if (d->current_filter[0] != '\0' && strcmp(p->prev_filter, d->current_filter) != 0) {
-        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_delete(p->arc_exposure, arc_exec_cb);
         p->arc_completing = false;
         p->cached_end_epoch = 0;
         p->cached_total = 0;
@@ -537,7 +570,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         p->exp_anchor_elapsed = 0;
         p->cached_nina_epoch = 0;
         p->cached_nina_mono_us = 0;
-        lv_arc_set_value(p->arc_exposure, 0);
+        arc_exec_cb(p->arc_exposure, 0);
         snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
     }
 
@@ -564,7 +597,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     if (finished_edge) {
         /* Snap the arc to a full circle for a polished completion, then let the
          * inter-exposure gap logic below hold/fade it before the next sub. */
-        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_delete(p->arc_exposure, arc_exec_cb);
         p->arc_completing = true;
         p->exp_anchor_us = 0;
         int current_fill = lv_arc_get_value(p->arc_exposure);
@@ -573,7 +606,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         lv_anim_set_var(&a, p->arc_exposure);
         lv_anim_set_values(&a, current_fill, ARC_RANGE);
         lv_anim_set_time(&a, ARC_TRANSITION_MS);
-        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_set_exec_cb(&a, arc_exec_cb);
         lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
         lv_anim_start(&a);
     }
@@ -629,13 +662,13 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             p->exp_anchor_elapsed = seed;
             p->arc_completing = false;
 
-            lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_delete(p->arc_exposure, arc_exec_cb);
             /* Seed the arc value from the elapsed estimate so a mid-sub detection
              * does not snap back to zero. */
             int seed_val = (int)((seed * (float)ARC_RANGE) / d->exposure_total);
             if (seed_val < 0) seed_val = 0;
             if (seed_val > ARC_RANGE - 1) seed_val = ARC_RANGE - 1;
-            lv_arc_set_value(p->arc_exposure, seed_val);
+            arc_exec_cb(p->arc_exposure, seed_val);
 
             /* Start one long linear anim toward (ARC_RANGE-1) over the monotonic
              * remaining time. arc_start_exposure_anim skips if <=100ms remain
@@ -659,7 +692,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             if (target_val > ARC_RANGE - 1) target_val = ARC_RANGE - 1;
             int cur_val = lv_arc_get_value(p->arc_exposure);
 
-            lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_delete(p->arc_exposure, arc_exec_cb);
             /* Smoothly move from the (mis-seeded) current value to the corrected
              * position; the long linear anim takes over toward ARC_RANGE-1 once
              * this short correction anim ends. Do NOT call
@@ -671,7 +704,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             lv_anim_set_var(&a, p->arc_exposure);
             lv_anim_set_values(&a, cur_val, target_val);
             lv_anim_set_time(&a, ARC_TRANSITION_MS);
-            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_set_exec_cb(&a, arc_exec_cb);
             lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
             lv_anim_start(&a);
         }
@@ -737,15 +770,15 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                 if (p->lbl_exposure_current) {
                     set_label_if_changed(p->lbl_exposure_current, "--");
                 }
-                if (p->subbar.cont) nina_subbar_reset_elapsed(&p->subbar);
-                lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+                alt_reset_elapsed(p);
+                lv_anim_delete(p->arc_exposure, arc_exec_cb);
 
                 lv_anim_t a;
                 lv_anim_init(&a);
                 lv_anim_set_var(&a, p->arc_exposure);
                 lv_anim_set_values(&a, lv_arc_get_value(p->arc_exposure), 0);
                 lv_anim_set_time(&a, 500);
-                lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+                lv_anim_set_exec_cb(&a, arc_exec_cb);
                 lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
                 lv_anim_start(&a);
 
@@ -764,8 +797,8 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             if (p->lbl_exposure_current) {
                 set_label_if_changed(p->lbl_exposure_current, "--");
             }
-            if (p->subbar.cont) nina_subbar_reset_elapsed(&p->subbar);
-            lv_arc_set_value(p->arc_exposure, 0);
+            alt_reset_elapsed(p);
+            arc_exec_cb(p->arc_exposure, 0);
             if (p->row_filter_total) {
                 lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
             }
@@ -855,23 +888,31 @@ static void update_guider_stats(dashboard_page_t *p, const nina_client_t *d,
         p->anim_hfr_x100 = 0;
     }
 
-    /* Bullseye dots: distance from centre is the value against its configured
-     * tolerance (ok_max), clamped by ui_dial_place_dot at 1.35 so an
-     * out-of-tolerance value stays on the board. The bearing is fixed per
-     * metric so a moving dot reads as a change in error, not in direction. */
-    if (p->rms_dot && p->rms_bull) {
+    /* Trend graphs: one point per poll cycle, the value plotted as its ratio
+     * against the configured tolerance (ok_max) x100, clamped at
+     * DR_GRAPH_RANGE (twice the tolerance) so a bad excursion stays on the
+     * board. No reading pushes a gap, not a zero. */
+    if (p->rms_chart && p->rms_ser) {
         threshold_config_t t;
         app_config_get_rms_threshold_config(instance_idx, &t);
         float lim = (t.ok_max > 0.01f) ? t.ok_max : 1.0f;
-        float ratio = (d->guider.rms_total > 0.0f) ? d->guider.rms_total / lim : 0.0f;
-        ui_dial_place_dot(p->rms_dot, p->rms_bull, ratio, DR_BEARING_RMS);
+        int32_t v = LV_CHART_POINT_NONE;
+        if (d->guider.rms_total > 0.0f) {
+            float ratio = d->guider.rms_total / lim * 100.0f;
+            v = (ratio > DR_GRAPH_RANGE) ? DR_GRAPH_RANGE : (int32_t)ratio;
+        }
+        lv_chart_set_next_value(p->rms_chart, p->rms_ser, v);
     }
-    if (p->hfr_dot && p->hfr_bull) {
+    if (p->hfr_chart && p->hfr_ser) {
         threshold_config_t t;
         app_config_get_hfr_threshold_config(instance_idx, &t);
         float lim = (t.ok_max > 0.01f) ? t.ok_max : 3.5f;
-        float ratio = (d->hfr > 0.0f) ? d->hfr / lim : 0.0f;
-        ui_dial_place_dot(p->hfr_dot, p->hfr_bull, ratio, DR_BEARING_HFR);
+        int32_t v = LV_CHART_POINT_NONE;
+        if (d->hfr > 0.0f) {
+            float ratio = d->hfr / lim * 100.0f;
+            v = (ratio > DR_GRAPH_RANGE) ? DR_GRAPH_RANGE : (int32_t)ratio;
+        }
+        lv_chart_set_next_value(p->hfr_chart, p->hfr_ser, v);
     }
 }
 
@@ -1041,6 +1082,26 @@ static void update_stale_indicator(dashboard_page_t *p, const nina_client_t *d) 
     if (p->subbar.ring && !p->ring_exposure) {
         nina_subbar_set_stale(&p->subbar, stale_ms > STALE_WARN_MS);
     }
+
+    /* A capture layout's own exposure ring or bar dims the same way, so every
+     * round page tells the same story about stale data. */
+    {
+        lv_opa_t opa = (stale_ms > STALE_WARN_MS) ? LV_OPA_40 : LV_OPA_COVER;
+        if (p->alt.arc_progress) {
+            set_arc_opa_if_changed(p->alt.arc_progress, opa, LV_PART_INDICATOR);
+        }
+        if (p->alt.arc_progress_num) {
+            set_arc_opa_if_changed(p->alt.arc_progress_num, opa, LV_PART_INDICATOR);
+        }
+        if (p->alt.bar_progress
+            && lv_obj_get_style_bg_opa(p->alt.bar_progress, LV_PART_INDICATOR) != opa) {
+            lv_obj_set_style_bg_opa(p->alt.bar_progress, opa, LV_PART_INDICATOR);
+        }
+        /* The caps dim with the band they ride, including round layout 0's,
+         * whose ring is p->ring_exposure dimmed a few lines above. */
+        set_bg_opa_if_changed(p->alt.cap_progress.obj, opa);
+        set_bg_opa_if_changed(p->alt.cap_progress_num.obj, opa);
+    }
 }
 
 /* Material Symbols codepoints (UTF-8 encoded) */
@@ -1169,10 +1230,10 @@ static void update_exposure_anchor(dashboard_page_t *p, const nina_client_t *d) 
     }
 }
 
-/* Update path for layout 1 (Image-forward). NONE of the arc-path updaters may run here:
- * they dereference widgets these layouts never create. The shared pieces —
- * disconnected empty state, stale label and stale overlay — are driven from
- * this function so both layouts inherit them. */
+/* Update path for every capture layout (1 to 4). NONE of the arc-path updaters
+ * may run here: they dereference widgets these layouts never create. The shared
+ * pieces (disconnected empty state, stale label, stale overlay) are driven
+ * from this function so every layout inherits them. */
 static void update_alt_layout_page(dashboard_page_t *p, const nina_client_t *d,
                                    int inst, int gb) {
     nina_conn_state_t conn_state = nina_connection_get_state(inst);
@@ -1194,6 +1255,10 @@ static void update_alt_layout_page(dashboard_page_t *p, const nina_client_t *d,
             p->cached_end_epoch = 0;
             p->cached_total = 0;
             p->gap_start_epoch = 0;
+            /* Park the hero digits and the exposure ring or bar too, so a page that
+             * comes back from the offline overlay is not still showing the last
+             * second count of the sub that was running when the rig went away. */
+            alt_reset_elapsed(p);
             if (p->empty_state_cont) {
                 char host[64] = {0};
                 extract_host_from_url(app_config_get_instance_url(inst), host, sizeof(host));
@@ -1220,7 +1285,26 @@ static void update_alt_layout_page(dashboard_page_t *p, const nina_client_t *d,
 
     update_exposure_anchor(p, d);
 
-    nina_layout_image_update(p, d, inst, gb);
+    /* The anchor drops when the camera goes idle or the inter-exposure grace
+     * expires, which is not the same event as NINA reporting an exposure length
+     * of zero. Without this the hero digits and the exposure ring would sit at
+     * the last sub value all night, reading as an exposure that never ends. */
+    if (p->cached_total <= 0.0f) alt_reset_elapsed(p);
+
+    switch (p->layout) {
+        case 1: nina_layout_image_update(p, d, inst, gb); break;
+#if CONFIG_NINA_FAMILY_ROUND
+        case 2: nina_layout_halo_update(p, d, inst, gb); break;
+        case 4: nina_layout_orbit_update(p, d, inst, gb); break;
+#endif
+        default: break;
+    }
+
+#if CONFIG_NINA_FAMILY_ROUND
+    /* The shared overlay last, so it repaints over whatever the layout just
+     * wrote. It is a no-op on a page that never built one. */
+    if (p->alt.ov.crown) nina_round_overlay_update(p, d, inst, gb);
+#endif
 
     update_stale_indicator(p, d);
 }
@@ -1283,4 +1367,12 @@ void update_nina_dashboard_page(int instance, const nina_client_t *data) {
     update_mount_and_image_stats(p, data);
     update_power(p, data);
     update_stale_indicator(p, data);
+
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Round layout 0 carries the shared picture overlay on top of every widget
+     * above, so it is pushed last, after the classic updaters have written
+     * their own. The guard is the overlay's own crown handle, so this is a
+     * no-op on a page that never built one. */
+    if (p->alt.ov.crown) nina_round_overlay_update(p, data, inst, gb);
+#endif
 }

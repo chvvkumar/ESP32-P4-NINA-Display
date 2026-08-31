@@ -8,3 +8,8 @@ CONFIG_LV_USE_ARCLABEL=y
 
 # No layer cap: the round graph's clip_corner chart tiles two software layers of about 1 MB each, and a cap under about 1.2 MB silently drops every chart child
 CONFIG_LV_DRAW_LAYER_MAX_MEMORY=0
+
+# Sub-degree glyph placement for lv_arclabel. Without it lv_value_precise_t is
+# int32 and the widget snaps every rim glyph to a whole degree (about 6 px at
+# the 3.4C rim), which reads as broken kerning on every arclabel.
+CONFIG_LV_USE_FLOAT=y

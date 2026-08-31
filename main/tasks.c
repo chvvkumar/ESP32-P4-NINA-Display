@@ -1580,7 +1580,7 @@ main_loop:
                     fetch_thumbnail_pending = false;
                     if (fres.success && fres.thumbnail.rgb565_data) {
                         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                            /* Image-forward (layout 1) shows the last capture as its
+                            /* The capture layouts show the last picture as their
                              * page background. The page must still be the visible
                              * one: hide_page_at() has already released the capture,
                              * so attaching a frame to a hidden page would leak it
@@ -1588,7 +1588,8 @@ main_loop:
                             bool want_cap = (fres.instance_idx >= 0
                                 && fres.instance_idx < MAX_NINA_INSTANCES
                                 && nina_slot_available[fres.instance_idx]
-                                && pages[fres.instance_idx].layout == 1
+                                && nina_layout_uses_capture(
+                                       pages[fres.instance_idx].layout)
                                 && nina_dashboard_get_active_page()
                                        == NINA_PAGE_OFFSET + fres.instance_idx);
                             /* Both consumers TAKE OWNERSHIP, so the frame is copied
@@ -2324,10 +2325,12 @@ main_loop:
 
             /* ── Async thumbnail fetch (offloaded to Core 0 fetch worker) ── */
             bool want_thumbnail = nina_dashboard_thumbnail_requested();
-            /* Image-forward needs the same decoded frame for its page background:
-             * once on entry (it has none yet) and on every new image after that. */
+            /* A capture layout needs the same decoded frame for its page
+             * background: once on entry (it has none yet) and on every new image
+             * after that. */
             bool on_image_layout = (nina_slot_available[active_nina_idx]
-                                    && pages[active_nina_idx].layout == 1);
+                                    && nina_layout_uses_capture(
+                                           pages[active_nina_idx].layout));
             bool want_capture = on_image_layout
                                 && nina_layout_image_needs_capture(active_nina_idx);
             bool auto_refresh = false;

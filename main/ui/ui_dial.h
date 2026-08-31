@@ -84,6 +84,66 @@ static inline void ui_dial_set_tick(lv_obj_t *tick, int minutes, int span_min)
 }
 
 /**
+ * @brief Round cap that rides an arc's leading edge at the exact float angle.
+ *
+ * LVGL 9.5 maps an lv_arc's value to WHOLE degrees, and the software arc draw
+ * casts its angles to int32 whatever LV_USE_FLOAT says, so at a rim radius near
+ * 400 px the filled band jumps a 6 to 7 px step at a time. The cap is placed
+ * from the same fraction in floating point, so the leading edge the eye follows
+ * advances about 1.5 px per 200 ms tick while the quantised band trails at most
+ * one degree behind it, always underneath the cap.
+ *
+ * The cap is a CHILD of the arc, so it hides, dims and dies with it.
+ * @param diam  cap diameter, normally the arc's stroke width
+ */
+static inline lv_obj_t *ui_dial_cap_create(lv_obj_t *arc, int diam, uint32_t color)
+{
+    if (!arc) return NULL;
+    lv_obj_t *c = lv_obj_create(arc);
+    lv_obj_remove_style_all(c);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_size(c, diam, diam);
+    lv_obj_set_style_radius(c, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+    lv_obj_set_style_bg_color(c, lv_color_hex(color), 0);
+    lv_obj_add_flag(c, LV_OBJ_FLAG_HIDDEN);
+    return c;
+}
+
+/**
+ * @brief Put @p cap at @p frac along the ring described by the other arguments.
+ *
+ * @p a0_deg and @p sweep_deg are the arc's own start angle and span in degrees
+ * clockwise from twelve o'clock. A fraction at or below zero hides the cap
+ * (nothing has been exposed yet); above one it clamps. lv_obj_align stores an
+ * offset from the parent's centre, which for an lv_arc with no padding IS the
+ * arc's centre. A style write invalidates even when the value is unchanged,
+ * and this panel is full-refresh, so the position is compared first: the cap
+ * repaints the frame only when it has actually moved a pixel.
+ * ponytail: at the rim that is still about 5 Hz during an exposure; if that
+ * shows up in /api/perf, place on a 2 px grid instead.
+ */
+static inline void ui_dial_cap_place(lv_obj_t *cap, int r_mid, int a0_deg,
+                                     int sweep_deg, float frac)
+{
+    if (!cap) return;
+    if (frac <= 0.0f) {
+        lv_obj_add_flag(cap, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    if (frac > 1.0f) frac = 1.0f;
+    const float t = ((float)a0_deg + frac * (float)sweep_deg) * 0.017453292f;
+    const int32_t dx = (int32_t)lroundf((float)r_mid * sinf(t));
+    const int32_t dy = (int32_t)lroundf(-(float)r_mid * cosf(t));
+    if (lv_obj_get_style_x(cap, 0) != dx || lv_obj_get_style_y(cap, 0) != dy
+        || lv_obj_get_style_align(cap, 0) != LV_ALIGN_CENTER) {
+        lv_obj_align(cap, LV_ALIGN_CENTER, dx, dy);
+    }
+    lv_obj_remove_flag(cap, LV_OBJ_FLAG_HIDDEN);
+}
+
+/**
  * @brief Place a bullseye dot at @p ratio of @p ring's radius along a bearing.
  *
  * ratio 1.0 sits on the tolerance ring; out-of-tolerance values are clamped at

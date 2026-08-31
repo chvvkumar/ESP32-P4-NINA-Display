@@ -9,6 +9,9 @@
 #include "nina_dashboard.h"
 #include "nina_dashboard_internal.h"
 #include "nina_layout_alt.h"
+#if CONFIG_NINA_FAMILY_ROUND
+#include "nina_round_overlay.h"
+#endif
 #include "nina_empty_state.h"
 #include "nina_thumbnail.h"
 #include "nina_graph_overlay.h"
@@ -276,6 +279,7 @@ static nina_page_change_cb_t page_change_cb = NULL;
 void nina_dashboard_invalidate_disconnect_gate(int instance);
 
 static void update_indicators(void);
+static bool layout_uses_round_overlay(uint8_t layout);
 static void rms_click_cb(lv_event_t *e);
 static void hfr_click_cb(lv_event_t *e);
 static void exposure_arc_click_cb(lv_event_t *e);
@@ -464,8 +468,11 @@ static void hide_page_at(int idx) {
             /* Stop the 200 ms arc interpolation while the page is off-screen
              * (same rule as the clock/spotify/summary timers). */
             if (pages[inst].arc_timer) lv_timer_pause(pages[inst].arc_timer);
-            /* Image-forward keeps a decoded capture alive only while visible. */
-            if (pages[inst].layout == 1) nina_layout_image_release_capture(inst);
+            /* A capture layout keeps its decoded picture alive only while
+             * visible. */
+            if (nina_layout_uses_capture(pages[inst].layout)) {
+                nina_layout_image_release_capture(inst);
+            }
         }
     }
     else if (idx == SETTINGS_PAGE_IDX(page_count) && settings_obj) {
@@ -551,6 +558,13 @@ static void apply_theme_to_page(dashboard_page_t *p) {
         return;
     }
 
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Round layout 0 keeps every classic widget below AND carries the shared
+     * picture overlay, so it needs both re-toned. The square bento grid never
+     * reaches this call: layout_uses_round_overlay() is false on that family. */
+    if (layout_uses_round_overlay(p->layout)) nina_round_overlay_apply_theme(p);
+#endif
+
     if (p->lbl_instance_name) {
         uint32_t glow_color;
         if (theme_is_red_night(current_theme)) {
@@ -613,13 +627,13 @@ static void apply_theme_to_page(dashboard_page_t *p) {
         lv_obj_set_style_arc_color(p->ring_flip_tick,
             lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)), LV_PART_MAIN);
     }
-    if (p->rms_dot) {
-        lv_obj_set_style_bg_color(p->rms_dot,
-            lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
+    if (p->rms_chart && p->rms_ser) {
+        lv_chart_set_series_color(p->rms_chart, p->rms_ser,
+            lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)));
     }
-    if (p->hfr_dot) {
-        lv_obj_set_style_bg_color(p->hfr_dot,
-            lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
+    if (p->hfr_chart && p->hfr_ser) {
+        lv_chart_set_series_color(p->hfr_chart, p->hfr_ser,
+            lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)));
     }
 
     if (p->empty_state_cont) {
@@ -704,6 +718,33 @@ static void bottom_row_click_cb(lv_event_t *e) {
  * the layout body so it floats above it. */
 static void create_page_overlays(dashboard_page_t *p, int page_index);
 
+/* Resolve a stored nina_layout to one this binary can actually draw.
+ *
+ * Layouts 2 to 4 exist only in the round build, so the square build resolves
+ * them to the Dashboard HERE, at page-build time, and never rewrites the stored
+ * value: a board moved back to a round panel gets the user's choice again. */
+static uint8_t layout_for_family(uint8_t stored) {
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Round draws 0, 2 and 4. Image-forward (1) is a square board and 3 is a
+     * retired id, so both fall back to the Dashboard here. */
+    return (stored == 2 || stored == 4) ? stored : 0;
+#else
+    return (stored <= 1) ? stored : 0;
+#endif
+}
+
+/* True for a layout the shared round picture overlay is built for. Always false
+ * on the square family, which has no overlay module. */
+static bool layout_uses_round_overlay(uint8_t layout) {
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Every round NINA board is a picture board, the Dashboard included. */
+    return (layout == 0 || layout == 2 || layout == 4);
+#else
+    LV_UNUSED(layout);
+    return false;
+#endif
+}
+
 /* Build all widgets for one dashboard page.
  *
  * The per-instance layout (app_config_t::nina_layout[page_index]) decides what
@@ -719,7 +760,7 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
         if (cfg && page_index >= 0 && page_index < MAX_NINA_INSTANCES) {
             want = cfg->nina_layout[page_index];
         }
-        p->layout = (want <= 1) ? want : 0;
+        p->layout = layout_for_family(want);
     }
 
     p->page = lv_obj_create(parent);
@@ -731,28 +772,79 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
      * both families today). */
     const int parent_pad = lv_obj_get_style_pad_left(parent, 0);
 
-    if (p->layout == 1) {
-        /* Image-forward is full-bleed: the capture reaches the screen edge.
-         * Negate the parent main_cont's OUTER_PADDING, the same way the six
-         * image pages do it (nina_image_page.c). Must happen before the
-         * layout body so it builds against the real 720x720 root. The
+    if (p->layout != 0) {
+        /* Every capture layout is full-bleed: the picture reaches the screen
+         * edge. Negate the parent main_cont's OUTER_PADDING, the same way the
+         * six image pages do it (nina_image_page.c). Must happen before the
+         * layout body so it builds against the real full-panel root. The
          * shared overlays created below inherit the full-screen size, which
          * is what a full-bleed page wants. */
         lv_obj_set_size(p->page, screen_size(), screen_size());
         lv_obj_set_pos(p->page, -parent_pad, -parent_pad);
-        nina_layout_image_create(p, p->page, page_index);
+
+        /* On a round capture layout the SPINE owns the picture: it has to exist
+         * before the layout builds anything, so the layout's own objects and
+         * the shared overlay both land on top of it, and it is the one object
+         * that carries the view-cycle tap and the long-press preview. The
+         * picture is never hidden, only made transparent, so the tap target
+         * survives every view mode. */
+        const bool round_ov = layout_uses_round_overlay(p->layout);
+        if (round_ov) {
+            p->alt.inst = page_index;
+            p->alt.cap_img = lv_image_create(p->page);
+            lv_obj_set_size(p->alt.cap_img, screen_size(), screen_size());
+            lv_obj_center(p->alt.cap_img);
+            lv_image_set_inner_align(p->alt.cap_img, LV_IMAGE_ALIGN_CENTER);
+            lv_image_set_src(p->alt.cap_img, NULL);
+            nina_dashboard_bind_tap(p->alt.cap_img, NINA_TAP_VIEW_CYCLE);
+            nina_dashboard_bind_tap(p->alt.cap_img, NINA_TAP_CAPTURE_LONG);
+        }
+
+        switch (p->layout) {
+            case 1: nina_layout_image_create(p, p->page, page_index); break;
+#if CONFIG_NINA_FAMILY_ROUND
+            case 2: nina_layout_halo_create(p, p->page, page_index); break;
+            case 4: nina_layout_orbit_create(p, p->page, page_index); break;
+#endif
+            default: break;   /* layout_for_family() cannot produce this */
+        }
+
+#if CONFIG_NINA_FAMILY_ROUND
+        /* After the layout, so the crown, the rim arc and the readings plate
+         * draw over the layout's readings-only page rather than under it. */
+        if (round_ov) nina_round_overlay_create(p, p->page, page_index);
+#endif
         create_page_overlays(p, page_index);
+        /* A rebuild that kept the retained frame shows it again; the layouts
+         * that own their own picture do this inside their create(). */
+        if (round_ov) nina_layout_image_reattach_capture(page_index);
+        /* A page with no picture yet opens on its readings composition. */
+        nina_dashboard_refresh_view(page_index);
         return;
     }
 
 #if CONFIG_NINA_FAMILY_ROUND
-    /* Round Dashboard (radial board 1): full-bleed like layout 1, because the
-     * rim rings reach past the inset square. The square bento grid below is
-     * not compiled into the round binary. */
+    /* Round Dashboard (radial board 1): full-bleed like every other round
+     * board, because the rim rings reach past the inset square, and a picture
+     * board like them since the user asked for one. Same sequencing as layouts
+     * 2 and 4: the picture first so everything else lands on top of it, then
+     * the board, then the shared overlay, then the shared furniture. The square
+     * bento grid below is not compiled into the round binary. */
     lv_obj_set_size(p->page, screen_size(), screen_size());
     lv_obj_set_pos(p->page, -parent_pad, -parent_pad);
+    p->alt.inst = page_index;
+    p->alt.cap_img = lv_image_create(p->page);
+    lv_obj_set_size(p->alt.cap_img, screen_size(), screen_size());
+    lv_obj_center(p->alt.cap_img);
+    lv_image_set_inner_align(p->alt.cap_img, LV_IMAGE_ALIGN_CENTER);
+    lv_image_set_src(p->alt.cap_img, NULL);
+    nina_dashboard_bind_tap(p->alt.cap_img, NINA_TAP_VIEW_CYCLE);
+    nina_dashboard_bind_tap(p->alt.cap_img, NINA_TAP_CAPTURE_LONG);
     nina_layout_dashboard_round_create(p, p->page, page_index);
+    nina_round_overlay_create(p, p->page, page_index);
     create_page_overlays(p, page_index);
+    nina_layout_image_reattach_capture(page_index);
+    nina_dashboard_refresh_view(page_index);
     return;
 #else
     static lv_coord_t col_dsc[] = {LV_GRID_FR(1), LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
@@ -1091,7 +1183,22 @@ static void create_page_overlays(dashboard_page_t *p, int page_index) {
     lv_obj_set_style_pad_hor(p->lbl_stale, 8, 0);
     lv_obj_set_style_pad_ver(p->lbl_stale, 4, 0);
     lv_obj_set_style_radius(p->lbl_stale, 6, 0);
-    lv_obj_align(p->lbl_stale, LV_ALIGN_TOP_RIGHT, -4, 4);
+    /* The page root is the whole square panel, so a top-right corner badge
+     * lands outside the glass on a round panel. Put it under the top of the
+     * disc instead, where it is readable on both shapes.
+     *
+     * A capture layout puts the safety shield at twelve, top of the glyph on
+     * the rim inset, so it fills roughly the first 44 px of that axis. The
+     * badge has to clear it: stale is exactly when the user looks, and the
+     * shield is the one glyph that must never be covered. This runs after the
+     * layout and the overlay have been built, so p->layout is final here. */
+    if (SCREEN_ROUND) {
+        const int drop = layout_uses_round_overlay(p->layout) ? 64 : 34;
+        lv_obj_align(p->lbl_stale, LV_ALIGN_TOP_MID, 0,
+                     screen_center() - ui_rim_radius() + drop);
+    } else {
+        lv_obj_align(p->lbl_stale, LV_ALIGN_TOP_RIGHT, -4, 4);
+    }
     lv_obj_add_flag(p->lbl_stale, LV_OBJ_FLAG_HIDDEN);
 
     /* Stale overlay — semi-transparent dim for heavily stale data (> 2 min) */
@@ -1250,6 +1357,14 @@ static void gesture_event_cb(lv_event_t *e) {
      * next resolve(). */
     nina_dashboard_show_page_animated(new_page, 0, 0);
     nav_arbiter_submit_user(new_page, esp_timer_get_time() / 1000);
+
+    /* Swallow the rest of this press. LVGL raises one gesture per press, then
+     * still delivers the release to whatever object sits under the finger,
+     * which is now the DESTINATION page: on a capture layout that object is the
+     * picture, whose short click cycles the view. Waiting for the release keeps
+     * a swipe a swipe. The button and web navigation paths never come through
+     * here, and a second swipe needs a new press anyway. */
+    lv_indev_wait_release(lv_indev_active());
 }
 
 /* Target name: click to request thumbnail */
@@ -1320,8 +1435,93 @@ static void session_stats_click_cb(lv_event_t *e) {
  * in their own translation units. These two functions are the entire surface
  * they reach nina_dashboard.c through. */
 
+/* Per-instance view mode, RAM only: it survives a slot rebuild, resets to FULL
+ * on boot and is never written to NVS. The effective mode is computed in
+ * nina_dashboard_refresh_view() so a page with no picture yet shows its
+ * readings composition on its own. */
+static uint8_t s_view_mode[MAX_NINA_INSTANCES];
+
+/* Page background tap: step to the next composition. A page with no picture has
+ * nothing to cycle, so the tap does nothing there. */
+static void view_cycle_click_cb(lv_event_t *e) {
+    LV_UNUSED(e);
+    int inst = abs_page_to_instance(active_page);
+    if (inst < 0) return;
+    if (!nina_layout_image_has_capture(inst)) return;
+    s_view_mode[inst] = (uint8_t)((s_view_mode[inst] + 1) % 4);
+    nina_dashboard_refresh_view(inst);
+}
+
+/* What that instance is actually showing: the stored mode once it holds a
+ * picture, the readings-only page until then and again after the picture is
+ * released on leave. */
+static nina_view_mode_t effective_view_mode(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return NINA_VIEW_NUMBERS;
+    return nina_layout_image_has_capture(instance)
+         ? (nina_view_mode_t)s_view_mode[instance]
+         : NINA_VIEW_NUMBERS;
+}
+
+void nina_dashboard_refresh_view(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+    dashboard_page_t *p = &pages[instance];
+    if (!p->page || !nina_layout_uses_capture(p->layout)) return;
+    nina_layout_alt_set_view(p, effective_view_mode(instance));
+    /* The dot strip is part of the composition on a round board, so it has to
+     * be re-decided whenever the mode moves, not only on a page change. */
+    update_indicators();
+}
+
+void nina_layout_alt_set_view(dashboard_page_t *p, nina_view_mode_t mode) {
+    if (!p || !p->page) return;
+
+    /* The picture itself, at the one choke point every view change goes
+     * through. NUMBERS draws it fully transparent; every other mode draws it
+     * solid. It is NEVER hidden: cap_img is what carries the view-cycle tap and
+     * the long-press preview, LVGL's input search skips a hidden object, and a
+     * hidden picture would strand the page in NUMBERS with no way back. A
+     * transparent image is still hit-testable. Only the round boards get this:
+     * the square Image-forward page keeps its text over the picture in every
+     * mode. Set-if-changed, because a local style write invalidates the object
+     * and every invalidation on this panel is a full-frame redraw. */
+    if (layout_uses_round_overlay(p->layout) && p->alt.cap_img) {
+        lv_opa_t want = (mode == NINA_VIEW_NUMBERS) ? LV_OPA_TRANSP : LV_OPA_COVER;
+        if (lv_obj_get_style_image_opa(p->alt.cap_img, 0) != want) {
+            lv_obj_set_style_image_opa(p->alt.cap_img, want, 0);
+        }
+    }
+
+#if CONFIG_NINA_FAMILY_ROUND
+    /* The overlay next: the layout's own set_view reads what the overlay is
+     * showing (its readings-only ring replaces the rim arc, for one). */
+    if (layout_uses_round_overlay(p->layout)) nina_round_overlay_set_view(p, mode);
+#endif
+    switch (p->layout) {
+        case 1: nina_layout_image_set_view(p, mode); break;
+#if CONFIG_NINA_FAMILY_ROUND
+        case 0: nina_layout_dashboard_round_set_view(p, mode); break;
+        case 2: nina_layout_halo_set_view(p, mode); break;
+        case 4: nina_layout_orbit_set_view(p, mode); break;
+#endif
+        default: break;
+    }
+}
+
 void nina_dashboard_bind_tap(lv_obj_t *obj, nina_tap_target_t which) {
     if (!obj) return;
+    if (which == NINA_TAP_VIEW_CYCLE) {
+        /* SHORT_CLICKED, not CLICKED: the same object also carries the long
+         * press that opens the full-screen picture, and LVGL raises CLICKED on
+         * the release of a long press too. */
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(obj, view_cycle_click_cb, LV_EVENT_SHORT_CLICKED, NULL);
+        return;
+    }
+    if (which == NINA_TAP_CAPTURE_LONG) {
+        lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_event_cb(obj, target_name_click_cb, LV_EVENT_LONG_PRESSED, NULL);
+        return;
+    }
     if (which == NINA_TAP_HFR) {
         /* Same pair the square HFR box carries: short click opens the HFR
          * graph, long press opens the autofocus curve. */
@@ -1347,7 +1547,17 @@ void nina_dashboard_bind_tap(lv_obj_t *obj, nina_tap_target_t which) {
 
 void nina_layout_alt_apply_theme(dashboard_page_t *p) {
     if (!p || !p->page) return;
-    if (p->layout == 1) nina_layout_image_apply_theme(p);
+    switch (p->layout) {
+        case 1: nina_layout_image_apply_theme(p); break;
+#if CONFIG_NINA_FAMILY_ROUND
+        case 2: nina_layout_halo_apply_theme(p); break;
+        case 4: nina_layout_orbit_apply_theme(p); break;
+#endif
+        default: break;
+    }
+#if CONFIG_NINA_FAMILY_ROUND
+    if (layout_uses_round_overlay(p->layout)) nina_round_overlay_apply_theme(p);
+#endif
 }
 
 /* True iff NINA instance has a non-empty URL and is enabled in config */
@@ -1601,15 +1811,16 @@ void nina_dashboard_rebuild_slot(int instance) {
      * Recurse once through the destroy path, then fall through to create. */
     if (want && have) {
         const app_config_t *lcfg = app_config_get();
-        uint8_t want_layout = lcfg ? lcfg->nina_layout[instance] : 0;
-        if (want_layout > 1) want_layout = 0;
+        uint8_t want_layout = layout_for_family(lcfg ? lcfg->nina_layout[instance] : 0);
         if (want_layout == pages[instance].layout) return;   /* nothing to do */
         have = false;
         if (active_page == NINA_PAGE_OFFSET + instance) {
             /* Pre-move off the dying page; the arbiter re-resolves next tick. */
             nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
         }
-        if (pages[instance].layout == 1) nina_layout_image_release_capture(instance);
+        if (nina_layout_uses_capture(pages[instance].layout)) {
+            nina_layout_image_release_capture(instance);
+        }
         if (pages[instance].arc_timer) {
             lv_timer_delete(pages[instance].arc_timer);
             pages[instance].arc_timer = NULL;
@@ -1646,7 +1857,9 @@ void nina_dashboard_rebuild_slot(int instance) {
         apply_theme_to_page(&pages[instance]);
     } else {
         /* Destroy the slot's page + arc timer */
-        if (pages[instance].layout == 1) nina_layout_image_release_capture(instance);
+        if (nina_layout_uses_capture(pages[instance].layout)) {
+            nina_layout_image_release_capture(instance);
+        }
         if (active_page == NINA_PAGE_OFFSET + instance) {
             /* Pre-move off the dying page; the arbiter re-resolves next tick. */
             nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
@@ -1820,13 +2033,28 @@ static void update_indicators(void)
         }
         dot++;
     }
-    /* Image-forward (layout 1) fills the bottom-centre with its own readings,
-     * so the dots would collide; hide them on that layout only. */
+    /* The dots live where a picture board puts its readings stack, so they can
+     * only show when nothing is drawn over that band.
+     *
+     * Square: unchanged. The bento Dashboard (0) shows them, Image-forward (1)
+     * hides them, and layout_uses_round_overlay() is false on that family, so
+     * neither goes near the branch below.
+     *
+     * Round: the Dashboard shows them ONLY in the readings-only view, where the
+     * stack is gone. Halo and Orbit fill that band with their own readings in
+     * every view, so they never show them. */
     int inst_now = abs_page_to_instance(active_page);
-    bool on_nina = (inst_now >= 0);
-    bool image_fwd = on_nina && pages[inst_now].layout == 1;
-    if (on_nina && !image_fwd) lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
-    else                       lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+    bool show = false;
+    if (inst_now >= 0) {
+        const uint8_t lay = pages[inst_now].layout;
+        if (!layout_uses_round_overlay(lay)) {
+            show = (lay == 0);
+        } else if (lay == 0) {
+            show = (effective_view_mode(inst_now) == NINA_VIEW_NUMBERS);
+        }
+    }
+    if (show) lv_obj_clear_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
+    else      lv_obj_add_flag(indicator_cont, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void fade_out_ready_cb(lv_anim_t * a)

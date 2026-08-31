@@ -17,6 +17,7 @@
  */
 
 #include "adsb_client.h"
+#include "adsb_basemap.h"
 #include "adsb_geom.h"
 #include "app_config.h"
 #include "http_fetch.h"
@@ -152,6 +153,7 @@ void adsb_client_init(void)
     if (!s_pub || !s_work || !s_mux) {
         ESP_LOGE(TAG, "init failed (%u bytes x2 PSRAM)", (unsigned)sizeof(adsb_data_t));
     }
+    adsb_basemap_init();
 }
 
 bool adsb_client_snapshot(adsb_data_t *out)
@@ -864,6 +866,10 @@ static bool adsb_poll_once(void *arg)
         xSemaphoreGive(s_mux);
     }
 
+    if (atomic_load(&adsb_page_active)) {
+        adsb_basemap_poll(s_rx_lat, s_rx_lon, (float)cfg->flights_range_nm);
+    }
+
     /* Routes come AFTER publication and outside the mutex: `d` is now the
      * published buffer, and reading its callsigns races with nothing (the UI
      * only ever reads it too). One batch per cycle at most; on a hit the cache
@@ -905,6 +911,7 @@ static void adsb_on_park(void *arg)
         http_fetch_conn_destroy(s_conn);
         s_conn = NULL;
     }
+    adsb_basemap_release();
 }
 
 static void adsb_poll_task(void *arg)
@@ -933,6 +940,11 @@ void adsb_ensure_task_running(void)
     if (!s_pub || !s_work || !s_mux) return;
 
     static portMUX_TYPE adsb_spawn_mux = portMUX_INITIALIZER_UNLOCKED;
+    /* 20480, not the 12288 the other pollers use: adsb_basemap_poll() runs the
+     * basemap fetch and decode (image_fetch_custom, HW JPEG probe then the stb
+     * GIF path) UNDER the poll frame, which already carries the aircraft.json
+     * parse. At 12288 the first basemap decode overflowed the stack on the
+     * 3.4C (2026-08-30 boot loop). PSRAM stack, so the extra 8 KB is free. */
     psram_task_ensure(&s_task, &adsb_spawn_mux,
-                      adsb_poll_task, "adsb", 12288, NULL, 3, 0);
+                      adsb_poll_task, "adsb", 20480, NULL, 3, 0);
 }
