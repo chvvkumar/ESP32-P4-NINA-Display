@@ -22,7 +22,7 @@ int64_t  perf_timer_stop(perf_timer_t *t);
 
 // ── CPU Utilization ────────────────────────────────────────────────
 
-#define CPU_MAX_TRACKED_TASKS 40
+#define CPU_MAX_TRACKED_TASKS 64
 
 // Low-DMA-heap watchdog: when the largest contiguous DMA-capable internal
 // block (MALLOC_CAP_INTERNAL|MALLOC_CAP_DMA|MALLOC_CAP_8BIT) drops below this,
