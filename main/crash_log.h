@@ -74,6 +74,25 @@ esp_err_t crash_log_clear(void);
  */
 void crash_log_purge_old(uint8_t days);
 
+/**
+ * Core dump summary of the crash this boot followed, read ONCE by the
+ * internal-RAM boot worker. esp_core_dump_get_summary() and
+ * esp_core_dump_get_panic_reason() mmap the coredump partition, which runs
+ * with the data cache disabled and asserts when the calling task's stack is
+ * in PSRAM (cache_utils.c: esp_task_stack_is_sane_cache_disabled). Every
+ * PSRAM-stacked task (telemetry) must read this cache instead of the flash.
+ * `valid` is false until the worker has run, and stays false on a normal
+ * reset or when no image is present.
+ */
+typedef struct {
+    bool     valid;
+    char     task[17];
+    uint32_t pc;
+    char     detail[256];
+} crash_log_summary_t;
+
+const crash_log_summary_t *crash_log_get_summary(void);
+
 #ifdef __cplusplus
 }
 #endif
