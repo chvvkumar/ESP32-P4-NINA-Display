@@ -304,6 +304,32 @@ static void append_crash_record(uint32_t reason)
  * dump read, record write) is deferred. */
 static bool      s_crash_pending = false;     /* a crash record is waiting to be written */
 static uint32_t  s_pending_reason = 0;
+static crash_log_summary_t s_summary;         /* filled once by the worker, read-only after */
+
+const crash_log_summary_t *crash_log_get_summary(void)
+{
+    return &s_summary;
+}
+
+/* Read the coredump summary + panic note into s_summary. Flash mmap inside:
+ * internal-RAM stack only (see crash_log_deferred_worker). */
+static void cache_core_summary(void)
+{
+    size_t cd_addr = 0, cd_size = 0;
+    if (esp_core_dump_image_get(&cd_addr, &cd_size) != ESP_OK) {
+        return;
+    }
+    esp_core_dump_summary_t *sum = heap_caps_calloc(1, sizeof(*sum), MALLOC_CAP_SPIRAM);
+    if (sum) {
+        if (esp_core_dump_get_summary(sum) == ESP_OK) {
+            strlcpy(s_summary.task, sum->exc_task, sizeof(s_summary.task));
+            s_summary.pc = sum->exc_pc;
+        }
+        heap_caps_free(sum);
+    }
+    (void)esp_core_dump_get_panic_reason(s_summary.detail, sizeof(s_summary.detail));
+    s_summary.valid = true;
+}
 
 /**
  * One-shot background worker: performs the littlefs mount/format off the boot
@@ -320,6 +346,12 @@ static uint32_t  s_pending_reason = 0;
 static void crash_log_deferred_worker(void *arg)
 {
     (void)arg;
+
+    /* Before the mount: the summary cache must exist even when littlefs is
+     * unavailable, because telemetry reads it in place of the flash. */
+    if (s_crash_pending) {
+        cache_core_summary();
+    }
 
     if (!ensure_mounted()) {
         s_crash_pending = false;
@@ -354,5 +386,5 @@ void crash_log_init(void)
      * stack is mandatory (see crash_log_deferred_worker). Low priority on Core 0
      * keeps it out of the way of UI/network bring-up. */
     xTaskCreatePinnedToCore(crash_log_deferred_worker, "crash_log_def",
-                            8192, NULL, tskIDLE_PRIORITY + 2, NULL, 0);
+                            10240, NULL, tskIDLE_PRIORITY + 2, NULL, 0);
 }
