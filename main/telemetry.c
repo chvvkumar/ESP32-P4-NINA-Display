@@ -19,7 +19,6 @@
 #include "esp_crt_bundle.h"
 #include "esp_ota_ops.h"
 #include "esp_wifi.h"
-#include "esp_core_dump.h"
 #include "nvs.h"
 #include "driver/temperature_sensor.h"
 
@@ -27,6 +26,7 @@
 #include "build_version.h"
 #include "perf_monitor.h"
 #include "power_mgmt.h"
+#include "crash_log.h"
 #include "net_trace.h"
 #include "tasks.h"   /* s_wifi_event_group + WIFI_CONNECTED_BIT */
 
@@ -186,21 +186,15 @@ int telemetry_build_payload(char *buf, size_t cap, bool include_crash)
         char task_name[17] = "";
         char detail[121] = "";
         uint32_t pc = 0;
-        size_t cd_addr = 0, cd_size = 0;
-        if (esp_core_dump_image_get(&cd_addr, &cd_size) == ESP_OK) {
-            esp_core_dump_summary_t *sum =
-                heap_caps_calloc(1, sizeof(*sum), MALLOC_CAP_SPIRAM);
-            if (sum) {
-                if (esp_core_dump_get_summary(sum) == ESP_OK) {
-                    json_sanitize_copy(task_name, sizeof(task_name), sum->exc_task);
-                    pc = sum->exc_pc;
-                }
-                heap_caps_free(sum);
-            }
-            char raw[256] = "";
-            if (esp_core_dump_get_panic_reason(raw, sizeof(raw)) == ESP_OK) {
-                json_sanitize_copy(detail, sizeof(detail), raw);
-            }
+        /* From crash_log's boot-time cache, never from the coredump partition:
+         * esp_core_dump_get_summary() mmaps flash with the cache disabled and
+         * asserts on this task's PSRAM stack (cache_utils.c:127), which turned
+         * every panic into a reboot loop (allskyesp3236, 2026-08-31). */
+        const crash_log_summary_t *cs = crash_log_get_summary();
+        if (cs->valid) {
+            json_sanitize_copy(task_name, sizeof(task_name), cs->task);
+            json_sanitize_copy(detail, sizeof(detail), cs->detail);
+            pc = cs->pc;
         }
         n = snprintf(buf + pos, cap - pos,
             "\"crash\":{\"reason\":\"%s\",\"count\":%lu,\"task\":\"%s\","
