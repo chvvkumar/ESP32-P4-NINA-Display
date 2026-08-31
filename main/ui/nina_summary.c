@@ -799,7 +799,7 @@ void summary_page_rebuild(void) {
         if (!nina_slot_available[i]) {
             lv_obj_add_flag(cards[i].card, LV_OBJ_FLAG_HIDDEN);
             /* The round card's rings go with it. */
-            if (cards[i].ring.cont)      lv_obj_add_flag(cards[i].ring.cont, LV_OBJ_FLAG_HIDDEN);
+            if (cards[i].ring.cont)      nina_subbar_set_shown(&cards[i].ring, false);
             if (cards[i].ring_crown)     lv_obj_add_flag(cards[i].ring_crown, LV_OBJ_FLAG_HIDDEN);
             if (cards[i].ring_flip_tick) lv_obj_add_flag(cards[i].ring_flip_tick, LV_OBJ_FLAG_HIDDEN);
             /* Drop the exposure anchor so a re-enabled card starts clean and no
@@ -991,7 +991,7 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             /* This path returns before the per-card loop, so the round card's
              * rings have to be taken down here too: an offline rig is no card
              * and no ring, and the empty state must not sit inside one. */
-            if (sc->ring.cont)      lv_obj_add_flag(sc->ring.cont, LV_OBJ_FLAG_HIDDEN);
+            if (sc->ring.cont)      nina_subbar_set_shown(&sc->ring, false);
             if (sc->ring_crown)     lv_obj_add_flag(sc->ring_crown, LV_OBJ_FLAG_HIDDEN);
             if (sc->ring_flip_tick) lv_obj_add_flag(sc->ring_flip_tick, LV_OBJ_FLAG_HIDDEN);
         }
@@ -1105,12 +1105,12 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
              * interp timer doesn't keep driving an off-screen bar. */
             bar_reset_exposure_state(sc);
             /* An offline rig is a ring that is simply not there. */
-            if (sc->ring.cont)      lv_obj_add_flag(sc->ring.cont, LV_OBJ_FLAG_HIDDEN);
+            if (sc->ring.cont)      nina_subbar_set_shown(&sc->ring, false);
             if (sc->ring_crown)     lv_obj_add_flag(sc->ring_crown, LV_OBJ_FLAG_HIDDEN);
             if (sc->ring_flip_tick) lv_obj_add_flag(sc->ring_flip_tick, LV_OBJ_FLAG_HIDDEN);
             continue;
         }
-        if (sc->ring.cont)  lv_obj_remove_flag(sc->ring.cont, LV_OBJ_FLAG_HIDDEN);
+        if (sc->ring.cont)  nina_subbar_set_shown(&sc->ring, true);
         if (sc->ring_crown) lv_obj_remove_flag(sc->ring_crown, LV_OBJ_FLAG_HIDDEN);
 
         /* Trylock failed this cycle — the instance may be mid-commit, so leave

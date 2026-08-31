@@ -64,6 +64,12 @@ typedef struct {
     float ring_gap;          /* reserved gap at twelve o'clock, degrees */
     float ring_frac;         /* last in-flight fraction, so a repaint keeps it */
     bool  stale;             /* ring mode only: arcs at 40 % while data is stale */
+    bool  hide_single;       /* ring mode only: hide the whole ring when the target is
+                              * exactly one sub (the exposure ring already tells that
+                              * story); a layout sets it after create_ring */
+    bool  ring_shown;        /* ring mode only: the layout's view-switch state, set
+                              * through nina_subbar_set_shown(); true at create */
+    bool  single;            /* last rebuild's target was exactly one sub */
 
     /* Sub-boundary ratchet (see nina_subbar_set_progress). */
     float last_frac;         /* frac seen on the previous set_progress call */
@@ -112,6 +118,16 @@ void nina_subbar_reset_elapsed(nina_subbar_t *sb);
 
 /** @brief Genuine idle park: drop the sub-boundary hold and draw the fill at 0. */
 void nina_subbar_park(nina_subbar_t *sb);
+
+/**
+ * @brief Ring mode: the layout's own show/hide for the ring (its view switch).
+ *
+ * The ring is drawn only when the layout wants it shown AND hide_single is not
+ * suppressing it, so a view switch and a target-count change never fight over
+ * the container's HIDDEN flag. Layouts that toggle the ring per view must go
+ * through this instead of flagging sb->cont themselves.
+ */
+void nina_subbar_set_shown(nina_subbar_t *sb, bool shown);
 
 /**
  * @brief Push poll data into the block row.

@@ -267,6 +267,7 @@ void nina_layout_halo_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
      * still on screen. */
     nina_subbar_create_ring(&p->subbar, parent, halo_r_sub(), HALO_W_SUB,
                             halo_gap_deg());
+    p->subbar.hide_single = true;   /* one sub: the rim arc is enough */
     p->alt.ring_inner = p->subbar.cont;
 
     /* The overlay owns p->alt.elapsed_cb; this page takes the hook it calls. */
@@ -446,7 +447,9 @@ void nina_layout_halo_set_view(dashboard_page_t *p, nina_view_mode_t mode)
 
     const bool numbers = (mode == NINA_VIEW_NUMBERS);
     halo_show(p->alt.grp_mid, numbers);
-    halo_show(p->alt.ring_inner, numbers);
+    /* The ring's flag has one writer: the sub bar, which also hides it for a
+     * one-sub target (hide_single), so this goes through it. */
+    nina_subbar_set_shown(&p->subbar, numbers);
 }
 
 /* ---- update ------------------------------------------------------------- */

@@ -3,12 +3,13 @@
  * @brief Round composition of the image page captions (inscribed board 6) and
  *        of the Moon instance (radial board 7), guideline G1 and C2.
  *
- * GOES class (GOES, Solar, Custom, Radar, Clouds): the two corner-flush caption
- * labels move to the bottom rim. The region name is an arclabel trailing into
- * six o'clock from the left; the timestamp is a plain label on a bottom chord
- * (Branch B of the plan's per-frame stamp ruling: the A2 arclabel measurement
- * has not been run, so the caption that changes once per playback step stays a
- * cheap label). No chip, no bar background, no rim frame ring.
+ * GOES class (GOES, Solar, Custom, Radar, Clouds): both caption labels are rim
+ * arclabels at Rs - 10, split at six o'clock, each over its own translucent
+ * band from ui_arclabel_add_band(). The region name trails to the left of six
+ * o'clock; the timestamp leads out to the right. The per-frame HH:MM stamp of
+ * the Radar and Cloud Cover loops now re-lays out an arclabel on every
+ * playback step, by the user's explicit decision (the earlier Branch B chord
+ * label fallback is gone). No chip, no bar background, no rim frame ring.
  *
  * Moon: the disc gives ground (432 px, centred 12 px above the panel centre) so
  * the freed annulus can hold the four labels on two chords; illumination stops
@@ -35,7 +36,7 @@ extern const lv_font_t lv_font_overpass_27;
 
 /* Rim geometry, absolute pixels at both round widths (the extra diameter at 800
  * goes into chord width, never into type or stroke). */
-#define IMG_R_CAPTION_INSET   30   /* caption arclabel radius = Rs - 30 */
+#define IMG_R_CAPTION_INSET   10   /* caption arclabel radius = Rs - 10; the band pads outside it */
 #define IMG_R_ARC_INSET       12   /* moon rim arc centre line = Rs - 12 */
 #define IMG_ARC_W             16
 #define IMG_MOON_TICK_H       16   /* fits between the arc object's own edges */
@@ -43,10 +44,10 @@ extern const lv_font_t lv_font_overpass_27;
 #define IMG_MOON_TEXT_H       39   /* overpass_27 line height */
 #define IMG_MOON_TEXT_GAP     10   /* disc edge to the text's inner edge, text shown */
 #define IMG_MOON_TEXT_SPAN   150   /* degrees per rim row; 120 dots the three-item top row */
-#define IMG_CAP_ANGLE_START   90   /* six o'clock in lv_arclabel angles */
-#define IMG_CAP_ANGLE_SIZE    70   /* run left along the bottom rim */
-#define IMG_STAMP_DY         232   /* GOES class: bottom chord carrying HH:MM */
-#define IMG_STAMP_CHORD_PAD   32   /* inset from both chord ends */
+#define IMG_CAP_BAND_PAD       6   /* band padding beyond the glyph cell, GOES-class captions */
+#define IMG_CAP_REGION_START  92   /* region arclabel start angle; trailing ends 2 deg left of six o'clock */
+#define IMG_CAP_SPAN          88   /* degrees run by each of the two GOES-class rim captions */
+#define IMG_CAP_STAMP_START    0   /* timestamp arclabel start angle; leading begins 2 deg right of six o'clock */
 
 /* A transparent full-panel container that never eats a tap. overlay_bar must be
  * full panel on round because ui_arclabel_create() centres its arc on the
@@ -143,32 +144,34 @@ void image_page_build_overlay_round(image_page_t *p, lv_obj_t *page_container)
         return;
     }
 
-    /* GOES class: the region name is a rim arclabel trailing into six o'clock
-     * from the left. Angles are lv_arclabel angles (0 = three o'clock, clockwise
-     * positive, six o'clock 90), drawn counter-clockwise so the glyphs read left
-     * to right along the bottom of the circle; TRAILING ends the run exactly on
-     * angle_start, so the caption finishes at six o'clock and grows left into
-     * the 90..160 span. */
+    /* GOES class: both captions are rim arclabels split at six o'clock. Angles
+     * are lv_arclabel angles (0 = three o'clock, clockwise positive, six
+     * o'clock 90), drawn counter-clockwise so the glyphs read left to right
+     * along the bottom of the circle. The region name is TRAILING, which ends
+     * the run exactly on angle_start, so it finishes 2 degrees left of six
+     * o'clock and grows left through the 92..180 span. */
     p->lbl_region = ui_arclabel_create(p->overlay_bar, &lv_font_overpass_27,
                                        rs - IMG_R_CAPTION_INSET,
-                                       IMG_CAP_ANGLE_START, IMG_CAP_ANGLE_SIZE, false,
+                                       IMG_CAP_REGION_START, IMG_CAP_SPAN, false,
                                        LV_ARCLABEL_TEXT_ALIGN_TRAILING);
     /* NULL when the widget allocation failed; the styler dereferences. */
-    if (p->lbl_region) image_page_caption_style(p->lbl_region);
+    if (p->lbl_region) {
+        image_page_caption_style(p->lbl_region);
+        ui_arclabel_add_band(p->lbl_region, IMG_CAP_BAND_PAD);
+    }
     /* No lv_arclabel_set_text("") here: ui_arclabel_create() already set it. */
 
-    /* Branch B: the per-frame HH:MM stamp of the Radar and Cloud Cover loops
-     * changes on every playback step, and the A2 arclabel redraw measurement has
-     * not been run, so this caption stays a plain label on a bottom chord for
-     * all five GOES-class sources (one code path, no per-source test). */
-    p->lbl_timestamp = lv_label_create(p->overlay_bar);
-    lv_obj_set_style_text_font(p->lbl_timestamp, &lv_font_overpass_27, 0);
-    image_page_caption_style(p->lbl_timestamp);
-    lv_obj_set_width(p->lbl_timestamp,
-                     ui_chord_at_y(screen_center() + IMG_STAMP_DY + 20) - IMG_STAMP_CHORD_PAD);
-    lv_obj_set_style_text_align(p->lbl_timestamp, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_align(p->lbl_timestamp, LV_ALIGN_CENTER, 0, IMG_STAMP_DY);
-    lv_label_set_text(p->lbl_timestamp, "");
+    /* The timestamp is LEADING, which starts the run at angle_start +
+     * angle_size (88), so it begins 2 degrees right of six o'clock and grows
+     * right toward three o'clock. */
+    p->lbl_timestamp = ui_arclabel_create(p->overlay_bar, &lv_font_overpass_27,
+                                          rs - IMG_R_CAPTION_INSET,
+                                          IMG_CAP_STAMP_START, IMG_CAP_SPAN, false,
+                                          LV_ARCLABEL_TEXT_ALIGN_LEADING);
+    if (p->lbl_timestamp) {
+        image_page_caption_style(p->lbl_timestamp);
+        ui_arclabel_add_band(p->lbl_timestamp, IMG_CAP_BAND_PAD);
+    }
 }
 
 /* Disc diameter from moon_round_size_pct (percent of the rim diameter) while

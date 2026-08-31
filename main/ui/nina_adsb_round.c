@@ -38,12 +38,8 @@ LV_FONT_DECLARE(lv_font_montserrat_64);
  * (720: 164 / 552 / 596). The rim carries within/tracked as a 7 px arc
  * over the 3 px ring, and the range label and CONTACTS caption are arclabels on
  * the two quiet diagonals. */
-#define ADSBR_SC_RING_W       7
-#define ADSBR_SC_VAL_DY   (-196)
-#define ADSBR_SC_CALL_DY    192
-#define ADSBR_SC_FIG_DY     236
-#define ADSBR_SC_BLK_W      200
-#define ADSBR_SC_FIG_W      330
+#define ADSBR_SC_RING_W       2   /* same stroke as the inner range rings */
+#define ADSBR_SC_CUE_DY     152   /* reconnect cue chord, lower right */
 #define ADSBR_SC_RATE_W     170
 #define ADSBR_SC_LBL_R      235   /* contact labels never cross this radius */
 #define ADSBR_SC_ARC_K       12   /* arclabel baseline: Rs - 12, outside the blocks */
@@ -166,61 +162,54 @@ static void build_scope(lv_obj_t *root, lv_obj_t *content, const adsb_slots_t *s
     lv_obj_set_style_arc_opa(ring, LV_OPA_COVER, LV_PART_INDICATOR);
     *s->sc_contacts_ring = ring;
 
-    /* G1: the range label and the CONTACTS caption change at most once a poll
-     * and once a config change, so both go on the rim. The range label sits on
-     * the NNW diagonal, which is the one radius no tag box wants; the caption
-     * sits on the NNE diagonal over its own chord block.
-     *
-     * Rs - 12 puts the glyph body between about r 304 and r 330, INSIDE the
-     * 7 px contacts arc (338.5..345.5) and OUTSIDE the count block below it.
-     * At Rs - 40 the caption's body reached down to r 276 and crossed the
-     * right-aligned "12 / 34". */
-    *s->sc_rim_label = ui_arclabel_create(content, &lv_font_montserrat_28,
-                                          rs - ADSBR_SC_ARC_K, 225 - 30, 60,
-                                          true, LV_ARCLABEL_TEXT_ALIGN_CENTER);
+    /* G1: "n msg/s" and "CONTACTS n / m" ride the bottom rim, split at six
+     * o'clock with the S cardinal in the 10 degree gap between them. Angles are
+     * lv_arclabel angles (0 = three o'clock, clockwise); both run
+     * counter-clockwise so they read left to right along the bottom. The rate
+     * is TRAILING, so its run ends on angle_start (95) and grows left through
+     * 95..175; the caption is LEADING, so its run starts at angle_start +
+     * angle_size (85) and grows right through 85..5. Rs - 12 keeps the glyph
+     * body inside the rim ring. The range label
+     * is a plain label on the nine o'clock radius with the ring numbers
+     * (place_ring_label, ring_lbl_west), and the count no longer has a chord
+     * block of its own: sc_within stays NULL and the page's set_lbl() on it is
+     * a no-op. */
+    *s->sc_rate_arclabel = ui_arclabel_create(content, &lv_font_montserrat_28,
+                                              rs - ADSBR_SC_ARC_K, 95, 80,
+                                              false, LV_ARCLABEL_TEXT_ALIGN_TRAILING);
     *s->sc_contacts_arclabel = ui_arclabel_create(content, &lv_font_montserrat_28,
-                                                  rs - ADSBR_SC_ARC_K, 315 - 30, 60,
-                                                  true, LV_ARCLABEL_TEXT_ALIGN_CENTER);
+                                                  rs - ADSBR_SC_ARC_K, 5, 80,
+                                                  false, LV_ARCLABEL_TEXT_ALIGN_LEADING);
+    *s->sc_within = NULL;
 
-    /* Upper-right chord: the count, right edge at cx + 200, one line lower than
-     * the first draft so it clears the caption's arc. */
-    *s->sc_within = r_num(content, &lv_font_montserrat_36,
-                          cx, cx + ADSBR_SC_VAL_DY, ADSBR_SC_BLK_W);
+    /* Nearest aircraft on the TOP rim, mirroring the bottom split: the
+     * callsign trails to the left of twelve o'clock (clockwise TRAILING ends
+     * the run on angle_start + angle_size = 265), the merged figures line
+     * leads to the right (clockwise LEADING starts on angle_start = 275), and
+     * the N cardinal sits in the 10 degree gap. Both are arclabels; the page's
+     * set_lbl() dispatches on the widget class, so fill_scope_corners() writes
+     * them unchanged. sc_ident and sc_dist stay NULL, which is what makes the
+     * page merge the distance into the figures line. */
+    *s->sc_call = ui_arclabel_create(content, &lv_font_montserrat_28,
+                                     rs - ADSBR_SC_ARC_K, 185, 80,
+                                     true, LV_ARCLABEL_TEXT_ALIGN_TRAILING);
+    *s->sc_alt  = ui_arclabel_create(content, &lv_font_montserrat_28,
+                                     rs - ADSBR_SC_ARC_K, 275, 80,
+                                     true, LV_ARCLABEL_TEXT_ALIGN_LEADING);
 
-    /* Lower-left chord: callsign over one merged figures line. */
-    *s->sc_call = r_label(content, &lv_font_montserrat_40);
-    lv_obj_set_pos(*s->sc_call, cx - 226, cx + ADSBR_SC_CALL_DY);
-    lv_label_set_long_mode(*s->sc_call, LV_LABEL_LONG_DOT);
-    lv_obj_set_width(*s->sc_call, ADSBR_SC_BLK_W);
-    lv_obj_set_height(*s->sc_call, lv_font_get_line_height(&lv_font_montserrat_40));
-
-    *s->sc_alt = r_label(content, &lv_font_montserrat_28);
-    lv_obj_set_pos(*s->sc_alt, cx - 192, cx + ADSBR_SC_FIG_DY);
-    lv_obj_set_width(*s->sc_alt, ADSBR_SC_FIG_W);
-    /* r_label() leaves the default LV_LABEL_LONG_WRAP: the merged figures line
-     * is about 335 px for a five-digit altitude and would wrap onto a second
-     * line over the S cardinal. Clip and pin the height to one line. */
-    lv_label_set_long_mode(*s->sc_alt, LV_LABEL_LONG_CLIP);
-    lv_obj_set_height(*s->sc_alt, lv_font_get_line_height(&lv_font_montserrat_28));
-
-    /* Lower-right chord: the message rate. sc_dist stays NULL, which is what
-     * makes the page merge the distance into the figures line. */
-    *s->sc_rate = r_num(content, &lv_font_montserrat_28,
-                        cx + 68, cx + ADSBR_SC_CALL_DY, ADSBR_SC_RATE_W);
+    /* Lower-right chord: the reconnect cue only; the message rate moved to the
+     * rim arclabel above. */
+    *s->sc_rate = NULL;
     *s->sc_cue  = r_num(root, &lv_font_montserrat_28,
-                        cx + 68, cx + ADSBR_SC_CALL_DY - 40, ADSBR_SC_RATE_W);
+                        cx + 68, cx + ADSBR_SC_CUE_DY, ADSBR_SC_RATE_W);
     lv_obj_clear_flag(*s->sc_cue, LV_OBJ_FLAG_CLICKABLE);
 
-    /* The three chord blocks are screen area the contact labels used to be free
-     * to use, so the declutter pass must treat them like placed tags. Each one
-     * is the label's own box, grown by a few pixels. */
-    g->no_go[0] = (lv_area_t){ cx, cx + ADSBR_SC_VAL_DY - 4,
-                               cx + ADSBR_SC_BLK_W, cx + ADSBR_SC_VAL_DY + 48 };
-    g->no_go[1] = (lv_area_t){ cx - 226, cx + ADSBR_SC_CALL_DY,
-                               cx - 192 + ADSBR_SC_FIG_W, cx + ADSBR_SC_FIG_DY + 36 };
-    g->no_go[2] = (lv_area_t){ cx + 68,  cx + ADSBR_SC_CALL_DY - 40,
-                               cx + 68 + ADSBR_SC_RATE_W, cx + ADSBR_SC_CALL_DY + 36 };
-    g->no_go_n  = 3;
+    /* The one chord block left is screen area the contact labels used to be
+     * free to use, so the declutter pass treats it like a placed tag: the
+     * label's own box, grown by a few pixels. */
+    g->no_go[0] = (lv_area_t){ cx + 68,  cx + ADSBR_SC_CUE_DY,
+                               cx + 68 + ADSBR_SC_RATE_W, cx + ADSBR_SC_CUE_DY + 36 };
+    g->no_go_n  = 1;
     g->scope_lbl_r = ADSBR_SC_LBL_R;
 }
 
@@ -352,7 +341,7 @@ void adsb_round_build(lv_obj_t *root, lv_obj_t *content,
         .card_off_v = { ADSBR_SKY_CARD_V, ADSBR_SCOPE_CARD },
         .card_off_h = { ADSBR_SKY_CARD_H, ADSBR_SCOPE_CARD },
         .card_off_diag = ADSBR_SCOPE_CARD_DIAG,
-        .rim_w      = { 2, 3 },
+        .rim_w      = { 2, 2 },
         .ring_inset = ADSBR_RING_INSET,
         .ring_lbl_w = 100,   /* the 28 px ring-number face needs more no-go
                               * width than the square 22 px face's 84 */
@@ -364,6 +353,7 @@ void adsb_round_build(lv_obj_t *root, lv_obj_t *content,
         .scrim_top  = { ADSBR_CAP_H, 0 },
         .scrim_bot  = { ADSBR_CAP_H, 0 },
         .short_caps = true,  /* the square sentence overflows the round chord */
+        .ring_lbl_west = true,
     };
 
     /* CREATION ORDER IS LOAD BEARING. LVGL draws children in creation order, so

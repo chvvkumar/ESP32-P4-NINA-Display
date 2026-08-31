@@ -29,3 +29,25 @@ lv_obj_t *ui_arclabel_create(lv_obj_t *parent, const lv_font_t *font, int radius
 /* Convenience for the two rim conventions every G1 page uses. */
 lv_obj_t *ui_arclabel_top(lv_obj_t *parent, const lv_font_t *font, int radius);     /* centred on twelve o'clock, clockwise */
 lv_obj_t *ui_arclabel_bottom(lv_obj_t *parent, const lv_font_t *font, int radius);  /* centred on six o'clock, counter-clockwise */
+
+/* Adds a translucent black band (a plain lv_arc) that sits directly behind
+ * arclabel's glyph run and is refitted to the text's angular extent on every
+ * ui_arclabel_set_text() call. pad_px pads the band beyond the glyph cell on
+ * all sides (radially and at both angular ends). Returns the band, or NULL
+ * when arclabel is NULL or the band could not be created.
+ *
+ * The band is a sibling of arclabel (same parent, centred the same way), not
+ * a child, and it takes over arclabel's user_data to remember itself: from
+ * this call on, arclabel's user_data belongs to this wrapper. The band is
+ * created after arclabel, so it starts on top, then moved directly beneath
+ * it. Because it is a sibling, deleting arclabel alone leaves the band
+ * behind; every page that uses this deletes the whole page root, which takes
+ * both. The band starts hidden and stays hidden until a non-empty
+ * ui_arclabel_set_text() call sizes it and reveals it. */
+lv_obj_t *ui_arclabel_add_band(lv_obj_t *arclabel, int pad_px);
+
+/* Sets arclabel's text and refits its band (if ui_arclabel_add_band() was
+ * called for it) to the new text's angular window. NULL-safe: a NULL text is
+ * treated as empty. Empty text hides the band; the arclabel itself is always
+ * updated. Safe to call on an arclabel with no band. */
+void ui_arclabel_set_text(lv_obj_t *arclabel, const char *text);

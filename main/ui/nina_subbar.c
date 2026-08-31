@@ -41,6 +41,16 @@ static void sb_block_geom(const nina_subbar_t *sb, int i, int *a0, int *a1);
 static void sb_style_block(const nina_subbar_t *sb, lv_obj_t *b, uint32_t color, lv_opa_t opa);
 static void sb_ring_fill_angles(nina_subbar_t *sb, float frac);
 static float sb_within(const nina_subbar_t *sb, float frac);
+static void sb_apply_visibility(nina_subbar_t *sb);
+
+/* Ring mode: the one writer of the container's HIDDEN flag. Shown only when
+ * the layout's view wants it AND a one-sub target is not suppressing it. */
+static void sb_apply_visibility(nina_subbar_t *sb) {
+    if (!sb->ring || !sb->cont) return;
+    bool show = sb->ring_shown && !(sb->hide_single && sb->single);
+    if (show) lv_obj_remove_flag(sb->cont, LV_OBJ_FLAG_HIDDEN);
+    else      lv_obj_add_flag(sb->cont, LV_OBJ_FLAG_HIDDEN);
+}
 
 /* Block colour: the active filter's configured colour, clamped to the theme's
  * progress colour on Red Night so no non-red hue reaches the panel. */
@@ -155,6 +165,12 @@ static void sb_rebuild_blocks(nina_subbar_t *sb, int target) {
     sb->ring_frac   = 0.0f;
     sb->last_frac   = 0.0f;
     sb->hold_within = 0.0f;
+
+    /* A one-sub target draws a single block that duplicates the exposure
+     * ring; layouts that opted in hide the ring outright for it. An unknown
+     * target (0) keeps its lone progress block. */
+    sb->single = (target == 1);
+    sb_apply_visibility(sb);
 
     for (int i = 0; i < n; i++) {
         lv_obj_t *b;
@@ -293,6 +309,7 @@ void nina_subbar_create_ring(nina_subbar_t *sb, lv_obj_t *parent,
     sb->cached_target = -1;
     sb->cached_done   = -1;
     sb->ring        = true;
+    sb->ring_shown  = true;
     sb->ring_radius = radius;
     sb->ring_width  = width;
     sb->ring_gap    = (float)gap_deg;
@@ -328,6 +345,12 @@ void nina_subbar_ring_set_radius(nina_subbar_t *sb, int radius) {
 void nina_subbar_reset_elapsed(nina_subbar_t *sb) {
     if (!sb || !sb->elapsed_cb) return;
     sb->elapsed_cb(sb->elapsed_ud, -1);
+}
+
+void nina_subbar_set_shown(nina_subbar_t *sb, bool shown) {
+    if (!sb || !sb->ring) return;
+    sb->ring_shown = shown;
+    sb_apply_visibility(sb);
 }
 
 void nina_subbar_park(nina_subbar_t *sb) {

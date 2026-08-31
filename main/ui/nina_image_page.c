@@ -26,6 +26,9 @@
 #include "radar_sites.h"               /* radar_site_nearest (token resolution) */
 #include "radar_play.h"                /* ring size, dedupe hash, playback cursor */
 #include "clouds_wms.h"                /* clouds_channel_label (page caption) */
+#if CONFIG_NINA_FAMILY_ROUND
+#include "ui_arclabel.h"               /* ui_arclabel_set_text (round rim caption band refit) */
+#endif
 #include "app_config.h"
 #include "display_defs.h"
 #include "tasks.h"                     /* psram_task_ensure, psram_task_spawn */
@@ -68,7 +71,9 @@ static inline void set_label_if_changed(lv_obj_t *label, const char *text)
  * all. The shadow exists because lv_arclabel has no text getter and its setter
  * reallocates unconditionally. Truncation at 63 bytes only makes the dedupe
  * conservative (a longer string that differs past byte 63 is written again),
- * and no caption source in this file is that long. */
+ * and no caption source in this file is that long. On round the setter also
+ * refits the translucent band behind the text (ui_arclabel_set_text()); on
+ * square it is a plain lv_label_set_text(). */
 static void set_caption_if_changed(image_page_t *p, int slot, const char *text)
 {
     if (!p || slot < 0 || slot > 1) return;
@@ -79,7 +84,11 @@ static void set_caption_if_changed(image_page_t *p, int slot, const char *text)
     strlcpy(p->caption_shadow[slot], text, sizeof(p->caption_shadow[slot]));
 #if LV_USE_ARCLABEL
     if (lv_obj_check_type(lbl, &lv_arclabel_class)) {
+#if CONFIG_NINA_FAMILY_ROUND
+        ui_arclabel_set_text(lbl, text);
+#else
         lv_arclabel_set_text(lbl, text);
+#endif
         return;
     }
 #endif
@@ -322,10 +331,12 @@ static void moon_drag_released_cb(lv_event_t *e)
  * Non-red themes use white text. Under the Red Night theme (gated by
  * theme_is_red_night) the text becomes the theme's red (text_color) so the page
  * emits only red shades or black. image_page_apply_theme() re-runs this on
- * theme change. A rim arclabel (round) takes the colour and nothing else:
- * guideline C1 forbids a background behind rim text, and padding would push the
- * glyph run off its radius. Exported through nina_image_page_internal.h so the
- * round builder styles the widgets it creates without knowing the theme. */
+ * theme change. A rim arclabel (round) takes the colour only: its background is
+ * the band object from ui_arclabel_add_band(), never a style on the arclabel
+ * itself (a bg style on the full-panel arclabel object would tint the whole
+ * disc), and padding on the arclabel would shift the glyph run off its radius.
+ * Exported through nina_image_page_internal.h so the round builder styles the
+ * widgets it creates without knowing the theme. */
 void image_page_caption_style(lv_obj_t *lbl)
 {
     const theme_t *th = current_theme;

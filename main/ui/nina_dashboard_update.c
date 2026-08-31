@@ -110,6 +110,7 @@ static void auto_fit_target_name_font(lv_obj_t *label) {
 }
 
 static void arc_start_exposure_anim(dashboard_page_t *p);
+static void arc_exec_cb(void *var, int32_t v);
 static void alt_interp_tick(dashboard_page_t *p);
 static void arc_interp_tick(dashboard_page_t *p);
 static void alt_reset_elapsed(dashboard_page_t *p);
@@ -165,13 +166,16 @@ static void alt_interp_tick(dashboard_page_t *p) {
     }
     /* The bands above only fill whole degrees; the caps ride the exact fraction
      * so the leading edge advances smoothly instead of stepping (ui_dial.h).
-     * cap_progress_num rides round layout 0's p->arc_exposure too, which the
-     * long linear fill animation drives from the same anchor as this frac. */
+     * On round layout 0 cap_progress_num rides p->arc_exposure, whose
+     * animations place it themselves through arc_exec_cb from the animated
+     * value; placing it from this frac too put it a few degrees off the band. */
     ui_dial_cap_place(p->alt.cap_progress.obj, p->alt.cap_progress.r,
                       p->alt.cap_progress.a0, p->alt.cap_progress.sweep, frac);
-    ui_dial_cap_place(p->alt.cap_progress_num.obj, p->alt.cap_progress_num.r,
-                      p->alt.cap_progress_num.a0, p->alt.cap_progress_num.sweep,
-                      frac);
+    if (p->layout != 0) {
+        ui_dial_cap_place(p->alt.cap_progress_num.obj, p->alt.cap_progress_num.r,
+                          p->alt.cap_progress_num.a0, p->alt.cap_progress_num.sweep,
+                          frac);
+    }
     if (p->alt.bar_progress) {
         lv_bar_set_value(p->alt.bar_progress, (int32_t)(frac * 1000.0f), LV_ANIM_OFF);
     }
@@ -217,6 +221,20 @@ void arc_interp_timer_cb(lv_timer_t *timer) {
      * sinks it drives, so this is a no-op on the square bento layout and drives
      * the round board's sub ring on layout 0. */
     alt_interp_tick(p);
+}
+
+/* The one exec callback every arc_exposure animation uses (fill, completion
+ * snap, gap fade, idle drop). Sets the value and, when the round board hung
+ * its leading-edge cap descriptor on the arc's user data, places the cap from
+ * that SAME value, so band and cap can never disagree the way they did when
+ * the cap was placed from the 200 ms tick's own fraction (a ball a couple of
+ * degrees ahead of the band, or buried under it). Square never sets the user
+ * data, so this is plain lv_arc_set_value there. */
+static void arc_exec_cb(void *var, int32_t v) {
+    lv_obj_t *arc = (lv_obj_t *)var;
+    lv_arc_set_value(arc, v);
+    nina_arc_cap_t *c = (nina_arc_cap_t *)lv_obj_get_user_data(arc);
+    if (c) ui_dial_cap_place(c->obj, c->r, c->a0, c->sweep, (float)v / (float)ARC_RANGE);
 }
 
 /* Layout 0 only: the exposure arc's monotonic-anchor correction and long
@@ -266,7 +284,7 @@ static void arc_interp_tick(dashboard_page_t *p) {
     /* The long linear anim is the smooth source of truth; do NOT restart on
      * small drift. Only restart if no anim is running (e.g. a prior shorter
      * estimate ended the anim early) and we still have time left. */
-    lv_anim_t *existing = lv_anim_get(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+    lv_anim_t *existing = lv_anim_get(p->arc_exposure, arc_exec_cb);
     if (!existing && elapsed < p->cached_total) {
         arc_start_exposure_anim(p);
     }
@@ -396,7 +414,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     alt_reset_elapsed(p);
     /* Drop any active exposure anchor so a stale anchor can't keep the 200ms
      * timer driving the arc while this instance is disconnected. */
-    lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+    lv_anim_delete(p->arc_exposure, arc_exec_cb);
     p->exp_anchor_us = 0;
     p->exp_anchor_elapsed = 0;
     p->cached_is_exposing = false;
@@ -406,7 +424,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     p->gap_start_epoch = 0;
     p->cached_nina_epoch = 0;
     p->cached_nina_mono_us = 0;
-    if (p->arc_exposure)     lv_arc_set_value(p->arc_exposure, 0);
+    if (p->arc_exposure)     arc_exec_cb(p->arc_exposure, 0);
     if (p->row_filter_total) lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
     lv_anim_delete(p->lbl_rms_value, arcsec_anim_exec);
     set_label_if_changed(p->lbl_rms_value, "--");
@@ -524,7 +542,7 @@ static void arc_start_exposure_anim(dashboard_page_t *p) {
     lv_anim_set_var(&a, p->arc_exposure);
     lv_anim_set_values(&a, current, ARC_RANGE - 1);
     lv_anim_set_time(&a, remaining_ms);
-    lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+    lv_anim_set_exec_cb(&a, arc_exec_cb);
     lv_anim_set_path_cb(&a, lv_anim_path_linear);
     lv_anim_start(&a);
 }
@@ -543,7 +561,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
 
     // Detect filter change — reset arc state
     if (d->current_filter[0] != '\0' && strcmp(p->prev_filter, d->current_filter) != 0) {
-        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_delete(p->arc_exposure, arc_exec_cb);
         p->arc_completing = false;
         p->cached_end_epoch = 0;
         p->cached_total = 0;
@@ -552,7 +570,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         p->exp_anchor_elapsed = 0;
         p->cached_nina_epoch = 0;
         p->cached_nina_mono_us = 0;
-        lv_arc_set_value(p->arc_exposure, 0);
+        arc_exec_cb(p->arc_exposure, 0);
         snprintf(p->prev_filter, sizeof(p->prev_filter), "%s", d->current_filter);
     }
 
@@ -579,7 +597,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
     if (finished_edge) {
         /* Snap the arc to a full circle for a polished completion, then let the
          * inter-exposure gap logic below hold/fade it before the next sub. */
-        lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_delete(p->arc_exposure, arc_exec_cb);
         p->arc_completing = true;
         p->exp_anchor_us = 0;
         int current_fill = lv_arc_get_value(p->arc_exposure);
@@ -588,7 +606,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
         lv_anim_set_var(&a, p->arc_exposure);
         lv_anim_set_values(&a, current_fill, ARC_RANGE);
         lv_anim_set_time(&a, ARC_TRANSITION_MS);
-        lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+        lv_anim_set_exec_cb(&a, arc_exec_cb);
         lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
         lv_anim_start(&a);
     }
@@ -644,13 +662,13 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             p->exp_anchor_elapsed = seed;
             p->arc_completing = false;
 
-            lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_delete(p->arc_exposure, arc_exec_cb);
             /* Seed the arc value from the elapsed estimate so a mid-sub detection
              * does not snap back to zero. */
             int seed_val = (int)((seed * (float)ARC_RANGE) / d->exposure_total);
             if (seed_val < 0) seed_val = 0;
             if (seed_val > ARC_RANGE - 1) seed_val = ARC_RANGE - 1;
-            lv_arc_set_value(p->arc_exposure, seed_val);
+            arc_exec_cb(p->arc_exposure, seed_val);
 
             /* Start one long linear anim toward (ARC_RANGE-1) over the monotonic
              * remaining time. arc_start_exposure_anim skips if <=100ms remain
@@ -674,7 +692,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             if (target_val > ARC_RANGE - 1) target_val = ARC_RANGE - 1;
             int cur_val = lv_arc_get_value(p->arc_exposure);
 
-            lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_delete(p->arc_exposure, arc_exec_cb);
             /* Smoothly move from the (mis-seeded) current value to the corrected
              * position; the long linear anim takes over toward ARC_RANGE-1 once
              * this short correction anim ends. Do NOT call
@@ -686,7 +704,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
             lv_anim_set_var(&a, p->arc_exposure);
             lv_anim_set_values(&a, cur_val, target_val);
             lv_anim_set_time(&a, ARC_TRANSITION_MS);
-            lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+            lv_anim_set_exec_cb(&a, arc_exec_cb);
             lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
             lv_anim_start(&a);
         }
@@ -753,14 +771,14 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                     set_label_if_changed(p->lbl_exposure_current, "--");
                 }
                 alt_reset_elapsed(p);
-                lv_anim_delete(p->arc_exposure, (lv_anim_exec_xcb_t)lv_arc_set_value);
+                lv_anim_delete(p->arc_exposure, arc_exec_cb);
 
                 lv_anim_t a;
                 lv_anim_init(&a);
                 lv_anim_set_var(&a, p->arc_exposure);
                 lv_anim_set_values(&a, lv_arc_get_value(p->arc_exposure), 0);
                 lv_anim_set_time(&a, 500);
-                lv_anim_set_exec_cb(&a, (lv_anim_exec_xcb_t)lv_arc_set_value);
+                lv_anim_set_exec_cb(&a, arc_exec_cb);
                 lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
                 lv_anim_start(&a);
 
@@ -780,7 +798,7 @@ static void update_exposure_arc(dashboard_page_t *p, const nina_client_t *d,
                 set_label_if_changed(p->lbl_exposure_current, "--");
             }
             alt_reset_elapsed(p);
-            lv_arc_set_value(p->arc_exposure, 0);
+            arc_exec_cb(p->arc_exposure, 0);
             if (p->row_filter_total) {
                 lv_obj_add_flag(p->row_filter_total, LV_OBJ_FLAG_HIDDEN);
             }

@@ -70,6 +70,8 @@ typedef struct {
     bool    short_caps;      /* Sky Dome mount/strip text uses the short forms that
                               * fit the round chord instead of the square sentence. */
     bool    board_marks;     /* Board mode also draws s_mark glyphs (heading arrows) */
+    bool    ring_lbl_west;   /* Scope: ring numbers and the range label run along the
+                              * nine o'clock radius instead of the NNW diagonal */
     uint8_t no_go_n;
     lv_area_t no_go[ADSB_NO_GO_MAX];
 } adsb_geom_t;
@@ -97,8 +99,8 @@ typedef struct {
     lv_obj_t **sc_rate;
     lv_obj_t **sc_cue;
     lv_obj_t **sc_contacts_ring;      /* Scope: within/tracked as a rim arc */
-    lv_obj_t **sc_rim_label;          /* Scope: the range label, an arclabel */
-    lv_obj_t **sc_contacts_arclabel;  /* Scope: the CONTACTS caption, an arclabel */
+    lv_obj_t **sc_contacts_arclabel;  /* Scope: "CONTACTS n / m" on the bottom rim, an arclabel */
+    lv_obj_t **sc_rate_arclabel;      /* Scope: "n msg/s" on the bottom rim, an arclabel */
     lv_obj_t **board;
     lv_obj_t **lbl_glance;
     lv_obj_t **lbl_gsub;

@@ -46,11 +46,24 @@
  * they do not reserve space.
  *
  * INTERACTION: press/move/release on the root. Under ADSB_TAP_SLOP_PX of total
- * travel it is a tap and cycles the mode; beyond it on Sky/Scope it rotates
- * flights_up_azimuth live (the grabbed azimuth follows the finger), snapping to
- * 5 deg on release. Both writes go through a PSRAM config snapshot +
+ * travel it is a tap; beyond it on Sky/Scope it rotates flights_up_azimuth
+ * live (the grabbed azimuth follows the finger), snapping to 5 deg on
+ * release. Both writes go through a PSRAM config snapshot +
  * app_config_save_deferred(), which already debounces the ~350 ms NVS write by
- * ~2 s, so a burst of taps or a whole drag costs one flash write.
+ * ~2 s, so a burst of taps or a whole drag costs one flash write. A lone tap
+ * cycles the mode, but only ADSB_DBL_TAP_MS after release, since a second tap
+ * inside that window is a double tap instead: it toggles the text overlays
+ * (rim labels, corner captions, Scope contact labels) off, leaving aircraft,
+ * trails, rings, the ring distance numbers, the cardinals and the basemap on
+ * screen; a second double tap brings the text back. RAM only, resets on the
+ * next page build.
+ *
+ * RADAR SCOPE BASEMAP: a state-boundary picture from adsb_basemap.c
+ * sits as the FIRST child of s_content (map_refresh()), under every family's
+ * widgets, shown only while the Scope is the active mode and rotated to match
+ * flights_up_azimuth. A second layer, s_text_layer, holds every text-bearing
+ * object and is created LAST, after both family builders have run, so the
+ * double tap above can hide all of it with one HIDDEN flag write.
  */
 
 #include "nina_adsb.h"
@@ -59,6 +72,7 @@
 #include "nina_adsb_internal.h"
 #include "ui_round.h"
 #include "nina_empty_state.h"
+#include "adsb_basemap.h"
 #include "adsb_client.h"
 #include "adsb_geom.h"
 #include "app_config.h"
@@ -99,6 +113,12 @@ static int s_disc_r;
 
 #define ADSB_TAP_SLOP_PX 12
 #define ADSB_SNAP_DEG    5.0f
+
+/* Release-to-release window that turns a second tap into a double tap. A lone
+ * tap now waits this long before cycling the mode -- the price of being able
+ * to tell it apart from the first half of a double tap, since LVGL's own
+ * click-streak count is only known AFTER this page's RELEASED handler runs. */
+#define ADSB_DBL_TAP_MS  350
 
 /* Family geometry: the cardinal radii, the ring-label inset, the tag height,
  * the scrim reserves and the declutter exclusion rectangles. Filled once at
@@ -267,8 +287,8 @@ static lv_obj_t *s_row_dist[ADSB_BOARD_ROWS];
 /* Round-family additions. NULL on square, where the page draws the numbers and
  * the text columns these replace. */
 static lv_obj_t *s_scope_contacts_ring;         /* within/tracked as a rim arc  */
-static lv_obj_t *s_scope_rim_label;             /* range label, an arclabel     */
-static lv_obj_t *s_scope_contacts_arclabel;     /* CONTACTS caption, arclabel   */
+static lv_obj_t *s_scope_contacts_arclabel;     /* "CONTACTS n / m", bottom rim */
+static lv_obj_t *s_scope_rate_arclabel;         /* "n msg/s", bottom rim        */
 /* s_row_dot[] is per-contact coloured by fill_board() (distance over range on
  * the rail, ADSB_RAMP bucket for the colour), so apply_colors() never touches
  * it. It is also the round Board's own family test: NULL on square. */
@@ -287,6 +307,16 @@ static lv_obj_t *s_card_key[CARD_FIELDS];
 static lv_obj_t *s_card_val[CARD_FIELDS];
 static lv_obj_t *s_backdrop;                    /* full-cover host for the empty state */
 static lv_obj_t *s_empty;
+/* Radar Scope basemap picture, first child of s_content (bottom of the whole
+ * page). lv_image_dsc_t and the generation stamp are what map_refresh() uses
+ * to decide whether adsb_basemap_render() needs to run again. */
+static lv_obj_t      *s_map_img;
+static lv_image_dsc_t s_map_dsc;
+static uint32_t       s_map_gen;
+/* Text overlay layer: every text-bearing object is reparented into this after
+ * page create, so the double-tap toggle below is one HIDDEN flag write. */
+static lv_obj_t *s_text_layer;
+static bool      s_text_hidden;
 
 /* ── Page state ───────────────────────────────────────────────────────── */
 
@@ -306,6 +336,11 @@ static int   s_press_x, s_press_y;
 static int   s_travel;
 static float s_press_ang;
 static float s_press_up;
+
+/* Double-tap detection for the text-overlay toggle: a one-shot lv_timer that
+ * fires the deferred single-tap mode cycle when no second tap arrives. */
+static uint32_t    s_last_tap_ms;
+static lv_timer_t *s_tap_timer;
 
 /* Precomputed draw geometry (ints only — see file header) */
 typedef struct {
@@ -399,6 +434,8 @@ static void apply_mode(void);
 static void apply_colors(void);
 static void apply_disc_colors(void);
 static void persist_nav_fields(void);
+static void map_refresh(bool force);
+static void tap_timer_cb(lv_timer_t *t);
 
 /**
  * Outer disc radius for @p mode. The Sky Dome keeps the panel edge on every
@@ -619,9 +656,20 @@ static void show_obj(lv_obj_t *o, bool visible)
 }
 
 /** Text write that tolerates a handle the family builder did not create. */
+/* Text setter for a label OR a rim arclabel (the round Scope builds the
+ * nearest-aircraft rows as arclabels): the widget class picks the setter.
+ * lv_arclabel_set_text() re-lays out the run on every call, but every caller
+ * here runs once per poll at most, so no shadow copy is kept. */
 static void set_lbl(lv_obj_t *l, const char *t)
 {
-    if (l && t) lv_label_set_text(l, t);
+    if (!l || !t) return;
+#if LV_USE_ARCLABEL
+    if (lv_obj_check_type(l, &lv_arclabel_class)) {
+        lv_arclabel_set_text(l, t);
+        return;
+    }
+#endif
+    lv_label_set_text(l, t);
 }
 
 /** Colour write with the same tolerance. */
@@ -896,8 +944,9 @@ static void disc_draw_cb(lv_event_t *e)
 
     /* Radar Scope contact labels: two lines of text in the arrow's colour, no
      * box, no background. Same 8 px / 2 px / 31 px offsets as the Sky tag box
-     * so the declutter geometry (TAG_W x TAG_H) stays honest. */
-    if (scope && s_slbl) {
+     * so the declutter geometry (TAG_W x TAG_H) stays honest. Suppressed by
+     * the double-tap text toggle, same as every other label on the page. */
+    if (scope && s_slbl && !s_text_hidden) {
         lv_draw_label_dsc_t ld;
         lv_draw_label_dsc_init(&ld);
         for (int i = 0; i < s_slbl_n; i++) {
@@ -979,16 +1028,47 @@ static void released_cb(lv_event_t *e)
     s_pressing = false;
 
     if (s_travel <= ADSB_TAP_SLOP_PX) {
-        s_mode = (uint8_t)((s_mode + 1) % 3);
-        apply_mode();
-        recompute();
-        persist_nav_fields();
+        /* Second tap inside the window: toggle the text overlay and cancel
+         * the pending single-tap mode cycle. Otherwise arm the timer and wait
+         * to see if a second tap follows. */
+        uint32_t now = lv_tick_get();
+        if (s_tap_timer && lv_tick_elaps(s_last_tap_ms) <= ADSB_DBL_TAP_MS) {
+            lv_timer_delete(s_tap_timer);
+            s_tap_timer = NULL;
+            s_text_hidden = !s_text_hidden;
+            show_obj(s_text_layer, !s_text_hidden);
+            lv_obj_invalidate(s_disc);
+            return;
+        }
+        s_last_tap_ms = now;
+        if (s_tap_timer) {
+            lv_timer_delete(s_tap_timer);
+        }
+        s_tap_timer = lv_timer_create(tap_timer_cb, ADSB_DBL_TAP_MS, NULL);
+        lv_timer_set_repeat_count(s_tap_timer, 1);
         return;
     }
     if (s_mode == MODE_BOARD) {
         return;
     }
     s_up_deg = adsb_wrap360(roundf(s_up_deg / ADSB_SNAP_DEG) * ADSB_SNAP_DEG);
+    recompute();
+    map_refresh(true);   /* rotation changed; renders once, at drag end only */
+    persist_nav_fields();
+}
+
+/**
+ * Fires ADSB_DBL_TAP_MS after a lone tap with no second tap following: cycles
+ * the mode the way every tap used to. A one-shot lv_timer (repeat count 1)
+ * deletes itself right after invoking this callback, so this must only NULL
+ * the pointer and never call lv_timer_delete() on it.
+ */
+static void tap_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    s_tap_timer = NULL;
+    s_mode = (uint8_t)((s_mode + 1) % 3);
+    apply_mode();
     recompute();
     persist_nav_fields();
 }
@@ -1015,12 +1095,60 @@ static void persist_nav_fields(void)
     heap_caps_free(c);
 }
 
+/* ── Radar Scope basemap ──────────────────────────────────────────────── */
+
+/**
+ * Show, hide or repaint the basemap image under the Radar Scope.
+ *
+ * force=false is the cheap poll-tick path: it only re-renders when
+ * adsb_basemap_generation() has moved past the last frame this page drew, so
+ * a steady Scope view costs nothing extra between fetches. force=true is used
+ * whenever something that changes the PICTURE itself happened outside a new
+ * fetch: a mode switch, the end of a rotate drag, a Red Night remap or a
+ * theme change.
+ */
+static void map_refresh(bool force)
+{
+    if (s_mode != MODE_SCOPE || !s_map_img) {
+        show_obj(s_map_img, false);
+        return;
+    }
+    uint32_t gen = adsb_basemap_generation();
+    if (!force && gen == s_map_gen && s_map_dsc.data != NULL) {
+        return;
+    }
+    int side = 0;
+    const uint16_t *buf = adsb_basemap_render(s_up_deg, &side);
+    if (!buf) {
+        show_obj(s_map_img, false);
+        return;
+    }
+    s_map_dsc.header.magic  = LV_IMAGE_HEADER_MAGIC;
+    s_map_dsc.header.cf     = LV_COLOR_FORMAT_RGB565;
+    s_map_dsc.header.flags  = 0;
+    s_map_dsc.header.w      = (uint16_t)side;
+    s_map_dsc.header.h      = (uint16_t)side;
+    s_map_dsc.header.stride = (uint16_t)(side * 2);
+    s_map_dsc.data_size     = (uint32_t)side * (uint32_t)side * 2u;
+    s_map_dsc.data          = (const uint8_t *)buf;
+    /* RGB565 is an uncompressed "true colour" format, so LVGL's built-in
+     * decoder uses this buffer directly and never enters it into the image
+     * cache (lv_bin_decoder.c: the uncompressed-format path sets
+     * use_directly = true and skips the cache-add call) -- no cache-drop is
+     * needed even though &s_map_dsc keeps the same address every frame. */
+    lv_image_set_src(s_map_img, &s_map_dsc);
+    lv_obj_invalidate(s_map_img);
+    show_obj(s_map_img, true);
+    s_map_gen = gen;
+}
+
 /* ── Mode layout ──────────────────────────────────────────────────────── */
 
 static void apply_mode(void)
 {
     bool disc_mode = (s_mode != MODE_BOARD);
     bool scope     = (s_mode == MODE_SCOPE);
+    adsb_basemap_set_scope(scope, disc_r_for(MODE_SCOPE));
     s_disc_r = disc_r_for(s_mode);
 
     /* The round Board draws heading arrows through the same draw callback, so
@@ -1046,12 +1174,12 @@ static void apply_mode(void)
     lv_obj_t *corners[] = {
         s_sc_cap_contacts, s_sc_within, s_sc_cap_range, s_sc_range,
         s_sc_call, s_sc_ident, s_sc_alt, s_sc_dist, s_sc_rate, s_sc_cue,
-        s_scope_contacts_ring, s_scope_rim_label, s_scope_contacts_arclabel,
+        s_scope_contacts_ring, s_scope_contacts_arclabel, s_scope_rate_arclabel,
     };
     for (size_t i = 0; i < sizeof(corners) / sizeof(corners[0]); i++) {
         show_obj(corners[i], scope);
     }
-    apply_disc_colors();
+    apply_disc_colors();   /* ends in map_refresh(true): mode and colours in one render */
 }
 
 /* ── Coordinate pipeline ──────────────────────────────────────────────── */
@@ -1330,11 +1458,12 @@ static void place_compass(void)
         int idx = (s_mode == MODE_SCOPE) ? 1 : 0;
         int off = (co < 0.0f ? -co : co) > 0.707f ? s_geom.card_off_v[idx]
                                                   : s_geom.card_off_h[idx];
-        /* Round Scope: the range and CONTACTS arclabels own the two upper
-         * diagonals, 15..75 degrees either side of up, in the same rim band
-         * as the letters (bench B11: "1W5 NM" at up azimuth 320). A letter
-         * the rotation carries there steps in under the glyph band. */
-        if (idx == 1 && co > 0.0f) {
+        /* Round Scope: rim arclabels own all four diagonals, 15..75 degrees
+         * either side of up and of down (nearest aircraft on top, CONTACTS
+         * and msg/s at the bottom), in the same rim band as the letters
+         * (bench B11 showed the collision, "1W5 NM"). A letter the rotation
+         * carries there steps in under the glyph band. */
+        if (idx == 1) {
             float as = si < 0.0f ? -si : si;
             if (as > 0.259f && as < 0.966f) off = s_geom.card_off_diag;
         }
@@ -1372,28 +1501,37 @@ static void place_compass(void)
  */
 static void place_ring_label(int slot, int r, const char *text)
 {
-    if (slot == 2 && s_mode == MODE_SCOPE && s_scope_rim_label) {
-        /* The rim IS max range on the round Scope, so the number rides the rim
-         * instead of the diagonal and reserves no rectangle.
-         *
-         * place_rings() runs from every recompute(), which runs per touch-move
-         * during a drag, and lv_arclabel_set_text() reallocates and re-lays out
-         * the run on every call. Shadow the string and write only on a change:
-         * the range only moves on a config change. */
-        static char rim_shadow[16];
-        if (strcmp(rim_shadow, text) != 0) {
-            snprintf(rim_shadow, sizeof(rim_shadow), "%s", text);
-#if LV_USE_ARCLABEL
-            lv_arclabel_set_text(s_scope_rim_label, rim_shadow);
-#endif
-        }
-        show_obj(s_lbl_ring[slot], false);
-        s_ring_lbl_used[slot] = false;
-        return;
-    }
     /* No number, no rectangle to reserve (review_impl_D3 M-1). */
     if (!s_lbl_ring[slot]) {
         s_ring_lbl_used[slot] = false;
+        return;
+    }
+    if (s_geom.ring_lbl_west && s_mode == MODE_SCOPE) {
+        /* Round Scope: the numbers run along the W axis and follow it round
+         * when the up azimuth rotates. Each label is centred on the W bearing
+         * just inside its ring (the range label steps in past the W cardinal,
+         * which sits card_off_h inside the rim with its glyph reaching about
+         * 40 px in), then pushed one line toward N so it sits beside the axis
+         * chord rather than on it. The text itself stays upright. Width and
+         * height come from the laid-out label, so a two-digit and a "125 NM"
+         * label both centre on their own ink. */
+        lv_obj_t *l = s_lbl_ring[slot];
+        set_lbl(l, text);
+        show_obj(l, true);   /* before the layout pass, so the size is live */
+        lv_obj_update_layout(l);
+        int w = lv_obj_get_width(l);
+        int h = lv_obj_get_height(l);
+        float tw = (270.0f - s_up_deg) * ADSB_DEG2RAD;   /* W bearing on screen */
+        float tn = (-s_up_deg) * ADSB_DEG2RAD;           /* N bearing on screen */
+        int rr = r - ((slot == 2) ? s_geom.ring_inset + 14 : 6) - w / 2;
+        int side = h / 2 + 4;
+        int cxl = DISC_CX + (int)(rr * sinf(tw) + side * sinf(tn));
+        int cyl = DISC_CY - (int)(rr * cosf(tw) + side * cosf(tn));
+        int x = cxl - w / 2;
+        int y = cyl - h / 2;
+        lv_obj_set_pos(l, x, y);
+        s_ring_lbl_area[slot] = (lv_area_t){ x - 4, y - 4, x + w + 4, y + h + 4 };
+        s_ring_lbl_used[slot] = true;
         return;
     }
     /* Only the outermost number takes the family inset; the two inner ones
@@ -1808,6 +1946,20 @@ static void fill_scope_corners(int within, int tracked, float range, page_conn_t
     if (within > 99) within = 99;
     snprintf(buf, sizeof(buf), "%d / %d", within, tracked);
     set_lbl(s_sc_within, buf);
+#if LV_USE_ARCLABEL
+    if (s_scope_contacts_arclabel) {
+        /* Round Scope: caption and count share one rim run. Shadowed because
+         * lv_arclabel_set_text() re-lays out every glyph on each call and this
+         * runs per poll. */
+        static char cnt_shadow[48];
+        char cnt[48];
+        snprintf(cnt, sizeof(cnt), "CONTACTS %d / %d", within, tracked);
+        if (strcmp(cnt_shadow, cnt) != 0) {
+            snprintf(cnt_shadow, sizeof(cnt_shadow), "%s", cnt);
+            lv_arclabel_set_text(s_scope_contacts_arclabel, cnt_shadow);
+        }
+    }
+#endif
 
     int rng = (int)(range + 0.5f);
     if (rng > 999) rng = 999;
@@ -1820,6 +1972,19 @@ static void fill_scope_corners(int within, int tracked, float range, page_conn_t
     if (rate > 99999) rate = 99999;
     snprintf(buf, sizeof(buf), "%5d msg/s", rate);
     set_lbl(s_sc_rate, buf);
+#if LV_USE_ARCLABEL
+    if (s_scope_rate_arclabel) {
+        /* Round Scope: the rate rides the bottom rim, unpadded (an arc run has
+         * no right edge to hold still), shadowed like the count above. */
+        static char rate_shadow[48];
+        char rt[48];
+        snprintf(rt, sizeof(rt), "%d msg/s", rate);
+        if (strcmp(rate_shadow, rt) != 0) {
+            snprintf(rate_shadow, sizeof(rate_shadow), "%s", rt);
+            lv_arclabel_set_text(s_scope_rate_arclabel, rate_shadow);
+        }
+    }
+#endif
     set_lbl(s_sc_cue, (st == PAGE_CONN_STALE) ? "Reconnecting..." : "");
 
     const adsb_ac_t *nearest = NULL;
@@ -2201,6 +2366,7 @@ void nina_adsb_update(void)
         s_have = true;
     }
     recompute();
+    map_refresh(false);   /* picks up a freshly fetched frame, if any */
 }
 
 void nina_adsb_config_changed(void)
@@ -2209,6 +2375,9 @@ void nina_adsb_config_changed(void)
     const app_config_t *cfg = app_config_get();
     s_mode   = (cfg->flights_mode > MODE_BOARD) ? MODE_SKY : cfg->flights_mode;
     s_up_deg = adsb_wrap360((float)cfg->flights_up_azimuth);
+    /* apply_mode() re-renders the map with the new up azimuth; a range change
+     * makes the poller refetch and the next nina_adsb_update() picks the new
+     * generation up on its own. */
     apply_mode();
     recompute();
 }
@@ -2235,6 +2404,8 @@ static void apply_disc_colors(void)
     for (int i = 0; i < 3; i++) {
         set_col(s_lbl_ring[i], rlbl);
     }
+    map_refresh(true);   /* Red Night / colour-brightness remap is baked into
+                           * the rendered buffer, not applied at draw time */
 }
 
 static void apply_colors(void)
@@ -2324,8 +2495,8 @@ static void apply_colors(void)
                                    lv_color_hex(page_col(COL_SCOPE_GREEN)),
                                    LV_PART_INDICATOR);
     }
-    set_col(s_scope_rim_label, page_col(COL_SCOPE_RING_LBL));
     set_col(s_scope_contacts_arclabel, page_col(COL_SCOPE_CAP));
+    set_col(s_scope_rate_arclabel, page_col(COL_SCOPE_GREEN));
     for (int i = 0; i < ADSB_BOARD_ROWS; i++) {
         if (s_row_rail[i]) {
             lv_obj_set_style_bg_color(s_row_rail[i],
@@ -2408,6 +2579,15 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
     lv_obj_set_pos(s_content, 0, 0);
     lv_obj_clear_flag(s_content, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
 
+    /* Radar Scope basemap: the FIRST child of s_content, so it sits under
+     * everything else either family builds below (draw host, Board rows, tag
+     * boxes). Hidden until map_refresh() has a frame to show. */
+    s_map_img = lv_image_create(s_content);
+    lv_obj_set_pos(s_map_img, 0, 0);
+    lv_obj_set_size(s_map_img, screen_size(), screen_size());
+    lv_obj_clear_flag(s_map_img, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+    show_obj(s_map_img, false);
+
 #if CONFIG_NINA_FAMILY_ROUND
     {
         const adsb_slots_t slots = {
@@ -2420,8 +2600,8 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
             .sc_alt = &s_sc_alt, .sc_dist = &s_sc_dist,
             .sc_rate = &s_sc_rate, .sc_cue = &s_sc_cue,
             .sc_contacts_ring = &s_scope_contacts_ring,
-            .sc_rim_label = &s_scope_rim_label,
             .sc_contacts_arclabel = &s_scope_contacts_arclabel,
+            .sc_rate_arclabel = &s_scope_rate_arclabel,
             .board = &s_board, .lbl_glance = &s_lbl_glance, .lbl_gsub = &s_lbl_gsub,
             .row_panel = s_row_panel, .row_call = s_row_call,
             .row_dot = s_row_dot, .row_rail = s_row_rail,
@@ -2633,13 +2813,50 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
     lv_obj_clear_flag(s_sc_cue, LV_OBJ_FLAG_CLICKABLE);
 #endif
 
-    /* The Scope caption never changes, so it is laid out once here rather than
-     * re-run through lv_arclabel_set_text() on every poll. NULL on square. */
-#if LV_USE_ARCLABEL
-    if (s_scope_contacts_arclabel) {
-        lv_arclabel_set_text(s_scope_contacts_arclabel, "CONTACTS");
+    /* Text overlay layer, built LAST (after both family builders), so every
+     * text-bearing object created above can be reparented into ONE container.
+     * The double-tap toggle then hides all of it with a single HIDDEN flag
+     * write instead of walking dozens of objects. This does not fight the
+     * many per-slot show_obj() calls elsewhere in the file: LVGL treats an
+     * object as hidden if EITHER it or an ancestor carries LV_OBJ_FLAG_HIDDEN,
+     * so a child's own flag still works exactly as before, and clearing the
+     * layer's flag just uncovers whatever the child flags already say.
+     * s_content, s_root and this layer are all full-panel at (0,0), so every
+     * position/align coordinate written above against s_content stays valid
+     * after the reparent. */
+    s_text_layer = lv_obj_create(s_content);
+    lv_obj_remove_style_all(s_text_layer);
+    lv_obj_set_size(s_text_layer, screen_size(), screen_size());
+    lv_obj_set_pos(s_text_layer, 0, 0);
+    lv_obj_set_style_bg_opa(s_text_layer, LV_OPA_TRANSP, 0);
+    lv_obj_clear_flag(s_text_layer, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE |
+                                    LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
+    {
+        /* s_lbl_title/s_lbl_mount and s_lbl_strip are children of s_hdr/
+         * s_strip and move with their parent; s_disc, s_board and
+         * s_scope_contacts_ring (not text) and s_map_img (the picture, not
+         * text) are deliberately left off this list, and so are the three
+         * ring numbers (s_lbl_ring[]) and the four cardinals (s_lbl_card[]):
+         * the user wants the range markers and N E S W to stay readable with
+         * the rest of the text hidden, so they remain direct children of
+         * s_content above the draw host. */
+        lv_obj_t *text_objs[] = {
+            s_hdr, s_strip,
+            s_sc_cap_contacts, s_sc_within, s_sc_cap_range, s_sc_range,
+            s_sc_call, s_sc_ident, s_sc_alt, s_sc_dist, s_sc_rate, s_sc_cue,
+            s_scope_contacts_arclabel, s_scope_rate_arclabel,
+        };
+        for (size_t i = 0; i < sizeof(text_objs) / sizeof(text_objs[0]); i++) {
+            if (text_objs[i]) {
+                lv_obj_set_parent(text_objs[i], s_text_layer);
+            }
+        }
+        for (int i = 0; i < ADSB_TAG_COUNT; i++) {
+            if (s_tag_box[i]) {
+                lv_obj_set_parent(s_tag_box[i], s_text_layer);
+            }
+        }
     }
-#endif
 
     /* One owner for the draw callback, whichever family built the host. */
     lv_obj_add_event_cb(s_disc, disc_draw_cb, LV_EVENT_DRAW_MAIN_END, NULL);
@@ -2693,6 +2910,16 @@ static void adsb_on_hide(void)
 {
     adsb_page_active = false;
     s_pressing = false;
+    /* Drop the map before its buffer goes: this runs under the LVGL lock on
+     * the UI side, so nothing is mid-flush on the pixels being freed. The
+     * source frame is freed separately by the poller's park hook. */
+    if (s_map_img) {
+        lv_image_set_src(s_map_img, NULL);
+        show_obj(s_map_img, false);
+    }
+    s_map_dsc.data = NULL;
+    s_map_gen = 0;
+    adsb_basemap_release_display();
 }
 
 static const page_ops_t s_adsb_ops = {

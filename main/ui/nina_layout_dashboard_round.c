@@ -280,15 +280,18 @@ void nina_layout_dashboard_round_create(dashboard_page_t *p, lv_obj_t *parent,
     p->ring_exposure = p->arc_exposure;
 
     /* The ring's leading-edge cap. lv_arc only fills whole degrees, about 7 px
-     * at this radius, so the cap rides the exact fraction the 200 ms tick
-     * computes and the quantised band trails under it. It is a child of the
-     * ring, so it hides and dims with it. */
+     * at this radius, so the cap rides the exact animated value and the
+     * quantised band trails under it. It is a child of the ring, so it hides
+     * and dims with it, and the descriptor hangs on the ring's user data so
+     * every arc_exposure animation (arc_exec_cb in nina_dashboard_update.c)
+     * places it from the value it just set. */
     p->alt.cap_progress_num.obj = ui_dial_cap_create(p->arc_exposure,
         DR_W_EXPOSURE,
         app_config_apply_brightness(current_theme->progress_color, gb));
     p->alt.cap_progress_num.r     = r_exp;
     p->alt.cap_progress_num.a0    = g_exp;
     p->alt.cap_progress_num.sweep = 360 - 2 * g_exp;
+    lv_obj_set_user_data(p->arc_exposure, &p->alt.cap_progress_num);
 
     /* 2: no safety crown any more. The shield at twelve is the shared
      * overlay's, so p->ring_crown stays NULL and update_safety_icon() returns
@@ -303,6 +306,7 @@ void nina_layout_dashboard_round_create(dashboard_page_t *p, lv_obj_t *parent,
 
     /* 4: the sub ring, same block rule as the square ledge. */
     nina_subbar_create_ring(&p->subbar, board, r_sub, DR_W_SUB, 2 * g_sub);
+    p->subbar.hide_single = true;   /* one sub: the exposure ring is enough */
     nina_subbar_set_elapsed_cb(&p->subbar, dr_elapsed_cb, p);
 
     /* 5: the centre spine. One flex column on the widest chords it needs. */
