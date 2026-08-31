@@ -11,11 +11,13 @@
  */
 
 #include "nina_image_page.h"
+#include "moon_sphere.h"   /* MOON_SPHERE_ORTHO_DEFAULT */
+#include "nina_image_page_internal.h"  /* caption style + the two overlay builders */
 #include "nina_wait_overlay.h"
 #include "nina_empty_state.h"
 #include "nina_nav_arbiter.h"          /* nav_arbiter_notify_content_ready */
 #include "nina_dashboard.h"            /* nina_dashboard_set_image_page_enabled (config apply, B5) */
-#include "nina_dashboard_internal.h"   /* SCREEN_SIZE, OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
+#include "nina_dashboard_internal.h"   /* screen_size(), OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
 #include "image_red_remap.h"
 #include "image_fit.h"                 /* PPA fit: n/16 scale + symmetric trim */
 #include "image_night_invert.h"        /* radar: invert the greyscale basemap only */
@@ -24,6 +26,9 @@
 #include "radar_sites.h"               /* radar_site_nearest (token resolution) */
 #include "radar_play.h"                /* ring size, dedupe hash, playback cursor */
 #include "clouds_wms.h"                /* clouds_channel_label (page caption) */
+#if CONFIG_NINA_FAMILY_ROUND
+#include "ui_arclabel.h"               /* ui_arclabel_set_text (round rim caption band refit) */
+#endif
 #include "app_config.h"
 #include "display_defs.h"
 #include "tasks.h"                     /* psram_task_ensure, psram_task_spawn */
@@ -33,6 +38,7 @@
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
 #include <stdio.h>                     /* snprintf (radar caption) */
+#include <stdlib.h>                    /* atoi (moon illumination arc value) */
 #include <string.h>
 #include <time.h>
 
@@ -57,6 +63,50 @@ static inline void set_label_if_changed(lv_obj_t *label, const char *text)
     if (!label) return;
     const char *cur = lv_label_get_text(label);
     if (!cur || strcmp(cur, text) != 0) lv_label_set_text(label, text);
+}
+
+/* Write one of the two caption slots (IMG_CAP_REGION, IMG_CAP_STAMP). On round
+ * those handles are rim arclabels, on square they are plain labels; the widget
+ * class decides the setter and p->caption_shadow decides whether to call it at
+ * all. The shadow exists because lv_arclabel has no text getter and its setter
+ * reallocates unconditionally. Truncation at 63 bytes only makes the dedupe
+ * conservative (a longer string that differs past byte 63 is written again),
+ * and no caption source in this file is that long. On round the setter also
+ * refits the translucent band behind the text (ui_arclabel_set_text()); on
+ * square it is a plain lv_label_set_text(). */
+static void set_caption_if_changed(image_page_t *p, int slot, const char *text)
+{
+    if (!p || slot < 0 || slot > 1) return;
+    lv_obj_t *lbl = (slot == IMG_CAP_REGION) ? p->lbl_region : p->lbl_timestamp;
+    if (!lbl) return;
+    if (!text) text = "";
+    if (strcmp(p->caption_shadow[slot], text) == 0) return;
+    strlcpy(p->caption_shadow[slot], text, sizeof(p->caption_shadow[slot]));
+#if CONFIG_NINA_FAMILY_ROUND && LV_USE_ARCLABEL
+    /* Round GOES class: ONE centred bottom-rim arclabel (lbl_region) carries
+     * both slots joined, so either slot's write re-renders the pair from the
+     * two shadows. lbl_timestamp exists but stays hidden. GOES and Solar join
+     * with " - " (name and time are two facts); Radar and Clouds with a
+     * space (the site or channel and its stamp read as one phrase); an empty
+     * slot contributes nothing, so Custom shows the stamp alone. */
+    if (p->lbl_region && lv_obj_check_type(p->lbl_region, &lv_arclabel_class)) {
+        const char *a = p->caption_shadow[IMG_CAP_REGION];
+        const char *b = p->caption_shadow[IMG_CAP_STAMP];
+        const char *sep = (p->src == IMG_SRC_GOES || p->src == IMG_SRC_SOLAR) ? " - " : " ";
+        char joined[136];
+        if (a[0] && b[0]) snprintf(joined, sizeof(joined), "%s%s%s", a, sep, b);
+        else              snprintf(joined, sizeof(joined), "%s%s", a, b);
+        ui_arclabel_set_text(p->lbl_region, joined);
+        return;
+    }
+#endif
+#if LV_USE_ARCLABEL
+    if (lv_obj_check_type(lbl, &lv_arclabel_class)) {
+        lv_arclabel_set_text(lbl, text);
+        return;
+    }
+#endif
+    lv_label_set_text(lbl, text);
 }
 
 static inline bool frame_lock(image_page_t *p, int timeout_ms)
@@ -86,11 +136,31 @@ static void init_image_dsc(lv_image_dsc_t *dsc)
  * style property lv_obj_set_y() writes, not computed geometry, so it cannot go
  * stale before layout runs. Overlay labels are children of the page container,
  * not of the image, so they keep their screen-edge alignment. */
-static void center_image_y(lv_obj_t *img, int h, uint16_t scale)
+int image_page_fit_px(const image_page_t *p)
+{
+    return (p && p->fit_px > 0) ? p->fit_px : screen_size();
+}
+
+int image_page_fit_dy(const image_page_t *p)
+{
+    return p ? p->fit_dy : 0;
+}
+
+/* Centre the scaled picture on the panel. Every source is scaled to
+ * image_page_fit_px(), which is the panel width unless a builder shrank the
+ * picture (the round Moon disc), so on square x resolves to 0 exactly as
+ * before. The vertical nudge is image_page_fit_dy(), 0 everywhere but the
+ * round Moon. x is taken from the FITTED width rather than from the scaled
+ * source width so an integer-rounded software scale cannot move a square page
+ * by a pixel (review_F M3). */
+static void center_image_xy(image_page_t *p, lv_obj_t *img, int h, uint16_t scale)
 {
     int32_t scaled_h = ((int32_t)h * (int32_t)scale) / 256;
-    int32_t y = ((int32_t)SCREEN_SIZE - scaled_h) / 2;
+    int32_t x = ((int32_t)screen_size() - (int32_t)image_page_fit_px(p)) / 2;
+    int32_t y = ((int32_t)screen_size() - scaled_h) / 2 + image_page_fit_dy(p);
+    if (x < 0) x = 0;
     if (y < 0) y = 0;
+    if (lv_obj_get_style_x(img, LV_PART_MAIN) != x) lv_obj_set_x(img, x);
     if (lv_obj_get_style_y(img, LV_PART_MAIN) != y) lv_obj_set_y(img, y);
 }
 
@@ -180,6 +250,40 @@ static void cancel_moon_crossfade(image_page_t *p)
     p->crossfade_active = false;
 }
 
+static void image_page_config_set_overlay(app_config_t *c, image_src_t src, bool v);
+
+/* Guideline C2 (spec addendum 2026-08-28 section 2): an image page shows no
+ * text by default and a tap toggles it, on BOTH panel families. Registered on
+ * all six sources, so the handler reads the source from the page it was given.
+ *
+ * The write goes through a PSRAM snapshot: app_config_t is 9436 bytes and this
+ * runs on the LVGL task, so a stack copy would overflow it.
+ * app_config_save_deferred() puts the value in RAM immediately and coalesces
+ * the ~350 ms flash write about 2 s after the last call, which is the same
+ * mechanism the ADS-B rotation drag uses (nina_adsb.c persist_nav_fields()).
+ *
+ * No display lock is taken: an LVGL event callback already runs on the LVGL
+ * task with the lock held. */
+static void overlay_tap_cb(lv_event_t *e)
+{
+    image_page_t *p = lv_event_get_user_data(e);
+    if (!p) return;
+
+    bool want = !image_page_config_overlay(app_config_get(), p->src);
+
+    app_config_t *c = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
+    if (!c) {
+        ESP_LOGW(TAG, "no PSRAM for config snapshot; overlay toggle not saved");
+        return;
+    }
+    app_config_get_snapshot_into(c);
+    image_page_config_set_overlay(c, p->src, want);
+    app_config_save_deferred(c);
+    heap_caps_free(c);
+
+    image_page_set_overlay_visible(p, want);
+}
+
 /* Tap (short click) triggers the moon-cycle animation. Registered on the Moon
  * instance only, so no per-callback source test is needed. */
 static void moon_tap_cb(lv_event_t *e)
@@ -236,30 +340,40 @@ static void moon_drag_released_cb(lv_event_t *e)
     image_page_wake(p);
 }
 
-/* Apply the "chip" style to a label: transparent background (no chip) with the
+/* Apply the caption style to a label: transparent background (no chip) with the
  * historic padding so label geometry/stacking math is unchanged.
  * Non-red themes use white text. Under the Red Night theme (gated by
  * theme_is_red_night) the text becomes the theme's red (text_color) so the page
  * emits only red shades or black. image_page_apply_theme() re-runs this on
- * theme change. */
-static void apply_chip_style(lv_obj_t *lbl)
+ * theme change. A rim arclabel (round) takes the colour only: its background is
+ * the band object from ui_arclabel_add_band(), never a style on the arclabel
+ * itself (a bg style on the full-panel arclabel object would tint the whole
+ * disc), and padding on the arclabel would shift the glyph run off its radius.
+ * Exported through nina_image_page_internal.h so the round builder styles the
+ * widgets it creates without knowing the theme. */
+void image_page_caption_style(lv_obj_t *lbl)
 {
     const theme_t *th = current_theme;
     bool red = theme_is_red_night(th);
     lv_color_t txt = red ? lv_color_hex(th->text_color) : lv_color_white();
+    lv_obj_set_style_text_color(lbl, txt, 0);
+#if LV_USE_ARCLABEL
+    /* C1: rim text carries no background and no chip padding. Padding on an
+     * arclabel would also shift the glyph run off its radius. */
+    if (lv_obj_check_type(lbl, &lv_arclabel_class)) return;
+#endif
     lv_obj_set_style_bg_opa(lbl,     LV_OPA_TRANSP,    0);
     lv_obj_set_style_pad_left(lbl,   8,                0);
     lv_obj_set_style_pad_right(lbl,  8,                0);
     lv_obj_set_style_pad_top(lbl,    3,                0);
     lv_obj_set_style_pad_bottom(lbl, 3,                0);
-    lv_obj_set_style_text_color(lbl, txt, 0);
 }
 
 /* ─────────────────── Cloud Cover location marker ───────────────────
  * The Clouds frames are fetched with a bbox centred exactly on
  * weather_lat/weather_lon (clouds_bbox() in clouds_wms.h), and every image on
  * this page is scaled to the panel WIDTH and vertically centred
- * (see center_image_y / swap_borrowed_buf), so the frame centre is ALWAYS the
+ * (see center_image_xy / swap_borrowed_buf), so the frame centre is ALWAYS the
  * screen centre and lv_obj_center() on the page container is the location.
  * Clouds never crops (image_page_config_crop) and has no flip/rotate, so no
  * transform can move it off centre.
@@ -273,7 +387,7 @@ static void apply_chip_style(lv_obj_t *lbl)
 static lv_obj_t *s_clouds_marker;   /* NULL until the Clouds page is created */
 
 /* Colour the ring and the centre dot from the active theme. Red Night must emit
- * only red or black (same rule as apply_chip_style), so both parts take the
+ * only red or black (same rule as image_page_caption_style), so both parts take the
  * theme text colour there; other themes get an accent ring (progress_color)
  * with a white dot, which keeps the marker legible whatever the accent's
  * luminance. The 2 px black outline on both parts carries it over white cloud
@@ -341,7 +455,7 @@ static void hide_moon_corner_labels(image_page_t *p);
  * instance creates these labels, so this is a no-op on the other three. */
 static void update_moon_corner_labels(image_page_t *p)
 {
-    if (!p->lbl_moon_age) return;
+    if (!p->lbl_moon_age && !p->moon_arc_top) return;
     /* The corner labels track overlay visibility. overlay_bar's HIDDEN flag is the
      * single source of truth (set by the initial config check and by
      * image_page_set_overlay_visible). Without this guard the live drag paths
@@ -354,14 +468,49 @@ static void update_moon_corner_labels(image_page_t *p)
     char age[20], next[20], rise[20], set[20];
     moon_overlay_info(age, sizeof(age), next, sizeof(next),
                       rise, sizeof(rise), set, sizeof(set));
-    set_label_if_changed(p->lbl_moon_age,  age);
-    set_label_if_changed(p->lbl_moon_next, next);
-    set_label_if_changed(p->lbl_moon_rise, rise);
-    set_label_if_changed(p->lbl_moon_set,  set);
-    lv_obj_clear_flag(p->lbl_moon_age,  LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(p->lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(p->lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(p->lbl_moon_set,  LV_OBJ_FLAG_HIDDEN);
+#if LV_USE_ARCLABEL
+    /* Round: two rim rows inside the age arc, phase name with age and next
+     * phase on top, rise and set below. lv_arclabel_set_text() re-lays out
+     * every glyph and this runs per drag frame, so write on change only. */
+    if (p->moon_arc_top) {
+        static char top_prev[96], bot_prev[64];
+        char name[24], pct[16], top[96], bot[64];
+        moon_caption(name, sizeof(name), pct, sizeof(pct));
+        snprintf(top, sizeof(top), "%s / %s / %s", name, age, next);
+        snprintf(bot, sizeof(bot), "%s / %s", rise, set);
+        if (strcmp(top, top_prev) != 0) {
+            lv_arclabel_set_text(p->moon_arc_top, top);
+            snprintf(top_prev, sizeof(top_prev), "%s", top);
+        }
+        if (p->moon_arc_bot && strcmp(bot, bot_prev) != 0) {
+            lv_arclabel_set_text(p->moon_arc_bot, bot);
+            snprintf(bot_prev, sizeof(bot_prev), "%s", bot);
+        }
+    }
+#endif
+    if (p->lbl_moon_age) {
+        set_label_if_changed(p->lbl_moon_age,  age);
+        set_label_if_changed(p->lbl_moon_next, next);
+        set_label_if_changed(p->lbl_moon_rise, rise);
+        set_label_if_changed(p->lbl_moon_set,  set);
+    }
+    /* Illumination is a shape on round: the arc replaces the percentage that
+     * lbl_timestamp carries on square. moon_caption() formats the percentage
+     * as "NN%"; atoi stops at the '%'. */
+    if (p->moon_illum_arc) {
+        char name[24], pct[16];
+        moon_caption(name, sizeof(name), pct, sizeof(pct));
+        int v = atoi(pct);
+        if (v < 0) v = 0;
+        if (v > 100) v = 100;
+        lv_arc_set_value(p->moon_illum_arc, v);
+    }
+    if (p->lbl_moon_age) {
+        lv_obj_clear_flag(p->lbl_moon_age,  LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(p->lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(p->lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(p->lbl_moon_set,  LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 /* Hide the four moon corner labels (non-Moon instances and overlay-off state). */
@@ -373,12 +522,101 @@ static void hide_moon_corner_labels(image_page_t *p)
     if (p->lbl_moon_set)  lv_obj_add_flag(p->lbl_moon_set,  LV_OBJ_FLAG_HIDDEN);
 }
 
+/* Paints the round-only Moon shapes; defined below, next to the theme pass, and
+ * called from image_page_create() right after the builder dispatch. */
+static void moon_arc_apply_theme(image_page_t *p);
+
+#if !CONFIG_NINA_FAMILY_ROUND
+/* Square: the disc always fills the canvas with the renderer's own margin. */
+float image_page_moon_ortho(const image_page_t *p)
+{
+    (void)p;
+    return MOON_SPHERE_ORTHO_DEFAULT;
+}
+
+/* Square composition (unchanged pixels): a full-width invisible 68 px bar on the
+ * bottom edge with the region caption flush left and the timestamp flush right,
+ * plus the Moon instance's four corner labels stacked in the top corners, clear
+ * of the inscribed disc. Was the middle of image_page_create(). */
+void image_page_build_overlay_square(image_page_t *p, lv_obj_t *page_container)
+{
+    p->overlay_bar = lv_obj_create(page_container);
+    lv_obj_remove_style_all(p->overlay_bar);
+    lv_obj_set_size(p->overlay_bar, screen_size(), 68);
+    lv_obj_align(p->overlay_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
+    /* No bar background: labels render text directly (image_page_caption_style), so
+     * overlay_bar is just an invisible positioning container for
+     * lbl_region / lbl_timestamp. */
+    lv_obj_set_style_bg_opa(p->overlay_bar, LV_OPA_TRANSP, 0);
+    /* No edge padding: the bottom labels sit flush in the screen corners so they
+     * stay clear of the inscribed moon disc. */
+    lv_obj_set_style_pad_left(p->overlay_bar, 0, 0);
+    lv_obj_set_style_pad_right(p->overlay_bar, 0, 0);
+    lv_obj_clear_flag(p->overlay_bar, LV_OBJ_FLAG_SCROLLABLE);
+    /* lv_obj_create() makes an object CLICKABLE by default and this bar has no
+     * event handler of its own, so a C2 tap landing in its bottom 68 px strip
+     * was swallowed here instead of reaching page_container's overlay_tap_cb
+     * (review_impl_F1.md, "Outside F1's scope" note). Clear it so the tap falls
+     * through, matching the round overlay_bar (round_layer() in
+     * nina_image_page_round.c already clears it for the same reason). */
+    lv_obj_clear_flag(p->overlay_bar, LV_OBJ_FLAG_CLICKABLE);
+
+    p->lbl_region = lv_label_create(p->overlay_bar);
+    lv_obj_set_style_text_font(p->lbl_region, &lv_font_overpass_27, 0);
+    lv_obj_align(p->lbl_region, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    image_page_caption_style(p->lbl_region);   /* white text, transparent bg */
+    lv_label_set_text(p->lbl_region, "");
+
+    p->lbl_timestamp = lv_label_create(p->overlay_bar);
+    lv_obj_set_style_text_font(p->lbl_timestamp, &lv_font_overpass_27, 0);
+    lv_obj_align(p->lbl_timestamp, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+    image_page_caption_style(p->lbl_timestamp);
+    lv_label_set_text(p->lbl_timestamp, "");
+
+    /* Moon corner labels: children of page_container (NOT overlay_bar) so they
+     * sit at the TOP corners above the image. Created after overlay_bar so their
+     * z-order keeps them on top. Only the Moon instance has them; the other five
+     * leave them NULL and every access is guarded. Start hidden. */
+    if (p->src == IMG_SRC_MOON) {
+        p->lbl_moon_age = lv_label_create(page_container);
+        lv_obj_set_style_text_font(p->lbl_moon_age, &lv_font_overpass_27, 0);
+        image_page_caption_style(p->lbl_moon_age);
+        lv_obj_align(p->lbl_moon_age, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_label_set_text(p->lbl_moon_age, "");
+        lv_obj_add_flag(p->lbl_moon_age, LV_OBJ_FLAG_HIDDEN);
+
+        p->lbl_moon_next = lv_label_create(page_container);
+        lv_obj_set_style_text_font(p->lbl_moon_next, &lv_font_overpass_27, 0);
+        image_page_caption_style(p->lbl_moon_next);
+        /* Stack flush below lbl_moon_age. At 27px each label is line_height(39)+pad(6)
+         * = 45px tall, so the second row sits at y = 45 (rows touch, no gap). */
+        lv_obj_align(p->lbl_moon_next, LV_ALIGN_TOP_LEFT, 0, 45);
+        lv_label_set_text(p->lbl_moon_next, "");
+        lv_obj_add_flag(p->lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
+
+        p->lbl_moon_rise = lv_label_create(page_container);
+        lv_obj_set_style_text_font(p->lbl_moon_rise, &lv_font_overpass_27, 0);
+        image_page_caption_style(p->lbl_moon_rise);
+        lv_obj_align(p->lbl_moon_rise, LV_ALIGN_TOP_RIGHT, 0, 0);
+        lv_label_set_text(p->lbl_moon_rise, "");
+        lv_obj_add_flag(p->lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
+
+        p->lbl_moon_set = lv_label_create(page_container);
+        lv_obj_set_style_text_font(p->lbl_moon_set, &lv_font_overpass_27, 0);
+        image_page_caption_style(p->lbl_moon_set);
+        lv_obj_align(p->lbl_moon_set, LV_ALIGN_TOP_RIGHT, 0, 45);
+        lv_label_set_text(p->lbl_moon_set, "");
+        lv_obj_add_flag(p->lbl_moon_set, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
+
 lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
 {
     lv_obj_t *page_container = lv_obj_create(parent);
     p->root = page_container;
     lv_obj_remove_style_all(page_container);
-    lv_obj_set_size(page_container, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(page_container, screen_size(), screen_size());
     /* Negate the parent main_cont's OUTER_PADDING so the image fills edge-to-edge
      * (matches nina_spotify spotify_page_create). Without this the page renders
      * inset by OUTER_PADDING, leaving a black band on the top and left. */
@@ -388,6 +626,14 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
     lv_obj_clear_flag(page_container, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_add_flag(page_container, LV_OBJ_FLAG_CLICKABLE);
+
+    /* Guideline C2: the text toggle is on every source. SHORT_CLICKED, not
+     * CLICKED, for the same reason the Moon tap uses it: CLICKED also fires at
+     * the end of the horizontal swipe that changes pages. The Moon instance
+     * registers moon_tap_cb on the same event below; LVGL runs both, in
+     * registration order, so a tap on the Moon page still triggers its
+     * animation as well as the toggle (addendum section 2 requires that). */
+    lv_obj_add_event_cb(page_container, overlay_tap_cb, LV_EVENT_SHORT_CLICKED, p);
 
     /* Tap + single-finger drag-to-rotate belong to the Moon instance only, so
      * the callbacks are registered ONLY there (the other three pages never see
@@ -447,67 +693,21 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
     p->displayed_stamp_ms = 0;
     p->crossfade_active   = false;
 
-    p->overlay_bar = lv_obj_create(page_container);
-    lv_obj_remove_style_all(p->overlay_bar);
-    lv_obj_set_size(p->overlay_bar, SCREEN_SIZE, 68);
-    lv_obj_align(p->overlay_bar, LV_ALIGN_BOTTOM_MID, 0, 0);
-    /* No bar background: labels render text directly (apply_chip_style), so
-     * overlay_bar is just an invisible positioning container for
-     * lbl_region / lbl_timestamp. */
-    lv_obj_set_style_bg_opa(p->overlay_bar, LV_OPA_TRANSP, 0);
-    /* No edge padding — the bottom labels sit flush in the screen corners so they
-     * stay clear of the inscribed moon disc. */
-    lv_obj_set_style_pad_left(p->overlay_bar, 0, 0);
-    lv_obj_set_style_pad_right(p->overlay_bar, 0, 0);
-    lv_obj_clear_flag(p->overlay_bar, LV_OBJ_FLAG_SCROLLABLE);
-
-    p->lbl_region = lv_label_create(p->overlay_bar);
-    lv_obj_set_style_text_font(p->lbl_region, &lv_font_overpass_27, 0);
-    lv_obj_align(p->lbl_region, LV_ALIGN_BOTTOM_LEFT, 0, 0);
-    apply_chip_style(p->lbl_region);   /* white text, transparent bg */
-    lv_label_set_text(p->lbl_region, "");
-
-    p->lbl_timestamp = lv_label_create(p->overlay_bar);
-    lv_obj_set_style_text_font(p->lbl_timestamp, &lv_font_overpass_27, 0);
-    lv_obj_align(p->lbl_timestamp, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
-    apply_chip_style(p->lbl_timestamp);
-    lv_label_set_text(p->lbl_timestamp, "");
-
-    /* Moon corner labels: children of page_container (NOT overlay_bar) so they
-     * sit at the TOP corners above the image. Created after overlay_bar so their
-     * z-order keeps them on top. Only the Moon instance has them; the other three
-     * leave them NULL and every access is guarded. Start hidden. */
-    if (p->src == IMG_SRC_MOON) {
-        p->lbl_moon_age = lv_label_create(page_container);
-        lv_obj_set_style_text_font(p->lbl_moon_age, &lv_font_overpass_27, 0);
-        apply_chip_style(p->lbl_moon_age);
-        lv_obj_align(p->lbl_moon_age, LV_ALIGN_TOP_LEFT, 0, 0);
-        lv_label_set_text(p->lbl_moon_age, "");
-        lv_obj_add_flag(p->lbl_moon_age, LV_OBJ_FLAG_HIDDEN);
-
-        p->lbl_moon_next = lv_label_create(page_container);
-        lv_obj_set_style_text_font(p->lbl_moon_next, &lv_font_overpass_27, 0);
-        apply_chip_style(p->lbl_moon_next);
-        /* Stack flush below lbl_moon_age. At 27px each label is line_height(39)+pad(6)
-         * = 45px tall, so the second row sits at y = 45 (rows touch, no gap). */
-        lv_obj_align(p->lbl_moon_next, LV_ALIGN_TOP_LEFT, 0, 45);
-        lv_label_set_text(p->lbl_moon_next, "");
-        lv_obj_add_flag(p->lbl_moon_next, LV_OBJ_FLAG_HIDDEN);
-
-        p->lbl_moon_rise = lv_label_create(page_container);
-        lv_obj_set_style_text_font(p->lbl_moon_rise, &lv_font_overpass_27, 0);
-        apply_chip_style(p->lbl_moon_rise);
-        lv_obj_align(p->lbl_moon_rise, LV_ALIGN_TOP_RIGHT, 0, 0);
-        lv_label_set_text(p->lbl_moon_rise, "");
-        lv_obj_add_flag(p->lbl_moon_rise, LV_OBJ_FLAG_HIDDEN);
-
-        p->lbl_moon_set = lv_label_create(page_container);
-        lv_obj_set_style_text_font(p->lbl_moon_set, &lv_font_overpass_27, 0);
-        apply_chip_style(p->lbl_moon_set);
-        lv_obj_align(p->lbl_moon_set, LV_ALIGN_TOP_RIGHT, 0, 45);
-        lv_label_set_text(p->lbl_moon_set, "");
-        lv_obj_add_flag(p->lbl_moon_set, LV_OBJ_FLAG_HIDDEN);
-    }
+    /* Caption and Moon labels: one builder per shape family. The square builder
+     * is the block that used to sit here; the round one lives in
+     * nina_image_page_round.c and is compiled only on the round family. The
+     * shadow is cleared first: fresh widgets carry no text. */
+    p->caption_shadow[0][0] = '\0';
+    p->caption_shadow[1][0] = '\0';
+#if CONFIG_NINA_FAMILY_ROUND
+    image_page_build_overlay_round(p, page_container);
+#else
+    image_page_build_overlay_square(p, page_container);
+#endif
+    /* Spec B.2: a builder never sets a colour. Paint the round-only shapes from
+     * the theme here, once, on the same pass image_page_apply_theme() re-runs.
+     * No-op when the builder left the handles NULL. */
+    moon_arc_apply_theme(p);
 
     /* Animated pages: a pulsing placeholder shown from page entry until the
      * loop holds ring_show_gate() frames. Without it the first seconds after
@@ -531,11 +731,11 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
         marker_set_visible(app_config_get()->clouds_show_location);
     }
 
-    if (!image_page_config_overlay(app_config_get(), p->src)) {
-        lv_obj_add_flag(p->overlay_bar, LV_OBJ_FLAG_HIDDEN);
-        /* Corner labels also start hidden when the overlay is off. */
-        hide_moon_corner_labels(p);
-    }
+    /* One path for the stored flag: overlay_bar, the four Moon labels and the
+     * lunar age arc all follow it, exactly as the C2 tap makes them follow it
+     * later. Calling this unconditionally also gives the visible case its
+     * update_moon_corner_labels() pass. */
+    image_page_set_overlay_visible(p, image_page_config_overlay(app_config_get(), p->src));
     return page_container;
 }
 
@@ -567,8 +767,8 @@ void image_page_render_frame(image_page_t *p)
         char err_copy[48];
         strlcpy(err_copy, p->frame.error_msg, sizeof(err_copy));
         frame_unlock(p);
-        lv_label_set_text(p->lbl_region, err_copy);
-        lv_label_set_text(p->lbl_timestamp, "");
+        set_caption_if_changed(p, IMG_CAP_REGION, err_copy);
+        set_caption_if_changed(p, IMG_CAP_STAMP,  "");
         hide_moon_corner_labels(p);
         /* Release any manual-fetch wait overlay so it cannot get stuck on the
          * error path (mirrors the other early-exit overlay-hide sites). */
@@ -696,7 +896,7 @@ void image_page_render_frame(image_page_t *p)
      * the display lock and on up to 1024x1024 pixels, plus — every bit as
      * expensive — an lv_image_set_scale() != 256 that made LVGL software-
      * resample the whole 720x720 screen on EVERY redraw in full-refresh mode.
-     * The destination is exactly SCREEN_SIZE wide, so the image is a blit now.
+     * The destination is exactly screen_size() wide, so the image is a blit now.
      *
      * image_fit_pick() works in LOGICAL (post-rotation) space and hands back the
      * n/16 scale plus the symmetric trim that keeps the output inside the panel;
@@ -704,15 +904,20 @@ void image_page_render_frame(image_page_t *p)
      * rectangle, which is then offset by the config crop origin (ox, oy). */
     uint32_t lw = (orient & 1) ? h : w;
     uint32_t lh = (orient & 1) ? w : h;
+    /* The hardware fit targets the DISPLAYED width, which is the panel width
+     * for every source except a page whose builder shrank the picture (the
+     * round Moon disc). Reading it once keeps the five uses below consistent;
+     * on square it is screen_size() and every one of them is unchanged. */
+    const int fit_px = image_page_fit_px(p);
     image_fit_t fit;
     uint32_t bx = 0, by = 0, bw = 0, bh = 0;
     uint8_t  *dst = NULL;
     size_t    dst_size = 0;
     esp_err_t err = ESP_ERR_INVALID_SIZE;
-    if (image_fit_pick(lw, lh, SCREEN_SIZE, &fit) &&
+    if (image_fit_pick(lw, lh, fit_px, &fit) &&
         image_fit_logical_to_source(&fit, w, h, orient, &bx, &by, &bw, &bh)) {
         /* 128 B aligned address AND size: the PPA rejects anything else. */
-        dst_size = ((size_t)SCREEN_SIZE * fit.out_h * 2 + 127) & ~(size_t)127;
+        dst_size = ((size_t)fit_px * fit.out_h * 2 + 127) & ~(size_t)127;
         dst = heap_caps_aligned_alloc(128, dst_size, MALLOC_CAP_SPIRAM);
         if (dst) {
             ppa_srm_job_t job = {
@@ -728,13 +933,13 @@ void image_page_render_frame(image_page_t *p)
                 .vflip         = do_vflip != 0,
                 .dst           = dst,
                 .dst_buf_size  = dst_size,
-                .dst_w         = SCREEN_SIZE,
+                .dst_w         = fit_px,
                 .dst_h         = fit.out_h,
                 .dst_x         = fit.dst_x,
                 .dst_y         = 0,
                 .scale_n16     = fit.n16,
                 /* Only a source too wide to fill the panel leaves bands to clear. */
-                .clear_dst     = (fit.out_w < SCREEN_SIZE),
+                .clear_dst     = (fit.out_w < fit_px),
             };
             err = ppa_srm_rgb565(&job);
         } else {
@@ -795,10 +1000,10 @@ void image_page_render_frame(image_page_t *p)
         show_buf   = fb;
         show_w     = w;
         show_h     = h;
-        show_scale = (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w);
+        show_scale = (uint16_t)(((uint32_t)fit_px * 256 + w / 2) / w);
     } else {
         show_buf = dst;
-        show_w   = SCREEN_SIZE;
+        show_w   = (uint16_t)fit_px;
         show_h   = (uint16_t)fit.out_h;
     }
 
@@ -823,12 +1028,12 @@ void image_page_render_frame(image_page_t *p)
 
     /* On the PPA path the buffer is already panel width and LVGL only blits it
      * (show_scale 256). The image keeps its create-time x = 0; only y moves, and
-     * only when the height changes (center_image_y), so the per-update
+     * only when the height changes (center_image_xy), so the per-update
      * lv_obj_set_pos() that once flipped the image under 90/270 display rotation
      * is still not happening here. */
     lv_image_set_src(p->img_back, back_dsc);
     lv_image_set_scale(p->img_back, show_scale);
-    center_image_y(p->img_back, (int)show_h, show_scale);
+    center_image_xy(p, p->img_back, (int)show_h, show_scale);
     lv_obj_set_style_opa(p->img_back, LV_OPA_TRANSP, 0);
     lv_obj_clear_flag(p->img_back, LV_OBJ_FLAG_HIDDEN);
 
@@ -866,38 +1071,48 @@ void image_page_render_frame(image_page_t *p)
     } else {
         p->crossfade_active = true;
 
-        lv_anim_t a_in;
-        lv_anim_init(&a_in);
-        lv_anim_set_var(&a_in, p->img_back);
-        lv_anim_set_values(&a_in, 0, 255);
-        lv_anim_set_duration(&a_in, 500);
-        lv_anim_set_path_cb(&a_in, lv_anim_path_ease_in_out);
-        lv_anim_set_exec_cb(&a_in, anim_opa_cb);
-        lv_anim_set_user_data(&a_in, p);
-        lv_anim_set_completed_cb(&a_in, crossfade_done_cb);
-        lv_anim_start(&a_in);
+        /* Only ONE image animates; the other is held fully opaque underneath so
+         * the composite is a true lerp(old, new). Fading both at once darkens
+         * the midpoint (top*0.5 over bottom*0.5 over the black container is
+         * about 75% brightness) and reads as a pulse on every update - the same
+         * dip the Moon source works around by swapping instantly, above.
+         *
+         * Which object is on top alternates with front_is_a (child 0 = image A,
+         * child 1 = image B), and the child order must NOT be reordered here:
+         * crossfade_done_cb and release_lvgl index children 0 and 1. So pick the
+         * fade direction from the existing z-order instead:
+         *   front_is_a  -> img_back is child 1, on top: fade the NEW image IN.
+         *   !front_is_a -> img_front is child 1, on top: fade the OLD image OUT.
+         * Either way crossfade_done_cb retires img_front when the anim ends. */
+        bool back_on_top = p->front_is_a;
 
-        lv_anim_t a_out;
-        lv_anim_init(&a_out);
-        lv_anim_set_var(&a_out, p->img_front);
-        lv_anim_set_values(&a_out, 255, 0);
-        lv_anim_set_duration(&a_out, 500);
-        lv_anim_set_path_cb(&a_out, lv_anim_path_ease_in_out);
-        lv_anim_set_exec_cb(&a_out, anim_opa_cb);
-        lv_anim_start(&a_out);
+        lv_obj_set_style_opa(p->img_front, LV_OPA_COVER, 0);
+        lv_obj_set_style_opa(p->img_back,
+                             back_on_top ? LV_OPA_TRANSP : LV_OPA_COVER, 0);
+
+        lv_anim_t a;
+        lv_anim_init(&a);
+        lv_anim_set_var(&a, back_on_top ? p->img_back : p->img_front);
+        lv_anim_set_values(&a, back_on_top ? 0 : 255, back_on_top ? 255 : 0);
+        lv_anim_set_duration(&a, 1000);
+        lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+        lv_anim_set_exec_cb(&a, anim_opa_cb);
+        lv_anim_set_user_data(&a, p);
+        lv_anim_set_completed_cb(&a, crossfade_done_cb);
+        lv_anim_start(&a);
     }
 
     if (p->src == IMG_SRC_MOON) {
         char name[24], pct[16];
         moon_caption(name, sizeof(name), pct, sizeof(pct));
-        lv_label_set_text(p->lbl_region, name);
-        lv_label_set_text(p->lbl_timestamp, pct);
+        set_caption_if_changed(p, IMG_CAP_REGION, name);
+        set_caption_if_changed(p, IMG_CAP_STAMP,  pct);
         update_moon_corner_labels(p);
     } else {                                         /* GOES / Solar / Custom */
-        lv_label_set_text(p->lbl_region, label_copy);
+        set_caption_if_changed(p, IMG_CAP_REGION, label_copy);
         time_t now; struct tm ti; time(&now); localtime_r(&now, &ti);
         char ts[32]; strftime(ts, sizeof(ts), "Updated %H:%M", &ti);
-        lv_label_set_text(p->lbl_timestamp, ts);
+        set_caption_if_changed(p, IMG_CAP_STAMP, ts);
         hide_moon_corner_labels(p);
     }
 
@@ -966,10 +1181,10 @@ void image_page_show_scaled(image_page_t *p, const uint16_t *buf, int w, int h)
 
     /* Software-scale the small copy to fill the panel width (256 = 1.0x), the same
      * proven-clean path image_page_render_frame() uses. */
-    uint16_t scale = (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w);
+    uint16_t scale = (uint16_t)(((uint32_t)image_page_fit_px(p) * 256 + w / 2) / w);
     lv_image_set_src(p->img_back, back_dsc);
     lv_image_set_scale(p->img_back, scale);
-    center_image_y(p->img_back, h, scale);   /* square moon render: resolves to 0 */
+    center_image_xy(p, p->img_back, h, scale);   /* square moon render: resolves to 0 */
     lv_obj_set_style_opa(p->img_back, LV_OPA_COVER, 0);
     lv_obj_clear_flag(p->img_back, LV_OBJ_FLAG_HIDDEN);
 
@@ -992,8 +1207,8 @@ void image_page_show_scaled(image_page_t *p, const uint16_t *buf, int w, int h)
     p->displayed_stamp_ms = esp_timer_get_time() / 1000;
     char name[24], pct[16];
     moon_caption(name, sizeof(name), pct, sizeof(pct));
-    set_label_if_changed(p->lbl_region, name);
-    set_label_if_changed(p->lbl_timestamp, pct);
+    set_caption_if_changed(p, IMG_CAP_REGION, name);
+    set_caption_if_changed(p, IMG_CAP_STAMP,  pct);
     update_moon_corner_labels(p);
 
     nina_wait_overlay_hide();
@@ -1052,11 +1267,11 @@ static void swap_borrowed_buf(image_page_t *p, const uint16_t *buf, int w, int h
      * 720-wide dissolve scratch. The general expression stays for the ring's
      * no-scratch fallback, which borrows a slot at its NATIVE size (a 600 px
      * radar tile) and needs LVGL to scale it as it always did. */
-    uint16_t scale = (w > 0) ? (uint16_t)(((uint32_t)SCREEN_SIZE * 256 + w / 2) / w) : 256;
+    uint16_t scale = (w > 0) ? (uint16_t)(((uint32_t)image_page_fit_px(p) * 256 + w / 2) / w) : 256;
     lv_image_set_src(p->img_back, back_dsc);
     lv_image_set_scale(p->img_back, scale);
-    /* Centres the wide radar tile; a full-panel 720 moon-drag buffer gets 0. */
-    center_image_y(p->img_back, h, scale);
+    /* Centres the wide radar tile; a full-panel moon-drag buffer gets 0. */
+    center_image_xy(p, p->img_back, h, scale);
     lv_obj_set_style_opa(p->img_back, LV_OPA_COVER, 0);
     lv_obj_clear_flag(p->img_back, LV_OBJ_FLAG_HIDDEN);
 
@@ -1089,8 +1304,8 @@ void image_page_show_borrowed(image_page_t *p, const uint16_t *buf, int w, int h
     /* Keep the moon caption live during the drag. */
     char name[24], pct[16];
     moon_caption(name, sizeof(name), pct, sizeof(pct));
-    set_label_if_changed(p->lbl_region, name);
-    set_label_if_changed(p->lbl_timestamp, pct);
+    set_caption_if_changed(p, IMG_CAP_REGION, name);
+    set_caption_if_changed(p, IMG_CAP_STAMP,  pct);
     update_moon_corner_labels(p);
 
     nina_wait_overlay_hide();
@@ -1161,6 +1376,21 @@ void image_page_set_overlay_visible(image_page_t *p, bool visible)
     if (visible) lv_obj_clear_flag(p->overlay_bar, LV_OBJ_FLAG_HIDDEN);
     else         lv_obj_add_flag(p->overlay_bar, LV_OBJ_FLAG_HIDDEN);
 
+    /* Round Moon: the disc size follows the text (it shrinks to clear the rim
+     * rows while they show), so a toggle is a re-render. The poller reads the
+     * flag and image_page_moon_ortho() at its next wake. */
+    if (p->moon_arc_top && atomic_exchange(&p->moon_overlay_on, visible) != visible &&
+        atomic_load(&p->active)) {
+        image_page_wake(p);
+    }
+
+    /* C2: the tap hides the captions, the four Moon labels and the lunar age
+     * arc together. NULL on square and on every non-Moon source. */
+    if (p->moon_illum_arc) {
+        if (visible) lv_obj_clear_flag(p->moon_illum_arc, LV_OBJ_FLAG_HIDDEN);
+        else         lv_obj_add_flag(p->moon_illum_arc, LV_OBJ_FLAG_HIDDEN);
+    }
+
     /* Corner labels follow the overlay visibility, but only ever exist for Moon.
      * When making visible, restore them only on the Moon instance; when hiding,
      * always hide unconditionally. */
@@ -1171,19 +1401,40 @@ void image_page_set_overlay_visible(image_page_t *p, bool visible)
     }
 }
 
+/* Paint the round-only Moon shapes from the current theme. No-op when the
+ * builder left the handles NULL (square, and the five non-Moon sources).
+ * Same red rule as image_page_caption_style(): under Red Night the page emits
+ * the theme red and black only, so the cream indicator and the grey tick both
+ * become the theme text colour. */
+static void moon_arc_apply_theme(image_page_t *p)
+{
+    if (!p->moon_illum_arc) return;
+    const theme_t *th = current_theme;
+    bool red = theme_is_red_night(th);
+    lv_color_t lit   = red ? lv_color_hex(th->text_color) : lv_color_hex(0xB9B2A6);
+    lv_color_t track = red ? lv_color_black()             : lv_color_hex(0x161616);
+    lv_obj_set_style_arc_color(p->moon_illum_arc, track, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(p->moon_illum_arc, lit,   LV_PART_INDICATOR);
+    if (p->moon_illum_tick) {
+        lv_obj_set_style_bg_color(p->moon_illum_tick,
+                                  red ? lv_color_hex(th->text_color) : lv_color_hex(0x6B7280), 0);
+    }
+}
+
 void image_page_apply_theme(image_page_t *p)
 {
     /* Re-apply the label style to every existing caption/corner label so a theme
-     * switch recolours them live. apply_chip_style() reads current_theme and,
+     * switch recolours them live. image_page_caption_style() reads current_theme and,
      * under Red Night, emits red text; non-red themes use white text. Each label
      * is NULL-guarded so this is safe before create() or after release_lvgl(),
      * and on the three instances that have no corner labels. */
-    if (p->lbl_region)    apply_chip_style(p->lbl_region);
-    if (p->lbl_timestamp) apply_chip_style(p->lbl_timestamp);
-    if (p->lbl_moon_age)  apply_chip_style(p->lbl_moon_age);
-    if (p->lbl_moon_next) apply_chip_style(p->lbl_moon_next);
-    if (p->lbl_moon_rise) apply_chip_style(p->lbl_moon_rise);
-    if (p->lbl_moon_set)  apply_chip_style(p->lbl_moon_set);
+    if (p->lbl_region)    image_page_caption_style(p->lbl_region);
+    if (p->lbl_timestamp) image_page_caption_style(p->lbl_timestamp);
+    if (p->lbl_moon_age)  image_page_caption_style(p->lbl_moon_age);
+    if (p->lbl_moon_next) image_page_caption_style(p->lbl_moon_next);
+    if (p->lbl_moon_rise) image_page_caption_style(p->lbl_moon_rise);
+    if (p->lbl_moon_set)  image_page_caption_style(p->lbl_moon_set);
+    moon_arc_apply_theme(p);
 
     /* Cloud Cover location marker follows the theme accent / Red Night rule.
      * No-op on the other five instances (s_clouds_marker is NULL there). */
@@ -1428,6 +1679,22 @@ bool image_page_config_overlay(const app_config_t *c, image_src_t src)
     }
 }
 
+/* Write the same field image_page_config_overlay() reads. Used by the tap
+ * handler only, so it stays file-local: the web save path edits the fields
+ * directly on its own snapshot. */
+static void image_page_config_set_overlay(app_config_t *c, image_src_t src, bool v)
+{
+    switch (src) {
+        case IMG_SRC_GOES:   c->goes_show_overlay   = v; break;
+        case IMG_SRC_MOON:   c->moon_show_overlay   = v; break;
+        case IMG_SRC_SOLAR:  c->solar_show_overlay  = v; break;
+        case IMG_SRC_CUSTOM: c->custom_show_overlay = v; break;
+        case IMG_SRC_RADAR:  c->radar_show_overlay  = v; break;
+        case IMG_SRC_CLOUDS: c->clouds_show_overlay = v; break;
+        default: break;
+    }
+}
+
 bool image_page_config_crop(const app_config_t *c, image_src_t src)
 {
     switch (src) {
@@ -1546,7 +1813,7 @@ void image_page_label(image_page_t *p, char *out, size_t sz)
         case IMG_SRC_GOES:   if (c->goes_region[0]) strlcpy(out, goes_region_name(c->goes_region), sz); break;
         case IMG_SRC_MOON:   strlcpy(out, "Moon", sz); break;
         case IMG_SRC_SOLAR:  strlcpy(out, solar_band_label(c->solar_band), sz); break;
-        case IMG_SRC_CUSTOM: strlcpy(out, "Custom", sz); break;
+        case IMG_SRC_CUSTOM: break;   /* no source name: the stamp alone is the caption */
         case IMG_SRC_RADAR: {
             char token[16];
             image_page_radar_token(c, token, sizeof(token));
@@ -1882,7 +2149,7 @@ uint32_t image_page_ring_judge_head(image_page_t *p,
 
 /* 1,036,800 B — a 128 B multiple, which is what the PPA demands of an output
  * buffer's SIZE as well as its address. */
-#define RING_SCRATCH_BYTES ((size_t)SCREEN_SIZE * SCREEN_SIZE * 2)
+#define RING_SCRATCH_BYTES ((size_t)screen_size() * screen_size() * 2)
 #define RING_FADE_STEP_MS  33          /* ~30 blends/s while a dissolve runs */
 
 /* Stop a running dissolve without committing it. Display lock held. */
@@ -1956,7 +2223,7 @@ static int ring_fit_into(image_ring_t *r, const ring_slot_t *s)
 {
     image_fit_t fit;
     uint32_t bx = 0, by = 0, bw = 0, bh = 0;
-    if (!image_fit_pick(s->w, s->h, SCREEN_SIZE, &fit) ||
+    if (!image_fit_pick(s->w, s->h, screen_size(), &fit) ||
         !image_fit_logical_to_source(&fit, s->w, s->h, 0, &bx, &by, &bw, &bh)) {
         return 0;
     }
@@ -1973,12 +2240,12 @@ static int ring_fit_into(image_ring_t *r, const ring_slot_t *s)
         .vflip         = false,
         .dst           = r->nxt,
         .dst_buf_size  = RING_SCRATCH_BYTES,
-        .dst_w         = SCREEN_SIZE,
+        .dst_w         = screen_size(),
         .dst_h         = fit.out_h,
         .dst_x         = fit.dst_x,
         .dst_y         = 0,
         .scale_n16     = fit.n16,
-        .clear_dst     = (fit.out_w < SCREEN_SIZE),
+        .clear_dst     = (fit.out_w < screen_size()),
     };
     return (ppa_srm_rgb565(&job) == ESP_OK) ? (int)fit.out_h : 0;
 }
@@ -1990,7 +2257,7 @@ static int ring_fit_into(image_ring_t *r, const ring_slot_t *s)
  * dissolving from a picture that is not the one on screen. Display lock held. */
 static bool ring_commit(image_page_t *p, image_ring_t *r, const uint8_t *fg, int h)
 {
-    if (ppa_blend_rgb565(r->cur, fg, r->mix, SCREEN_SIZE, (uint32_t)h, 255) != ESP_OK) {
+    if (ppa_blend_rgb565(r->cur, fg, r->mix, screen_size(), (uint32_t)h, 255) != ESP_OK) {
         r->cur_h = 0;
         return false;
     }
@@ -1998,7 +2265,7 @@ static bool ring_commit(image_page_t *p, image_ring_t *r, const uint8_t *fg, int
     r->cur = r->mix;
     r->mix = t;
     r->cur_h = (uint16_t)h;
-    swap_borrowed_buf(p, (const uint16_t *)r->cur, SCREEN_SIZE, h);
+    swap_borrowed_buf(p, (const uint16_t *)r->cur, screen_size(), h);
     return true;
 }
 
@@ -2009,7 +2276,7 @@ static bool ring_fade_blend(image_ring_t *r, int el)
     uint32_t a = (el <= 0) ? 0u : ((uint32_t)el * 255u) / RADAR_PLAY_FADE_MS;
     if (a > 255u) a = 255u;
     return ppa_blend_rgb565(r->cur, r->fade_fg, r->mix,
-                            SCREEN_SIZE, r->fade_h, (uint8_t)a) == ESP_OK;
+                            screen_size(), r->fade_h, (uint8_t)a) == ESP_OK;
 }
 
 /* End a running dissolve NOW, at full alpha: the incoming frame lands in `cur`
@@ -2064,7 +2331,7 @@ static bool ring_fade_start(image_page_t *p, image_ring_t *r, const uint8_t *fg,
         ring_fade_stop(r);
         return false;
     }
-    swap_borrowed_buf(p, (const uint16_t *)r->mix, SCREEN_SIZE, h);
+    swap_borrowed_buf(p, (const uint16_t *)r->mix, screen_size(), h);
     r->fade_timer = lv_timer_create(ring_fade_cb, RING_FADE_STEP_MS, p);
     if (!r->fade_timer) {
         ring_fade_finish(p, r);            /* no timer: land the frame now */
@@ -2089,7 +2356,7 @@ static void ring_play(image_page_t *p, image_ring_t *r, const ring_slot_t *s, bo
      * one SRM pass into `nxt`. */
     const uint8_t *fg = s->buf;
     int fg_h = (int)s->h;
-    if (s->w != SCREEN_SIZE || s->h > SCREEN_SIZE) {
+    if (s->w != screen_size() || s->h > screen_size()) {
         fg_h = ring_fit_into(r, s);
         if (fg_h <= 0) {
             swap_borrowed_buf(p, (const uint16_t *)s->buf, (int)s->w, (int)s->h);
@@ -2152,26 +2419,27 @@ static void ring_show_idx(image_page_t *p, int idx, bool fade)
 
     char label[48];
     image_page_label(p, label, sizeof(label));
-    set_label_if_changed(p->lbl_region, label);
+    set_caption_if_changed(p, IMG_CAP_REGION, label);
 
-    /* A stamped frame shows its own time (local clock); the newest carries the
-     * "Latest" prefix. Unstamped rings (radar style 0, and a styles-1/2 site
-     * with no advertised time list): the newest frame is stamped with the wall
-     * clock and the history frames show their position in the loop instead of a
-     * time we would be inventing. */
+    /* A stamped frame shows its own time (local clock), the newest one too:
+     * the "Latest" word was dropped at the user's request, the newest frame is
+     * the one that holds. Unstamped rings (radar style 0, and a styles-1/2
+     * site with no advertised time list): the newest frame is stamped with the
+     * wall clock and the history frames show their position in the loop
+     * instead of a time we would be inventing. */
     char ts[32];
     struct tm ti;
     if (s->stamp != 0) {
         time_t t = (time_t)s->stamp;
         localtime_r(&t, &ti);
-        strftime(ts, sizeof(ts), idx == 0 ? "Latest %H:%M" : "%H:%M", &ti);
+        strftime(ts, sizeof(ts), "%H:%M", &ti);
     } else if (idx == 0) {
         time_t now; time(&now); localtime_r(&now, &ti);
-        strftime(ts, sizeof(ts), "Latest %H:%M", &ti);
+        strftime(ts, sizeof(ts), "%H:%M", &ti);
     } else {
         snprintf(ts, sizeof(ts), "Loop %d/%d", count - idx, count);
     }
-    set_label_if_changed(p->lbl_timestamp, ts);
+    set_caption_if_changed(p, IMG_CAP_STAMP, ts);
 }
 
 /* True if slot @p i holds pixels baked under the settings in force now. Display
@@ -2471,7 +2739,8 @@ void image_page_ring_reset_if_requested(image_page_t *p)
  * are two modes: 0 keeps the whole published picture, and ANY non-zero value
  * drops the NOAA header/legend rows and crops what is left to a centred square.
  * The render path scales to the panel WIDTH and centres vertically, so a square
- * frame lands on exactly 720x720 and center_image_y() resolves to 0 — the bars
+ * frame lands on a square that fills the panel and center_image_xy() resolves
+ * to 0, so the bars
  * go away without moving the image. Non-zero rather than == 1 is deliberate: it
  * is where a device still holding the retired mode 2 gets resolved. The origin
  * is NOT (x,0), which is why the copy below indexes rows from oy, not 0. */
@@ -3087,6 +3356,7 @@ static bool moon_params_changed(const app_config_t *prev, const app_config_t *cu
            cur->moon_spin_mode != prev->moon_spin_mode ||
            cur->moon_spin_return_s != prev->moon_spin_return_s ||
            cur->moon_drag_light_mode != prev->moon_drag_light_mode ||
+           cur->moon_round_size_pct != prev->moon_round_size_pct ||
            cur->moon_lat != prev->moon_lat ||
            cur->moon_lon != prev->moon_lon;
 }

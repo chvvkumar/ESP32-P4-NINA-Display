@@ -43,6 +43,22 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 2.12.3
+  espressif/esp_lcd_jd9365:
+    component_hash: a191822f1d90de977e15f2d6f58783b288b782f82a980c4d6ea4c1fd75aba6f2
+    dependencies:
+    - name: espressif/cmake_utilities
+      registry_url: https://components.espressif.com
+      require: private
+      version: 0.*
+    - name: idf
+      require: private
+      version: '>=5.3'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32p4
+    version: 1.0.4
   espressif/esp_lcd_touch:
     component_hash: 3f85a7d95af876f1a6ecca8eb90a81614890d0f03a038390804e5a77e2caf862
     dependencies:
@@ -156,28 +172,6 @@ dependencies:
       registry_url: https://components.espressif.com/
       type: service
     version: 9.5.0
-  waveshare/esp32_p4_wifi6_touch_lcd_4b:
-    dependencies:
-    - name: espressif/esp_codec_dev
-      public: true
-      version: 1.2.*
-    - name: espressif/esp_lcd_touch_gt911
-      version: ^1
-    - name: espressif/esp_lvgl_port
-      public: true
-      version: ^2
-    - name: idf
-      version: '>=5.4'
-    - name: lvgl/lvgl
-      version: '>=8,<10'
-    - name: waveshare/esp_lcd_st7703
-      version: '*'
-    source:
-      path: C:\Users\Kumar\git\ESP32-P4-NINA-Display\components\esp32_p4_wifi6_touch_lcd_4b
-      type: local
-    targets:
-    - esp32p4
-    version: 1.0.1
   waveshare/esp_lcd_st7703:
     component_hash: d82de85750df3c6c9bfae4c49fdf8cc443e2387cb19507081968f71c11976378
     dependencies:
@@ -197,6 +191,7 @@ dependencies:
 direct_dependencies:
 - espressif/esp_codec_dev
 - espressif/esp_hosted
+- espressif/esp_lcd_jd9365
 - espressif/esp_lcd_touch_gt911
 - espressif/esp_lvgl_port
 - espressif/esp_websocket_client
@@ -204,8 +199,7 @@ direct_dependencies:
 - idf
 - joltwallet/littlefs
 - lvgl/lvgl
-- waveshare/esp32_p4_wifi6_touch_lcd_4b
 - waveshare/esp_lcd_st7703
-manifest_hash: f5b86e4c3da95f6962905d3c61318b577ba9335ccb8931ba33b7651ea7007ab5
+manifest_hash: e301fde2fba5bc661b6a87013f3d35cc11f2d2dc586cde48dcaa2eb0cd1438b3
 target: esp32p4
 version: 2.0.0

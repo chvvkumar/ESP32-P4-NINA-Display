@@ -1,0 +1,6 @@
+# Square family: Waveshare ESP32-P4-WIFI6-Touch-LCD-4B, 720x720, ST7703.
+# Layered on top of sdkconfig.defaults; carries the family choice only.
+CONFIG_NINA_FAMILY_SQUARE=y
+
+# The square family never draws rim text (LVGL default is y); the round family pins =y in sdkconfig.defaults.round
+CONFIG_LV_USE_ARCLABEL=n

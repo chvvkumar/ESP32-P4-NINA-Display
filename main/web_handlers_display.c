@@ -525,7 +525,11 @@ static uint8_t *s_enc_out = NULL;
 static size_t s_enc_out_size = 0;
 static SemaphoreHandle_t s_screenshot_mutex = NULL;   /* serialises use of the static buffers */
 
-#define SCREENSHOT_IN_RESERVE   ((size_t)SCREEN_SIZE * SCREEN_SIZE * 2)   /* RGB565 */
+/* RGB565 input reserve for the screenshot encoder. Allocated once at boot from
+ * screenshot_encoder_init(), which runs after board_profile_init(), so the
+ * panel width is already resolved. No family-maximum rule: the panel row cannot
+ * change without a restart, and a restart re-runs this. */
+#define SCREENSHOT_IN_RESERVE   ((size_t)screen_size() * (size_t)screen_size() * 2)
 #define SCREENSHOT_OUT_RESERVE  ((size_t)512 * 1024)
 
 void screenshot_encoder_init(void)

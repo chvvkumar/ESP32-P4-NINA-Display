@@ -16,6 +16,7 @@
  */
 
 #include "settings_hub.h"
+#include "settings_wifi_internal.h"
 #include "wifi_join.h"
 #include "wifi_manager.h"
 #include "app_config.h"
@@ -60,12 +61,25 @@ static lv_timer_t *s_forget_timer = NULL;  /* 5 s disarm */
 /* Connect-result auto-return */
 static lv_timer_t *s_result_timer = NULL;  /* 2 s SUCCESS -> WiFi home */
 
-/* Password screen */
-static lv_obj_t *s_pw_ta       = NULL;
-static lv_obj_t *s_ssid_ta     = NULL;     /* hidden-network variant only */
-static lv_obj_t *s_connect_btn = NULL;
-static lv_obj_t *s_eye_lbl     = NULL;
-static lv_obj_t *s_kb          = NULL;
+/* Password screen. wifi_connect_obj and wifi_kb_obj are published to the round
+ * fit pass through settings_wifi_internal.h (and so lose the s_ prefix, which
+ * this codebase reserves for statics); the others stay file-local. */
+static lv_obj_t *s_pw_ta   = NULL;
+static lv_obj_t *s_ssid_ta = NULL;     /* hidden-network variant only */
+static lv_obj_t *s_eye_lbl = NULL;
+lv_obj_t *wifi_connect_obj = NULL;
+lv_obj_t *wifi_kb_obj      = NULL;
+
+/* Per-screen handles the round fit pass re-places. Cleared at the top of
+ * settings_wifi_build() and again on screen delete; a screen that has no such
+ * object leaves it NULL. The header row is not among them: every WiFi screen
+ * that has one gets it from settings_hub_make_header(), which publishes
+ * hub_header_obj itself. */
+lv_obj_t *wifi_list_obj   = NULL;
+lv_obj_t *wifi_prow_obj   = NULL;
+lv_obj_t *wifi_srow_obj   = NULL;
+lv_obj_t *wifi_rescan_obj = NULL;
+bool      wifi_hidden_variant = false;
 
 /* ── Forward declarations ────────────────────────────────────────────── */
 static void build_wifi_home(lv_obj_t *root);
@@ -118,6 +132,12 @@ void settings_wifi_build(lv_obj_t *root, hub_screen_t which)
     /* Teardown hook: the hub deletes this root on every navigation. */
     lv_obj_add_event_cb(root, wifi_screen_delete_cb, LV_EVENT_DELETE, NULL);
 
+    /* Round fit-pass handles: stale pointers here would re-place freed widgets. */
+    wifi_list_obj   = NULL;
+    wifi_prow_obj   = NULL;
+    wifi_srow_obj   = NULL;
+    wifi_rescan_obj = NULL;
+
     switch (which) {
     case HUB_SCREEN_WIFI_SCAN:
         build_wifi_scan(root);
@@ -167,9 +187,14 @@ static void wifi_screen_delete_cb(lv_event_t *e)
     s_forget_lbl   = NULL;
     s_pw_ta        = NULL;
     s_ssid_ta      = NULL;
-    s_connect_btn  = NULL;
+    wifi_connect_obj = NULL;
     s_eye_lbl      = NULL;
-    s_kb           = NULL;
+    wifi_kb_obj    = NULL;
+
+    wifi_list_obj   = NULL;
+    wifi_prow_obj   = NULL;
+    wifi_srow_obj   = NULL;
+    wifi_rescan_obj = NULL;
 }
 
 /* Solid button in the hub's style: bento_border fill, progress on press. */
@@ -497,6 +522,7 @@ static void build_wifi_scan(lv_obj_t *root)
                                      wifi_rescan_cb, NULL);
     lv_obj_align(rescan, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_text_font(lv_obj_get_child(rescan, 0), &lv_font_montserrat_24, 0);
+    wifi_rescan_obj = rescan;
 
     if (st == WIFI_JOIN_SCANNING) {
         lv_obj_t *wrap = lv_obj_create(root);
@@ -540,6 +566,7 @@ static void build_wifi_scan(lv_obj_t *root)
     lv_obj_set_style_pad_row(list, 8, 0);
     lv_obj_set_scroll_dir(list, LV_DIR_VER);
     lv_obj_set_scrollbar_mode(list, LV_SCROLLBAR_MODE_AUTO);
+    wifi_list_obj = list;
 
     if (s_scan_count == 0) {
         ui_label(list, "No networks found", &lv_font_montserrat_28, UI_THEME_COLOR(label_color));
@@ -576,7 +603,7 @@ static void build_wifi_scan(lv_obj_t *root)
  * for the hidden variant) and >= 8 password chars unless the network is open. */
 static void wifi_connect_gate_update(void)
 {
-    if (!s_connect_btn) {
+    if (!wifi_connect_obj) {
         return;
     }
     bool ok = true;
@@ -593,9 +620,9 @@ static void wifi_connect_gate_update(void)
         }
     }
     if (ok) {
-        lv_obj_remove_state(s_connect_btn, LV_STATE_DISABLED);
+        lv_obj_remove_state(wifi_connect_obj, LV_STATE_DISABLED);
     } else {
-        lv_obj_add_state(s_connect_btn, LV_STATE_DISABLED);
+        lv_obj_add_state(wifi_connect_obj, LV_STATE_DISABLED);
     }
 }
 
@@ -605,8 +632,8 @@ static void wifi_ta_event_cb(lv_event_t *e)
 {
     lv_event_code_t code = lv_event_get_code(e);
     if (code == LV_EVENT_FOCUSED) {
-        if (s_kb) {
-            lv_keyboard_set_textarea(s_kb, lv_event_get_target_obj(e));
+        if (wifi_kb_obj) {
+            lv_keyboard_set_textarea(wifi_kb_obj, lv_event_get_target_obj(e));
         }
         return;
     }
@@ -697,6 +724,7 @@ static lv_obj_t *wifi_make_ta(lv_obj_t *parent, const char *placeholder,
 static void build_wifi_password(lv_obj_t *root)
 {
     bool hidden_variant = (s_cand_ssid[0] == '\0');
+    wifi_hidden_variant = hidden_variant;
     /* Above-keyboard budget is 308 px (688 root - 380 keyboard):
      * normal 72+88+96+2x6 = 268; hidden 72+72+72+72+3x6 = 306. */
     int row_h     = hidden_variant ? 72 : 88;
@@ -723,6 +751,7 @@ static void build_wifi_password(lv_obj_t *root)
         lv_obj_clear_flag(srow, LV_OBJ_FLAG_SCROLLABLE);
         /* 31 max: wifi_network_t.ssid[32] must hold it NUL-terminated. */
         s_ssid_ta = wifi_make_ta(srow, "Network name", row_h, 31);
+        wifi_srow_obj = srow;
     }
 
     /* Password row: textarea + 72x72 eye toggle */
@@ -733,6 +762,7 @@ static void build_wifi_password(lv_obj_t *root)
     lv_obj_set_flex_align(prow, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_column(prow, 8, 0);
     lv_obj_clear_flag(prow, LV_OBJ_FLAG_SCROLLABLE);
+    wifi_prow_obj = prow;
 
     s_pw_ta = wifi_make_ta(prow, "Password", row_h, 63);
     lv_textarea_set_password_mode(s_pw_ta, true);
@@ -742,22 +772,22 @@ static void build_wifi_password(lv_obj_t *root)
     s_eye_lbl = lv_obj_get_child(eye, 0);
 
     /* CONNECT — disabled until the gate passes */
-    s_connect_btn = wifi_make_btn(root, "CONNECT", LV_PCT(100), connect_h,
+    wifi_connect_obj = wifi_make_btn(root, "CONNECT", LV_PCT(100), connect_h,
                                   wifi_connect_btn_cb, NULL);
     wifi_connect_gate_update();
 
     /* Keyboard: bottom-docked, floating out of the flex flow. */
-    s_kb = lv_keyboard_create(root);
-    lv_obj_add_flag(s_kb, LV_OBJ_FLAG_FLOATING);
-    lv_obj_set_size(s_kb, LV_PCT(100), WIFI_KB_H);
-    lv_obj_align(s_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
-    lv_obj_set_style_text_font(s_kb, &lv_font_montserrat_28, 0);
+    wifi_kb_obj = lv_keyboard_create(root);
+    lv_obj_add_flag(wifi_kb_obj, LV_OBJ_FLAG_FLOATING);
+    lv_obj_set_size(wifi_kb_obj, LV_PCT(100), WIFI_KB_H);
+    lv_obj_align(wifi_kb_obj, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_set_style_text_font(wifi_kb_obj, &lv_font_montserrat_28, 0);
     if (current_theme) {
-        lv_obj_set_style_bg_color(s_kb, lv_color_hex(current_theme->bg_main), 0);
-        lv_obj_set_style_bg_opa(s_kb, LV_OPA_COVER, 0);
+        lv_obj_set_style_bg_color(wifi_kb_obj, lv_color_hex(current_theme->bg_main), 0);
+        lv_obj_set_style_bg_opa(wifi_kb_obj, LV_OPA_COVER, 0);
     }
-    lv_keyboard_set_textarea(s_kb, hidden_variant ? s_ssid_ta : s_pw_ta);
-    lv_obj_add_event_cb(s_kb, wifi_kb_ready_cb, LV_EVENT_READY, NULL);
+    lv_keyboard_set_textarea(wifi_kb_obj, hidden_variant ? s_ssid_ta : s_pw_ta);
+    lv_obj_add_event_cb(wifi_kb_obj, wifi_kb_ready_cb, LV_EVENT_READY, NULL);
 }
 
 /* ════════════════════════════════════════════════════════════════════════

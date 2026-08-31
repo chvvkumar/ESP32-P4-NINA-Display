@@ -160,13 +160,13 @@ static void apply_zoom(void) {
      * When SW-fallback, LVGL scales orig_w x orig_h by scale factor. */
     lv_obj_set_size(thumbnail_img, (int32_t)disp_w, (int32_t)disp_h);
 
-    if (disp_w > SCREEN_SIZE || disp_h > SCREEN_SIZE) {
+    if (disp_w > screen_size() || disp_h > screen_size()) {
         lv_obj_set_style_align(thumbnail_img, LV_ALIGN_TOP_LEFT, 0);
         lv_obj_add_flag(img_container, LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_set_scroll_dir(img_container, LV_DIR_ALL);
         lv_obj_scroll_to(img_container,
-                         (disp_w > SCREEN_SIZE) ? (int32_t)(disp_w - SCREEN_SIZE) / 2 : 0,
-                         (disp_h > SCREEN_SIZE) ? (int32_t)(disp_h - SCREEN_SIZE) / 2 : 0,
+                         (disp_w > screen_size()) ? (int32_t)(disp_w - screen_size()) / 2 : 0,
+                         (disp_h > screen_size()) ? (int32_t)(disp_h - screen_size()) / 2 : 0,
                          LV_ANIM_OFF);
     } else {
         lv_obj_clear_flag(img_container, LV_OBJ_FLAG_SCROLLABLE);
@@ -216,7 +216,7 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     /* --- Fullscreen overlay --- */
     thumbnail_overlay = lv_obj_create(parent);
     lv_obj_remove_style_all(thumbnail_overlay);
-    lv_obj_set_size(thumbnail_overlay, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(thumbnail_overlay, screen_size(), screen_size());
     lv_obj_set_style_bg_color(thumbnail_overlay, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(thumbnail_overlay, LV_OPA_COVER, 0);
     lv_obj_add_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN);
@@ -227,7 +227,7 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     /* --- Image container (child of overlay, fills 720x720) --- */
     img_container = lv_obj_create(thumbnail_overlay);
     lv_obj_remove_style_all(img_container);
-    lv_obj_set_size(img_container, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(img_container, screen_size(), screen_size());
     lv_obj_set_style_bg_opa(img_container, LV_OPA_TRANSP, 0);
     lv_obj_add_flag(img_container, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_clear_flag(img_container, LV_OBJ_FLAG_SCROLLABLE);
@@ -256,7 +256,13 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     lv_obj_set_style_pad_hor(zoom_badge, 6, 0);
     lv_obj_set_style_pad_ver(zoom_badge, 3, 0);
     lv_obj_set_size(zoom_badge, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-    lv_obj_align(zoom_badge, LV_ALIGN_TOP_LEFT, 16, 16);
+    /* The overlay is full bleed (the picture keeps the whole panel), so the
+     * badge takes its own inset: 16 on square (screen_safe_inset() is 0), and
+     * safe inset plus 16 on round, which is 121 at 720 and 134 at 800. The
+     * badge's top-left corner then sits sqrt(2) * 239 = 338 px from centre at
+     * 720 and sqrt(2) * 266 = 376 at 800, inside the rim in both cases. */
+    lv_obj_align(zoom_badge, LV_ALIGN_TOP_LEFT,
+                 screen_safe_inset() + 16, screen_safe_inset() + 16);
     lv_obj_add_flag(zoom_badge, LV_OBJ_FLAG_HIDDEN);
 
     zoom_badge_lbl = lv_label_create(zoom_badge);
@@ -274,7 +280,9 @@ void nina_thumbnail_create(lv_obj_t *parent) {
     lv_obj_set_style_border_width(btn_back, 0, 0);
     lv_obj_set_style_shadow_width(btn_back, 0, 0);
     lv_obj_add_flag(btn_back, LV_OBJ_FLAG_FLOATING);
-    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT, -16, -16);
+    /* Same inset as the zoom badge, mirrored. On square this is -16, -16. */
+    lv_obj_align(btn_back, LV_ALIGN_BOTTOM_RIGHT,
+                 -(screen_safe_inset() + 16), -(screen_safe_inset() + 16));
 
     btn_back_lbl = lv_label_create(btn_back);
     lv_label_set_text(btn_back_lbl, LV_SYMBOL_LEFT);
@@ -334,7 +342,7 @@ void nina_dashboard_set_thumbnail(const uint8_t *rgb565_data, uint32_t w, uint32
     orig_w = w;
     orig_h = h;
     if (w > 0) {
-        fit_scale = (uint32_t)SCREEN_SIZE * 256 / w;
+        fit_scale = (uint32_t)screen_size() * 256 / w;
     } else {
         fit_scale = 256;
     }

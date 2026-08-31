@@ -468,6 +468,17 @@ static const Shader LOADED_SHADERS =
  * allocates nor frees them. moon_sphere_render_ex() wraps this with a per-call
  * alloc/free (the resting full-res path), while the drag loop passes persistent
  * scratch buffers so no per-frame heap churn occurs. */
+/* Orthographic half-extent, see moon_sphere_set_ortho(). Written by the Moon
+ * poller between renders, read inside the render only. */
+static float s_ortho_r = MOON_SPHERE_ORTHO_DEFAULT;
+
+extern "C" void moon_sphere_set_ortho(float ortho_r)
+{
+    /* Below 1.0 the sphere runs past the canvas edge (a disc larger than the
+     * panel, used to find the glass edge on a round panel). */
+    s_ortho_r = (ortho_r >= 0.5f && ortho_r <= 4.0f) ? ortho_r : MOON_SPHERE_ORTHO_DEFAULT;
+}
+
 static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
                                          int nb_sectors, int nb_stacks,
                                          uint8_t bg_style,
@@ -522,7 +533,7 @@ static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
      * ORTHO_R (defined below as 1.08f), so the disc pixel radius is
      * (1.0/ORTHO_R) * 0.5 * min(w,h). */
     if (bg_style & 2) {
-        const float ORTHO_R = 1.08f;
+        const float ORTHO_R = s_ortho_r;
         const float R_disc  = (1.0f / ORTHO_R) * 0.5f * (float)((w < h) ? w : h);
         const float cx = (float)(w - 1) * 0.5f;
         const float cy = (float)(h - 1) * 0.5f;
@@ -565,7 +576,7 @@ static uint16_t *moon_sphere_render_core(int w, int h, const moon_state_t *st,
     /* Orthographic box sized to a unit sphere (radius 1) with a little margin
      * so the disc fills the viewport without clipping. The sphere is unit
      * radius and centered at the origin; near/far bracket it on the z axis. */
-    const float ORTHO_R = 1.08f;   /* half-extent: 1.0 sphere + ~8% margin */
+    const float ORTHO_R = s_ortho_r;   /* half-extent: 1.08 = sphere + ~8% margin */
     renderer.setOrtho(-ORTHO_R, ORTHO_R, -ORTHO_R, ORTHO_R, 0.1f, 10.0f);
 
     /* Diffuse-only (Lambert) material: ambient low so the unlit limb goes dark

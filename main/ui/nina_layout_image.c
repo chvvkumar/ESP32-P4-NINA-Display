@@ -21,6 +21,13 @@
  * exception is nina_layout_image_needs_capture(), which only reads and touches
  * no LVGL object; the matching latch write lives in
  * nina_layout_image_note_capture_request(), which does take the lock's caller.
+ *
+ * Family split: the builder below is the SQUARE one and is compiled out of the
+ * round binary, where nina_layout_image_round.c defines the same four entry
+ * points (radial board 2). The retained-capture store and its handoff, at the
+ * bottom of this file, are compiled on both families and serve all four capture
+ * layouts (1 Image-forward, 2 Halo, 3 Meridian, 4 Orbit), including the one-off
+ * COVER pre-scale layout 2 asks for.
  */
 
 #include "nina_layout_alt.h"
@@ -33,9 +40,23 @@
 
 #include "app_config.h"
 #include "image_red_remap.h"
+#include "jpeg_utils.h"
 #include "nina_connection.h"
 #include "themes.h"
 #include "ui_helpers.h"
+
+/* Everything from here to the capture handoff is the SQUARE Image-forward
+ * builder. On the round family nina_layout_image_round.c defines the same
+ * three entry points and these bodies would be unreferenced, so the whole
+ * region is compiled out (addendum section 6 rule 2). The retained-capture
+ * store below the guard is shared by both families, and so are the two helpers
+ * the square builder also calls: their prototypes stay here, above the guard,
+ * so no square call site precedes a declaration. */
+
+static bool      if_red_night(void);
+static void      if_release(int instance);
+
+#if !CONFIG_NINA_FAMILY_ROUND
 
 LV_FONT_DECLARE(lv_font_material_safety);
 LV_FONT_DECLARE(lv_font_hanken_bold_64);
@@ -58,7 +79,7 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define IF_FONT_FILTER    (&lv_font_montserrat_24)
 
 /* The page root IS full-bleed 720x720 for this layout: create_dashboard_page()
- * in nina_dashboard.c sizes it SCREEN_SIZE square and offsets it by
+ * in nina_dashboard.c sizes it screen_size() square and offsets it by
  * -OUTER_PADDING to negate main_cont's padding (same trick as the six image
  * pages in nina_image_page.c). The two text groups hug the panel edges; only
  * their inner padding keeps the glyphs off the physical edge. */
@@ -77,20 +98,8 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define IF_ICON_UNSAFE    "\xef\x80\x92"  /* U+F012 gpp_bad       */
 #define IF_ICON_UNKNOWN   "\xef\x80\x94"  /* U+F014 gpp_maybe     */
 
-/* ── retained captures ───────────────────────────────────────────────────── */
-
-typedef struct {
-    uint8_t        *buf;      /* PSRAM RGB565, owned here, freed with free() */
-    lv_image_dsc_t  dsc;
-    bool            asked;    /* a fetch was already requested for this gap */
-    bool            red;      /* Red Night state the buffer was remapped for  */
-} if_capture_t;
-
-static if_capture_t s_cap[MAX_NINA_INSTANCES];
-
 /* ── forward declarations ────────────────────────────────────────────────── */
 
-static bool      if_red_night(void);
 static uint32_t  if_dim(uint32_t color, int gb);
 static lv_obj_t *if_group(lv_obj_t *parent);
 static lv_obj_t *if_hrow(lv_obj_t *parent, int gap);
@@ -101,13 +110,8 @@ static void      if_set_text(lv_obj_t *lbl, const char *text);
 static uint32_t  if_filter_color(const char *filter, int inst, int gb);
 static void      if_elapsed_cb(void *ud, int secs);
 static void      if_theme_page(dashboard_page_t *p, int gb);
-static void      if_release(int instance);
 
 /* ── small helpers ───────────────────────────────────────────────────────── */
-
-static bool if_red_night(void) {
-    return current_theme && theme_is_red_night(current_theme);
-}
 
 static uint32_t if_dim(uint32_t color, int gb) {
     return app_config_apply_brightness(color, gb);
@@ -218,7 +222,7 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
      * NULL source) even when there is no capture so the tap target for the
      * full-screen preview is always present. */
     p->alt.cap_img = lv_image_create(parent);
-    lv_obj_set_size(p->alt.cap_img, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(p->alt.cap_img, screen_size(), screen_size());
     lv_obj_center(p->alt.cap_img);
     /* ponytail: LVGL software-scales the cover fit on redraw (PPA only helps at
      * 1.0x). Fine for a background that changes once per sub; if it ever shows
@@ -229,10 +233,7 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
 
     /* A rebuild that kept the retained frame (theme/URL edit rather than a page
      * leave) re-attaches it instead of showing an empty background. */
-    if (page_index >= 0 && page_index < MAX_NINA_INSTANCES && s_cap[page_index].buf) {
-        lv_image_set_src(p->alt.cap_img, &s_cap[page_index].dsc);
-        lv_image_set_inner_align(p->alt.cap_img, LV_IMAGE_ALIGN_CONTAIN);
-    }
+    nina_layout_image_reattach_capture(page_index);
 
     /* Content layer: the two groups pushed flush to the top and bottom screen
      * edges (no inset); everything between them is the picture. */
@@ -381,16 +382,20 @@ static void if_theme_page(dashboard_page_t *p, int gb) {
 
 void nina_layout_image_apply_theme(dashboard_page_t *p) {
     if (!p) return;
-    /* The retained capture was red-remapped in place at set_capture() time and
-     * cannot be un-remapped. A Red Night switch either way would otherwise
-     * leave a full-screen background in the old palette, so drop it and let the
-     * next capture arrive correctly remapped (needs_capture() re-arms). */
-    int inst = p->alt.inst;
-    if (inst >= 0 && inst < MAX_NINA_INSTANCES && s_cap[inst].buf
-        && s_cap[inst].red != if_red_night()) {
-        if_release(inst);
-    }
+    nina_layout_image_note_theme_switch(p->alt.inst);
     if_theme_page(p, app_config_get()->color_brightness);
+}
+
+/* ── view mode ───────────────────────────────────────────────────────────── */
+
+/* The square Image-forward page has one composition: the text groups always sit
+ * over whatever the background is, with or without a picture, which is the
+ * shipped behaviour and the one this family keeps. The view cycle is a round
+ * board feature, so this is deliberately empty rather than absent: the spine
+ * dispatches to it on both families. */
+void nina_layout_image_set_view(dashboard_page_t *p, nina_view_mode_t mode) {
+    LV_UNUSED(p);
+    LV_UNUSED(mode);
 }
 
 /* ── update ──────────────────────────────────────────────────────────────── */
@@ -472,7 +477,126 @@ void nina_layout_image_update(dashboard_page_t *p, const nina_client_t *d,
     if (d->exposure_total <= 0.0f) if_elapsed_cb(p, -1);
 }
 
-/* ── capture handoff ─────────────────────────────────────────────────────── */
+#endif  /* !CONFIG_NINA_FAMILY_ROUND */
+
+/* ── capture handoff, compiled on both families ──────────────────────────── */
+
+typedef struct {
+    uint8_t        *buf;      /* PSRAM RGB565, owned here, freed with free() */
+    lv_image_dsc_t  dsc;
+    bool            asked;    /* a fetch was already requested for this gap */
+    bool            red;      /* Red Night state the buffer was remapped for  */
+    lv_image_align_t align;   /* inner align this buffer was prepared for */
+} if_capture_t;
+
+static if_capture_t s_cap[MAX_NINA_INSTANCES];
+
+static bool if_red_night(void) {
+    return current_theme && theme_is_red_night(current_theme);
+}
+
+bool nina_layout_uses_capture(uint8_t layout) {
+    /* 1 Image-forward, 2 Halo, 4 Orbit. Id 3 is retired.
+     *
+     * On a ROUND panel the Dashboard (0) draws a picture too, so it joins the
+     * list there and only there: the square bento grid has no picture and must
+     * never be handed one, or the poll loop would fetch a capture it cannot
+     * show and the page would try to release a buffer it never took. */
+#if CONFIG_NINA_FAMILY_ROUND
+    if (layout == 0) return true;
+#endif
+    return (layout == 1 || layout == 2 || layout == 4);
+}
+
+bool nina_layout_image_has_capture(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return false;
+    return s_cap[instance].buf != NULL;
+}
+
+nina_capture_fit_t nina_layout_capture_fit(uint8_t layout) {
+    /* Every round board fills the disc: a letterboxed picture inside a circle
+     * wastes the two lens shaped caps and reads as a mistake. The uncropped
+     * frame is one long press away, on the full-screen preview, which fetches
+     * its own copy. Round layout 0 is a picture layout as well, so it takes the
+     * same fit; on square, layout 0 has no picture at all. */
+#if CONFIG_NINA_FAMILY_ROUND
+    if (layout == 0) return NINA_CAPTURE_FIT_COVER;
+#endif
+    return (layout == 2 || layout == 4) ? NINA_CAPTURE_FIT_COVER
+                                        : NINA_CAPTURE_FIT_CONTAIN;
+}
+
+/* Crop the centre square out of the decoded frame and scale it to the panel in
+ * ONE PPA SRM pass, replacing the caller's buffer. This is what makes the COVER
+ * fit affordable: LV_IMAGE_ALIGN_COVER rescales in software on every redraw,
+ * and every redraw on this panel is a full refresh.
+ *
+ * The scale is a truncated n/16, so the result is at least the panel size and
+ * usually a few pixels larger; the widget is told to CENTER it and the extra
+ * is clipped by the object, which is exactly the cover crop.
+ *
+ * Returns false and leaves the caller's buffer untouched when the frame is
+ * unusable or the hardware refuses the job, so the caller can fall back to
+ * CONTAIN. */
+static bool if_cover_prescale(uint8_t **pbuf, uint32_t *pw, uint32_t *ph,
+                              uint32_t *psize) {
+    const uint32_t panel = (uint32_t)screen_size();
+    const uint32_t w = *pw, h = *ph;
+    const uint32_t block = (w < h) ? w : h;
+    if (block == 0 || panel == 0) return false;
+
+    uint32_t n16 = (panel * 16 + block - 1) / block;   /* ceil, 1/16 steps */
+    if (n16 < 1)   n16 = 1;
+    if (n16 > 255) n16 = 255;                          /* the field is a uint8_t */
+    const uint32_t out = block * n16 / 16;
+    /* PPA hangs on a 0 px or over-8191 px output axis; jpeg_utils guards it too,
+     * but a bad frame should never get that far. */
+    if (out == 0 || out > 8191) return false;
+
+    /* 128 B aligned address AND size: the PPA rejects anything else. */
+    const size_t dst_size = ((size_t)out * out * 2 + 127) & ~(size_t)127;
+    uint8_t *dst = heap_caps_aligned_alloc(128, dst_size, MALLOC_CAP_SPIRAM);
+    if (!dst) return false;
+
+    ppa_srm_job_t job = {
+        .src           = *pbuf,
+        .src_stride_px = w,
+        .src_h         = h,
+        .block_x       = (w - block) / 2,
+        .block_y       = (h - block) / 2,
+        .block_w       = block,
+        .block_h       = block,
+        .rotate_cw     = 0,
+        .hflip         = false,
+        .vflip         = false,
+        .dst           = dst,
+        .dst_buf_size  = dst_size,
+        .dst_w         = out,
+        .dst_h         = out,
+        .dst_x         = 0,
+        .dst_y         = 0,
+        .scale_n16     = (uint8_t)n16,
+        .clear_dst     = false,
+    };
+    if (ppa_srm_rgb565(&job) != ESP_OK) {
+        free(dst);
+        return false;
+    }
+
+    free(*pbuf);
+    *pbuf  = dst;
+    *pw    = out;
+    *ph    = out;
+    *psize = (uint32_t)dst_size;
+    return true;
+}
+
+/* Point the widget at the retained buffer with the fit it was prepared for. */
+static void if_attach(dashboard_page_t *p, const if_capture_t *c) {
+    if (!p->alt.cap_img || !c->buf) return;
+    lv_image_set_src(p->alt.cap_img, &c->dsc);
+    lv_image_set_inner_align(p->alt.cap_img, c->align);
+}
 
 /* Drop the retained buffer for one instance and detach it from the widget.
  * Callers hold the LVGL display lock. With no capture the page falls back to
@@ -481,7 +605,7 @@ static void if_release(int instance) {
     if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
 
     dashboard_page_t *p = &pages[instance];
-    if (p->layout == 1 && p->alt.cap_img) {
+    if (nina_layout_uses_capture(p->layout) && p->alt.cap_img) {
         lv_image_set_src(p->alt.cap_img, NULL);
     }
     if (s_cap[instance].buf) {
@@ -490,6 +614,31 @@ static void if_release(int instance) {
     }
     memset(&s_cap[instance].dsc, 0, sizeof(s_cap[instance].dsc));
     s_cap[instance].asked = false;
+    s_cap[instance].align = LV_IMAGE_ALIGN_CONTAIN;
+
+    /* With no picture the page falls back to its readings composition. */
+    nina_dashboard_refresh_view(instance);
+}
+
+void nina_layout_image_note_theme_switch(int instance) {
+    /* The retained capture was red-remapped in place at set_capture() time and
+     * cannot be un-remapped. A Red Night switch either way would otherwise
+     * leave a full-screen background in the old palette, so drop it and let the
+     * next capture arrive correctly remapped (needs_capture() re-arms). */
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+    if (s_cap[instance].buf && s_cap[instance].red != if_red_night()) {
+        if_release(instance);
+    }
+}
+
+void nina_layout_image_reattach_capture(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+    dashboard_page_t *p = &pages[instance];
+    if (!nina_layout_uses_capture(p->layout) || !p->alt.cap_img
+        || !s_cap[instance].buf) {
+        return;
+    }
+    if_attach(p, &s_cap[instance]);
 }
 
 void nina_layout_image_set_capture(int instance, uint8_t *rgb565,
@@ -498,7 +647,8 @@ void nina_layout_image_set_capture(int instance, uint8_t *rgb565,
 
     if (instance < 0 || instance >= MAX_NINA_INSTANCES
         || w == 0 || h == 0 || size == 0
-        || pages[instance].layout != 1 || !pages[instance].alt.cap_img) {
+        || !nina_layout_uses_capture(pages[instance].layout)
+        || !pages[instance].alt.cap_img) {
         free(rgb565);
         return;
     }
@@ -506,11 +656,21 @@ void nina_layout_image_set_capture(int instance, uint8_t *rgb565,
     dashboard_page_t *p = &pages[instance];
     if_capture_t *c = &s_cap[instance];
 
+    /* COVER layouts pay for the crop and the scale ONCE, here, on the PPA. A
+     * refusal degrades to CONTAIN with the original frame rather than asking
+     * LVGL to cover-scale the picture on every full-panel redraw. */
+    lv_image_align_t align = LV_IMAGE_ALIGN_CONTAIN;
+    if (nina_layout_capture_fit(p->layout) == NINA_CAPTURE_FIT_COVER
+        && if_cover_prescale(&rgb565, &w, &h, &size)) {
+        align = LV_IMAGE_ALIGN_CENTER;
+    }
+
     /* Detach before freeing the buffer LVGL is still pointing at. */
     lv_image_set_src(p->alt.cap_img, NULL);
     if (c->buf) free(c->buf);
     c->buf = rgb565;
     c->asked = false;
+    c->align = align;
 
     /* Red Night: remap the frame in place, same rule as the thumbnail overlay.
      * Self-gating — a no-op unless Red Night is the active theme. */
@@ -525,8 +685,11 @@ void nina_layout_image_set_capture(int instance, uint8_t *rgb565,
     c->dsc.data          = c->buf;
     c->dsc.data_size     = size;
 
-    lv_image_set_src(p->alt.cap_img, &c->dsc);
-    lv_image_set_inner_align(p->alt.cap_img, LV_IMAGE_ALIGN_CONTAIN);
+    if_attach(p, c);
+
+    /* The page may have been showing its readings composition while it had no
+     * picture; the stored mode takes over now that one exists. */
+    nina_dashboard_refresh_view(instance);
 }
 
 void nina_layout_image_release_capture(int instance) {
@@ -536,7 +699,7 @@ void nina_layout_image_release_capture(int instance) {
 bool nina_layout_image_needs_capture(int instance) {
     if (instance < 0 || instance >= MAX_NINA_INSTANCES) return false;
     dashboard_page_t *p = &pages[instance];
-    if (p->layout != 1 || !p->alt.cap_img) return false;
+    if (!nina_layout_uses_capture(p->layout) || !p->alt.cap_img) return false;
     return !s_cap[instance].buf && !s_cap[instance].asked;
 }
 

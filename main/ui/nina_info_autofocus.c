@@ -75,6 +75,8 @@ void build_autofocus_content(lv_obj_t *content) {
 
     /* Chart — full width/height like graph overlay */
     af_chart = lv_chart_create(chart_area);
+    /* Width comes from the info overlay's pad (ui_page_inset()); every link in
+     * the chain is LV_PCT, so the chart needs no round arithmetic of its own. */
     lv_obj_set_size(af_chart, LV_PCT(100), LV_PCT(100));
     lv_chart_set_type(af_chart, LV_CHART_TYPE_LINE);
     lv_chart_set_point_count(af_chart, MAX_AF_POINTS);

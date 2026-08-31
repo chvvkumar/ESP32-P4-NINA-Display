@@ -29,10 +29,12 @@
 
 #include "nina_clock.h"
 #include "nina_dashboard_internal.h"
+#include "nina_clock_internal.h"
 #include "nina_idle_indicator.h"
 #include "display_defs.h"
 #include "app_config.h"
 #include "weather_client.h"
+#include "ui_round.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -43,29 +45,10 @@
 #include "esp_log.h"
 static const char *TAG = "clock_ui";
 
-/* ── Classic editorial color palette (fixed, not theme-dependent) ────── */
-
-#define CLK_BG          0x121110  /* Warm near-black */
-#define CLK_PRIMARY     0xE8E2D4  /* Warm cream (time, temp) */
-#define CLK_SECONDARY   0xC8C2B4  /* Muted cream (stat values) */
-#define CLK_TERTIARY    0x908A7E  /* Warm gray (date) */
-#define CLK_DIM         0x6A6458  /* Warm gray (labels, AM/PM, hi/lo) */
-#define CLK_CONDITION   0x908A7E  /* Warm gray (condition text) */
-#define CLK_RULE        0x2A2622  /* Barely visible warm divider */
-#define CLK_BAR_LABEL   0x5A5448  /* Forecast bar time labels */
-#define CLK_BAR_HOT     0xB86A3A  /* >75 F / >24 C */
-#define CLK_BAR_WARM    0xA8924A  /* 65-75 F / 18-24 C */
-#define CLK_BAR_COOL    0x5A7A5A  /* 55-65 F / 13-18 C */
-#define CLK_BAR_COLD    0x4A6A7A  /* <55 F / <13 C */
-#define CLK_ACCENT      0xB86A3A  /* Warm accent (mock --accent): AM/PM, dial, highs */
-
-/* ── Console 92 palette (mock ins-b1) ────────────────────────────────── */
-
-#define CON_BG          0x0D0B07
-#define CON_LINE        0x372F1E
-#define CON_AMBER       0xF5A83C
-#define CON_DIM         0x9B7F4E
-#define CON_CREAM       0xEFE6D3
+/* The Classic, Console 92, Blueprint and Transit / Night Network palettes,
+ * FORECAST_BARS, MET_CSTATIONS and the Console bar range live in
+ * ui/nina_clock_internal.h: the round builders need them too. BS_* and EV_*
+ * stay here because no round builder uses them. */
 
 /* ── Broadside palette (mock typ-b1) ─────────────────────────────────── */
 
@@ -83,37 +66,11 @@ static const char *TAG = "clock_ui";
 #define EV_MUTE         0x7D766A
 #define EV_DIM          0x46423A
 
-/* ── Blueprint palette (mock blu-b1) ─────────────────────────────────── */
-
-#define BLU_BG          0x0E2A52  /* deep cyanotype blue */
-#define BLU_LINE        0x8FB8DD  /* pale cyan hairlines */
-#define BLU_HI          0xEEF6FF  /* white/ivory ink */
-#define BLU_DIM         0x56799F  /* dim cyan */
-
-/* ── Transit / Night Network palette (mocks met-b1 / met-b2) ─────────── */
-
-#define MET_BG          0x0E1420
-#define MET_INK         0xF2F4F6
-#define MET_DIM         0x8A94A6
-#define MET_EDGE        0x2A3646
-#define MET_NAVY        0x24427D
-#define MET_TEAL        0x37B3AD
-#define MET_GOLD        0xEEBC4F
-#define MET_ORANGE      0xE8823C
-#define MET_RED         0xE04A3F
-#define MET_BLUE        0x5AA7E0
-#define MET_BOX         0x151D2B  /* panel/legend fill */
-
 #define CLOCK_PADDING   40
-#define FORECAST_BARS   10
 #define BAR_WIDTH       22
 #define BAR_GAP         4
 #define BAR_MIN_H       21
 #define BAR_MAX_H       63
-
-/* Console 92 forecast bar height range (mock: 8..48px in a 56px strip) */
-#define CON_BAR_MIN     8
-#define CON_BAR_MAX     56
 
 /* ── Font declarations (generated .c files in main/ui/) ──────────────── */
 
@@ -121,7 +78,11 @@ extern const lv_font_t lv_font_playfair_228;
 extern const lv_font_t lv_font_playfair_90;
 extern const lv_font_t lv_font_overpass_27;
 extern const lv_font_t lv_font_overpass_16;
-LV_FONT_DECLARE(lv_font_saira_black_300)
+#if CONFIG_NINA_FAMILY_ROUND
+LV_FONT_DECLARE(lv_font_saira_black_230)   /* Broadside time, round column */
+#else
+LV_FONT_DECLARE(lv_font_saira_black_300)   /* Broadside time, square */
+#endif
 LV_FONT_DECLARE(lv_font_saira_black_110)
 LV_FONT_DECLARE(lv_font_saira_black_66)
 LV_FONT_DECLARE(lv_font_saira_thin_240)
@@ -135,9 +96,12 @@ LV_FONT_DECLARE(lv_font_hanken_black_96)   /* digits + colon */
 LV_FONT_DECLARE(lv_font_hanken_bold_44)    /* digits, minus, degree */
 LV_FONT_DECLARE(lv_font_hanken_black_40)   /* space + A-Z */
 
-/* ── Static widget pointers ──────────────────────────────────────────── */
+/* ── Widget pointers ─────────────────────────────────────────────────── *
+ * The handles ui/nina_clock_internal.h declares have external linkage so the
+ * round builders in ui/nina_clock_round.c can write them; the rest stay
+ * file static. */
 
-static lv_obj_t *clock_root = NULL;
+lv_obj_t *clock_root = NULL;
 
 /* Active layout (0 = Classic, 1 = Console 92, 2 = Broadside, 3 = Evensong,
  * 4 = Blueprint, 5 = Transit Line, 6 = Night Network), cached at build */
@@ -147,42 +111,41 @@ static uint8_t s_layout = 0;
 static bool s_page_visible = false;
 
 /* Header — date stack */
-static lv_obj_t *lbl_day  = NULL;   /* Classic + Broadside */
-static lv_obj_t *lbl_date = NULL;   /* all layouts (per-layout format) */
+lv_obj_t *lbl_day  = NULL;          /* Classic + Broadside */
+lv_obj_t *lbl_date = NULL;          /* all layouts (per-layout format) */
 static lv_obj_t *lbl_year = NULL;   /* Classic + Broadside */
 static lv_obj_t *lbl_mday = NULL;   /* Broadside only (day-of-month) */
 
 /* Weather */
-static lv_obj_t *lbl_temp = NULL;
-static lv_obj_t *lbl_deg  = NULL;   /* Classic only */
-static lv_obj_t *lbl_cond = NULL;
-static lv_obj_t *lbl_hilo = NULL;
+lv_obj_t *lbl_temp = NULL;
+lv_obj_t *lbl_deg  = NULL;          /* Classic only */
+lv_obj_t *lbl_cond = NULL;
+lv_obj_t *lbl_hilo = NULL;
 
 /* Time */
-static lv_obj_t *lbl_time = NULL;
-static lv_obj_t *lbl_ampm = NULL;
+lv_obj_t *lbl_time = NULL;
+lv_obj_t *lbl_ampm = NULL;
 
 /* Stats strip */
-static lv_obj_t *lbl_humid_val = NULL;
-static lv_obj_t *lbl_dew_val   = NULL;
-static lv_obj_t *lbl_wind_val  = NULL;
-static lv_obj_t *lbl_uv_val   = NULL;
+lv_obj_t *lbl_humid_val = NULL;
+lv_obj_t *lbl_dew_val   = NULL;
+lv_obj_t *lbl_wind_val  = NULL;
 
 /* Forecast (Classic + Console bars; hour labels shared by all layouts) */
-static lv_obj_t *forecast_row  = NULL;
-static lv_obj_t *forecast_bars[FORECAST_BARS];
-static lv_obj_t *forecast_lbls[FORECAST_BARS];
+lv_obj_t *forecast_row  = NULL;
+lv_obj_t *forecast_bars[FORECAST_BARS];
+lv_obj_t *forecast_lbls[FORECAST_BARS];
 /* Forecast temp numerals (Console / Broadside / Evensong) */
-static lv_obj_t *forecast_temp_lbls[FORECAST_BARS];
+lv_obj_t *forecast_temp_lbls[FORECAST_BARS];
 
 /* Console 92-only widgets */
 static lv_obj_t *console_corners[4];         /* 2px corner brackets */
-static lv_obj_t *console_atmo = NULL;        /* ATMOSPHERICS knockout label */
-static lv_obj_t *console_caps[4];            /* readout cell captions */
-static lv_obj_t *console_rulers[4];          /* readout tick rulers */
+lv_obj_t *console_atmo = NULL;               /* ATMOSPHERICS knockout label */
+lv_obj_t *console_caps[4];                   /* readout cell captions */
+lv_obj_t *console_rulers[4];                 /* readout tick rulers */
 static lv_obj_t *console_fc_cap = NULL;      /* forecast caption, left */
 static lv_obj_t *console_range = NULL;       /* forecast range, right */
-static lv_obj_t *lbl_cond_big = NULL;        /* SKY cell big value */
+lv_obj_t *lbl_cond_big = NULL;               /* SKY cell big value */
 
 /* Evensong-only widgets */
 static lv_obj_t *ev_itis = NULL;             /* "IT IS" */
@@ -206,39 +169,38 @@ static lv_obj_t *x_dim_bg[X_DIM_BG_MAX];    static int x_dim_bg_cnt = 0;
 static lv_obj_t *x_ter_bg[X_TER_BG_MAX];    static int x_ter_bg_cnt = 0;
 
 /* Blueprint-only widgets */
-static lv_obj_t *blu_frame_o = NULL;         /* outer frame (line border) */
-static lv_obj_t *blu_frame_i = NULL;         /* inner frame (dim border) */
+lv_obj_t *blu_frame_o = NULL;                /* outer frame (line border) */
+lv_obj_t *blu_frame_i = NULL;                /* inner frame (dim border) */
 static lv_obj_t *blu_plot = NULL;            /* chart plot (baseline border) */
-static lv_obj_t *blu_dimlbl = NULL;          /* "LOCAL TIME 1:38 AM" */
+lv_obj_t *blu_dimlbl = NULL;                 /* "LOCAL TIME 1:38 AM" */
 static lv_obj_t *blu_max_lbl = NULL;         /* MAX callout, moves with peak */
 static lv_obj_t *blu_peak_tick = NULL;       /* dimension tick over peak bar */
-static lv_obj_t *blu_arrow[2];               /* dimension-line arrowheads */
+lv_obj_t *blu_arrow[2];                      /* dimension-line arrowheads */
 
 /* Transit / Network shared widgets */
-static lv_obj_t *met_name = NULL;            /* live weekday header */
-static lv_obj_t *met_segs[FORECAST_BARS];    /* route/line segments */
+lv_obj_t *met_name = NULL;                   /* live weekday header */
+lv_obj_t *met_segs[FORECAST_BARS];           /* route/line segments */
 static lv_obj_t *met_arcs[2];                /* Transit U-bends */
-static lv_obj_t *met_dots[FORECAST_BARS];    /* station dots */
+lv_obj_t *met_dots[FORECAST_BARS];           /* station dots */
 static lv_obj_t *met_ring5 = NULL;           /* Transit roundel ring */
 static lv_obj_t *met_bar = NULL;             /* Transit roundel navy bar */
 static lv_obj_t *met_pill = NULL;            /* YOU ARE HERE pill */
 static lv_obj_t *met_peak_lbl = NULL;        /* PEAK tag, moves with peak */
-static lv_obj_t *met_peak_ring = NULL;       /* Network peak double ring */
-static lv_obj_t *met_peak_core = NULL;       /* Network peak core dot */
+lv_obj_t *met_peak_ring = NULL;              /* Network peak double ring */
+lv_obj_t *met_peak_core = NULL;              /* Network peak core dot */
 static lv_obj_t *met_sun_dia = NULL;         /* sunrise diamond */
 static lv_obj_t *met_sun_lbl = NULL;         /* SUNRISE label */
 static lv_obj_t *met_terminus = NULL;        /* Transit terminus cap */
-static lv_obj_t *met_panel = NULL;           /* Network corner block */
+lv_obj_t *met_panel = NULL;                  /* Network corner block */
 static lv_obj_t *met_legend = NULL;          /* Network legend panel */
-static lv_obj_t *met_tick_a = NULL;          /* Network temp-line end ticks */
-static lv_obj_t *met_tick_b = NULL;
-static lv_obj_t *met_cline[3];               /* Network conditions line + ends */
-#define MET_CSTATIONS 5
-static lv_obj_t *met_cdots[MET_CSTATIONS];   /* Network conditions dots */
+lv_obj_t *met_tick_a = NULL;                 /* Network temp-line end ticks */
+lv_obj_t *met_tick_b = NULL;
+lv_obj_t *met_cline[3];                      /* Network conditions line + ends */
+lv_obj_t *met_cdots[MET_CSTATIONS];          /* Network conditions dots */
 static lv_obj_t *met_chips[9];               /* Network legend swatches */
 static lv_obj_t *met_band_lbl[4];            /* Network legend band ranges */
-static lv_obj_t *met_hi_val = NULL;          /* Network HIGH station value */
-static lv_obj_t *met_lo_val = NULL;          /* Network LOW station value */
+lv_obj_t *met_hi_val = NULL;                 /* Network HIGH station value */
+lv_obj_t *met_lo_val = NULL;                 /* Network LOW station value */
 
 /* Network legend swatch -> temperature band (-1 = Conditions blue) */
 static const int8_t met_chip_band[9] = { 0, 1, 2, 3, -1, 0, 1, 2, 3 };
@@ -246,17 +208,22 @@ static const int8_t met_chip_band[9] = { 0, 1, 2, 3, -1, 0, 1, 2, 3 };
 /* Transit station geometry: runs A (0-3), B (4-7), C (8-9) */
 static const int16_t m5_sx[FORECAST_BARS] =
     { 110, 260, 410, 560, 560, 410, 260, 110, 180, 330 };
+#if !CONFIG_NINA_FAMILY_ROUND
+/* Read only by build_layout_transit(), which is round-guarded below. */
 static const int16_t m5_seg_x[FORECAST_BARS] =
     { 90, 190, 340, 490, 490, 340, 190, 90, 90, 260 };
 static const int16_t m5_seg_w[FORECAST_BARS] =
     { 100, 150, 150, 110, 110, 150, 150, 100, 170, 170 };
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 static const int16_t m5_line_y[3] = { 408, 528, 648 };   /* run tops */
+#if !CONFIG_NINA_FAMILY_ROUND
 static const int16_t m5_band_y[3] = { 365, 552, 604 };   /* label band tops */
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 static const int16_t m5_tag_y[3]  = { 434, 484, 674 };   /* PEAK/SUNRISE band */
 
 /* Blueprint dimension-line arrowheads (3-point lv_line triangles) */
-static const lv_point_precise_t blu_arr_l_pts[3] = { {8, 0}, {0, 4}, {8, 8} };
-static const lv_point_precise_t blu_arr_r_pts[3] = { {0, 0}, {8, 4}, {0, 8} };
+const lv_point_precise_t blu_arr_l_pts[3] = { {8, 0}, {0, 4}, {8, 8} };
+const lv_point_precise_t blu_arr_r_pts[3] = { {0, 0}, {8, 4}, {0, 8} };
 
 /* Idle indicator dot — kept alive across layout rebuilds because the
  * indicator registry in nina_idle_indicator.c has no per-entry removal. */
@@ -276,6 +243,28 @@ static bool last_is_metric = false;
 
 /* Timer */
 static lv_timer_t *clock_timer = NULL;
+
+/* ── Round-only shape handles (see nina_clock_internal.h) ────────────── *
+ * NULL on the square family and on every round face that does not draw
+ * them. Defined here, not in the round builder file, so reset_widget_ptrs()
+ * and the update paths reach them on both families with no conditional. */
+lv_obj_t *clk_fc_arc[FORECAST_BARS];
+lv_obj_t *clk_minute_arc = NULL;
+lv_obj_t *clk_now_tick = NULL;
+lv_obj_t *clk_arc_cond = NULL;
+lv_obj_t *clk_arc_stats = NULL;
+lv_obj_t *clk_con_tick[4];
+lv_obj_t *clk_blu_ray[FORECAST_BARS];
+lv_obj_t *clk_blu_peak_tick = NULL;
+lv_obj_t *clk_blu_max_lbl = NULL;
+
+clock_round_restyle_cb_t clock_round_restyle = NULL;
+uint16_t clock_round_tick_ms = 0;
+
+/* Shadows for the two round Classic rim arclabels: see the header. File scope
+ * so reset_widget_ptrs() can clear them on a layout rebuild. */
+char clk_arc_cond_prev[192];
+char clk_arc_stats_prev[160];
 
 /* ── Palette resolution ──────────────────────────────────────────────── */
 
@@ -385,7 +374,7 @@ static void resolve_palette(clk_palette_t *p, bool red_night) {
 /**
  * Make a transparent, non-scrollable container.
  */
-static lv_obj_t *make_container(lv_obj_t *parent) {
+lv_obj_t *make_container(lv_obj_t *parent) {
     lv_obj_t *obj = lv_obj_create(parent);
     lv_obj_remove_style_all(obj);
     lv_obj_remove_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
@@ -396,9 +385,9 @@ static lv_obj_t *make_container(lv_obj_t *parent) {
 /**
  * Create a label with font, color, and letter spacing.
  */
-static lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font,
-                             uint32_t color_hex, int letter_space,
-                             const char *text) {
+lv_obj_t *make_label(lv_obj_t *parent, const lv_font_t *font,
+                     uint32_t color_hex, int letter_space,
+                     const char *text) {
     lv_obj_t *lbl = lv_label_create(parent);
     lv_obj_set_style_text_font(lbl, font, 0);
     lv_obj_set_style_text_color(lbl, lv_color_hex(color_hex), 0);
@@ -438,7 +427,7 @@ static void fit_cond_one_line(lv_obj_t *lbl, const lv_font_t *big,
 /**
  * Create a 1px horizontal rule across full width.
  */
-static lv_obj_t *make_rule(lv_obj_t *parent) {
+lv_obj_t *make_rule(lv_obj_t *parent) {
     lv_obj_t *rule = lv_obj_create(parent);
     lv_obj_remove_style_all(rule);
     lv_obj_set_size(rule, LV_PCT(100), 1);
@@ -453,9 +442,11 @@ static lv_obj_t *make_rule(lv_obj_t *parent) {
 }
 
 /**
- * Convert temperature to Fahrenheit for bar color thresholds.
+ * Convert temperature to Fahrenheit for bar color thresholds. Shared with
+ * the round builders (nina_clock_internal.h) so they do not re-derive the
+ * same single-precision arithmetic inline.
  */
-static float to_fahrenheit(float temp, bool is_metric) {
+float to_fahrenheit(float temp, bool is_metric) {
     if (is_metric) return temp * 9.0f / 5.0f + 32.0f;
     return temp;
 }
@@ -468,7 +459,7 @@ static float to_fahrenheit(float temp, bool is_metric) {
  * No green/blue/orange under Red Night. Otherwise the fixed editorial
  * green/blue/orange/olive palette is returned unchanged.
  */
-static uint32_t bar_color_for_temp(float temp_f, bool red_night) {
+uint32_t bar_color_for_temp(float temp_f, bool red_night) {
     if (red_night) {
         if (temp_f > 75.0f)  return 0xFF0000;  /* hot  — bright red */
         if (temp_f >= 65.0f) return 0xC00000;  /* warm — medium-bright red */
@@ -481,6 +472,7 @@ static uint32_t bar_color_for_temp(float temp_f, bool red_night) {
     return CLK_BAR_COLD;
 }
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Create a stat column (value + label) for the stats strip.
  */
@@ -516,37 +508,38 @@ static lv_obj_t *make_vdivider(lv_obj_t *parent) {
     }
     return div;
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /* ── Helpers for the Blueprint / Transit / Network layouts ───────────── */
 
 /** Push a label onto the dim recolor collector. */
-static void reg_dim_lbl(lv_obj_t *o) {
+void reg_dim_lbl(lv_obj_t *o) {
     if (x_dim_lbl_cnt < X_DIM_LBL_MAX) x_dim_lbls[x_dim_lbl_cnt++] = o;
 }
 
 /** Push a label onto the tertiary (hairline ink) recolor collector. */
-static void reg_ter_lbl(lv_obj_t *o) {
+void reg_ter_lbl(lv_obj_t *o) {
     if (x_ter_lbl_cnt < X_TER_LBL_MAX) x_ter_lbls[x_ter_lbl_cnt++] = o;
 }
 
 /** Push a label onto the primary-ink recolor collector. */
-static void reg_ink_lbl(lv_obj_t *o) {
+void reg_ink_lbl(lv_obj_t *o) {
     if (x_ink_lbl_cnt < X_INK_LBL_MAX) x_ink_lbls[x_ink_lbl_cnt++] = o;
 }
 
 /** Push a bg-colored object onto the dim recolor collector. */
-static void reg_dim_bg(lv_obj_t *o) {
+void reg_dim_bg(lv_obj_t *o) {
     if (x_dim_bg_cnt < X_DIM_BG_MAX) x_dim_bg[x_dim_bg_cnt++] = o;
 }
 
 /** Push a bg-colored object onto the tertiary recolor collector. */
-static void reg_ter_bg(lv_obj_t *o) {
+void reg_ter_bg(lv_obj_t *o) {
     if (x_ter_bg_cnt < X_TER_BG_MAX) x_ter_bg[x_ter_bg_cnt++] = o;
 }
 
 /** Absolutely positioned filled rectangle. */
-static lv_obj_t *make_bg_rect(lv_obj_t *parent, int x, int y, int w, int h,
-                              uint32_t color) {
+lv_obj_t *make_bg_rect(lv_obj_t *parent, int x, int y, int w, int h,
+                       uint32_t color) {
     lv_obj_t *o = make_container(parent);
     lv_obj_set_size(o, w, h);
     lv_obj_set_pos(o, x, y);
@@ -560,7 +553,7 @@ static lv_obj_t *make_bg_rect(lv_obj_t *parent, int x, int y, int w, int h,
  * onto teal / gold / orange / red; Red Night uses the same dark-to-bright
  * red ramp as the Classic bars.
  */
-static uint32_t met_band_color(int band, bool red_night) {
+uint32_t met_band_color(int band, bool red_night) {
     static const uint32_t ramp[4]    = { MET_TEAL, MET_GOLD, MET_ORANGE, MET_RED };
     static const uint32_t ramp_rn[4] = { 0x500000, 0x800000, 0xC00000, 0xFF0000 };
     if (band < 0) band = 0;
@@ -595,8 +588,8 @@ static int m5_row_of(int i) {
 /**
  * White-filled station dot with a colored ring, centered on (cx, cy).
  */
-static lv_obj_t *make_station_dot(lv_obj_t *parent, int cx, int cy,
-                                  int inner, int bw, uint32_t border) {
+lv_obj_t *make_station_dot(lv_obj_t *parent, int cx, int cy,
+                           int inner, int bw, uint32_t border) {
     int sz = inner + 2 * bw;
     lv_obj_t *d = make_container(parent);
     lv_obj_set_size(d, sz, sz);
@@ -610,6 +603,7 @@ static lv_obj_t *make_station_dot(lv_obj_t *parent, int cx, int cy,
     return d;
 }
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Thick half-ring U-bend for the Transit route, drawn with an lv_arc's
  * background arc only. @p right_half true = opens left (right-side bend).
@@ -632,6 +626,7 @@ static lv_obj_t *make_bend_arc(lv_obj_t *parent, int x, int y, int size,
     lv_obj_remove_flag(arc, LV_OBJ_FLAG_CLICKABLE);
     return arc;
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /**
  * In-place sanitize a string to the saira_thin_84 glyph range:
@@ -770,7 +765,9 @@ static void clock_timer_cb(lv_timer_t *timer) {
     localtime_r(&now, &tm_now);
     uint32_t ms_to_next_min = (uint32_t)(60 - tm_now.tm_sec) * 1000;
     if (ms_to_next_min < 1000) ms_to_next_min = 60000;  /* Just ticked, wait full minute */
-    lv_timer_set_period(clock_timer, ms_to_next_min);
+    /* A round face that sweeps seconds (Classic) ticks every second instead. */
+    lv_timer_set_period(clock_timer, clock_round_tick_ms ? clock_round_tick_ms
+                                                         : ms_to_next_min);
 }
 
 /**
@@ -796,8 +793,9 @@ static void create_clock_timer(void) {
 
 /* ── Shared sub-builders ─────────────────────────────────────────────── */
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
- * Build the 4-column stats strip (HUMID / DEW PT / WIND / UV IDX) with
+ * Build the 3-column stats strip (HUMID / DEW PT / WIND) with
  * vertical dividers. Used by the Classic layout.
  */
 static void build_stats_strip(lv_obj_t *parent) {
@@ -813,8 +811,6 @@ static void build_stats_strip(lv_obj_t *parent) {
     make_stat_col(stats_strip, "--", "DEW PT", &lbl_dew_val);
     make_vdivider(stats_strip);
     make_stat_col(stats_strip, "--", "WIND",   &lbl_wind_val);
-    make_vdivider(stats_strip);
-    make_stat_col(stats_strip, "--", "UV IDX", &lbl_uv_val);
 }
 
 /**
@@ -860,9 +856,11 @@ static void build_forecast_row(lv_obj_t *parent, int bar_w, bool spread) {
                                        CLK_BAR_LABEL, 0, "--");
     }
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /* ── Layout builders ─────────────────────────────────────────────────── */
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Layout 0 — Classic. Pixel-identical to the original single layout.
  */
@@ -942,7 +940,9 @@ static void build_layout_classic(void) {
     /* ── Forecast row (10 bars + labels, hidden until data arrives) ── */
     build_forecast_row(clock_root, BAR_WIDTH, false);
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Create a 2px corner bracket for the Console 92 frame.
  * @p sides is an OR of LV_BORDER_SIDE_* values.
@@ -958,6 +958,7 @@ static lv_obj_t *make_console_corner(lv_obj_t *parent, int x, int y,
     lv_obj_set_style_border_opa(c, LV_OPA_COVER, 0);
     return c;
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /**
  * Create a small tick ruler (96x6, ticks every 12px over a baseline) for
@@ -984,9 +985,9 @@ static lv_obj_t *make_console_ruler(lv_obj_t *parent) {
  * Create one Console 92 readout cell: caption, big value, tick ruler,
  * and an empty sub-row the caller fills. Returns the sub-row.
  */
-static lv_obj_t *make_console_cell(lv_obj_t *grid, int idx, const char *cap,
-                                    const lv_font_t *val_font,
-                                    lv_obj_t **out_val) {
+lv_obj_t *make_console_cell(lv_obj_t *grid, int idx, const char *cap,
+                            const lv_font_t *val_font,
+                            lv_obj_t **out_val) {
     lv_obj_t *cell = make_container(grid);
     lv_obj_set_flex_grow(cell, 1);
     lv_obj_set_height(cell, LV_PCT(100));
@@ -1015,6 +1016,7 @@ static lv_obj_t *make_console_cell(lv_obj_t *grid, int idx, const char *cap,
     return sub;
 }
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Layout 1 — Console 92. Amber observatory console: corner brackets,
  * header captions, hero condensed time with a PM chip, engraved
@@ -1030,12 +1032,12 @@ static void build_layout_console(void) {
     /* ── Corner brackets ── */
     console_corners[0] = make_console_corner(clock_root, 12, 12,
                             LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_LEFT);
-    console_corners[1] = make_console_corner(clock_root, SCREEN_SIZE - 26, 12,
+    console_corners[1] = make_console_corner(clock_root, screen_size() - 26, 12,
                             LV_BORDER_SIDE_TOP | LV_BORDER_SIDE_RIGHT);
-    console_corners[2] = make_console_corner(clock_root, 12, SCREEN_SIZE - 26,
+    console_corners[2] = make_console_corner(clock_root, 12, screen_size() - 26,
                             LV_BORDER_SIDE_BOTTOM | LV_BORDER_SIDE_LEFT);
-    console_corners[3] = make_console_corner(clock_root, SCREEN_SIZE - 26,
-                            SCREEN_SIZE - 26,
+    console_corners[3] = make_console_corner(clock_root, screen_size() - 26,
+                            screen_size() - 26,
                             LV_BORDER_SIDE_BOTTOM | LV_BORDER_SIDE_RIGHT);
 
     /* ── Hero time (centered, in the old header band) + PM chip ── */
@@ -1058,7 +1060,7 @@ static void build_layout_console(void) {
 
     /* ── Engraved section rule with knocked-out label ── */
     lv_obj_t *atmo_rule = make_rule(clock_root);
-    lv_obj_set_size(atmo_rule, SCREEN_SIZE - 112, 1);
+    lv_obj_set_size(atmo_rule, screen_size() - 112, 1);
     lv_obj_set_pos(atmo_rule, 56, 368);
     lv_obj_set_style_bg_color(atmo_rule, lv_color_hex(CON_LINE), 0);
 
@@ -1073,7 +1075,7 @@ static void build_layout_console(void) {
     lv_obj_t *grid = make_container(clock_root);
     /* Cell needs 4 pad + 25 cap + 8 + 44 val + 8 + 6 ruler + 8 + 39 sub
      * = 142px; 150 leaves breathing room so nothing clips. */
-    lv_obj_set_size(grid, SCREEN_SIZE - 112, 150);
+    lv_obj_set_size(grid, screen_size() - 112, 150);
     lv_obj_set_pos(grid, 56, 396);
     lv_obj_set_flex_flow(grid, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(grid, LV_FLEX_ALIGN_START,
@@ -1098,15 +1100,12 @@ static void build_layout_console(void) {
     make_label(sub, &lv_font_overpass_27, CON_DIM, 0, "DEW");
     lbl_dew_val = make_label(sub, &lv_font_overpass_27, CON_CREAM, 0, "--");
 
-    /* WIND cell — UV sub */
-    sub = make_console_cell(grid, 3, "WIND", &lv_font_saira_light_46,
-                            &lbl_wind_val);
-    make_label(sub, &lv_font_overpass_27, CON_DIM, 0, "UV");
-    lbl_uv_val = make_label(sub, &lv_font_overpass_27, CON_CREAM, 0, "--");
+    /* WIND cell, no sub row (UV dropped from every face, bench B5) */
+    make_console_cell(grid, 3, "WIND", &lv_font_saira_light_46, &lbl_wind_val);
 
     /* ── Forecast strip ── */
     forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, SCREEN_SIZE - 112, LV_SIZE_CONTENT);
+    lv_obj_set_size(forecast_row, screen_size() - 112, LV_SIZE_CONTENT);
     lv_obj_set_pos(forecast_row, 56, 554);
     lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_START,
@@ -1166,6 +1165,7 @@ static void build_layout_console(void) {
         lv_obj_set_style_text_align(forecast_lbls[i], LV_TEXT_ALIGN_CENTER, 0);
     }
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /**
  * Create a caption + value metric pair (overpass_27) for the Broadside
@@ -1190,9 +1190,13 @@ static void make_metric_pair(lv_obj_t *parent, const char *cap,
  * numerals sized and weighted by temperature.
  */
 static void build_layout_broadside(void) {
-    lv_obj_set_style_pad_top(clock_root, 30, 0);
-    lv_obj_set_style_pad_bottom(clock_root, 26, 0);
-    lv_obj_set_style_pad_hor(clock_root, 34, 0);
+    /* 30 / 26 / 34 on square (all larger than ui_page_inset()'s 16), the safe
+     * inset on round: 105 at 720, 118 at 800. Every block below is
+     * LV_PCT(100) or LV_SIZE_CONTENT in a SPACE_BETWEEN column, so the pads
+     * are the only geometry that moves. */
+    lv_obj_set_style_pad_top(clock_root, LV_MAX(30, ui_page_inset()), 0);
+    lv_obj_set_style_pad_bottom(clock_root, LV_MAX(26, ui_page_inset()), 0);
+    lv_obj_set_style_pad_hor(clock_root, LV_MAX(34, ui_page_inset()), 0);
     lv_obj_set_style_pad_row(clock_root, 0, 0);
     lv_obj_set_flex_flow(clock_root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(clock_root, LV_FLEX_ALIGN_SPACE_BETWEEN,
@@ -1214,10 +1218,22 @@ static void build_layout_broadside(void) {
     /* ── Hero: huge time, rotated PM on its right ── */
     lv_obj_t *hero = make_container(clock_root);
     /* 24 px wider than the content column so the PM mark can sit in the
-     * root's right padding, clear of a four-digit time ("10:12"). */
-    lv_obj_set_size(hero, SCREEN_SIZE - 2 * 34 + 24, 212);
+     * root's horizontal padding, clear of a four-digit time ("10:12"). The
+     * pad is the same expression as pad_hor above: 676 on square
+     * (720 - 68 + 24), 534 at 720 round, 588 at 800 round. */
+    lv_obj_set_size(hero, screen_size() - 2 * LV_MAX(34, ui_page_inset()) + 24, 212);
 
-    lbl_time = make_label(hero, &lv_font_saira_black_300, BS_BONE, -4, "");
+    /* Round: the 300 px digits run 589 px for "10:52" (603 for "10:08"),
+     * wider than the 534 px hero at 720 and the 588 px hero at 800, so the
+     * PM overlapped or the glass cut the last digit. The 230 px face keeps
+     * the widest four-digit time at 458 px, clear of the PM column (69 px)
+     * hugging the hero's right edge on the 4C. */
+#if CONFIG_NINA_FAMILY_ROUND
+    const lv_font_t *time_font = &lv_font_saira_black_230;
+#else
+    const lv_font_t *time_font = &lv_font_saira_black_300;
+#endif
+    lbl_time = make_label(hero, time_font, BS_BONE, -4, "");
     lv_obj_align(lbl_time, LV_ALIGN_LEFT_MID, -6, 0);
 
     lbl_ampm = make_label(hero, &lv_font_saira_thin_84, BS_SIG, 8, "");
@@ -1256,28 +1272,31 @@ static void build_layout_broadside(void) {
     make_metric_pair(metrics, "HUM",  &lbl_humid_val);
     make_metric_pair(metrics, "DEW",  &lbl_dew_val);
     make_metric_pair(metrics, "WIND", &lbl_wind_val);
-    make_metric_pair(metrics, "UV",   &lbl_uv_val);
 
-    /* ── Forecast: numerals sized+weighted by temp, bottoms aligned ── */
-    forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+    /* round: no forecast row on the inset faces (ledger ruling B3); the
+     * budget only fits the head, hero, condition, now row and metrics. */
+    if (!SCREEN_ROUND) {
+        /* ── Forecast: numerals sized+weighted by temp, bottoms aligned ── */
+        forecast_row = make_container(clock_root);
+        lv_obj_set_size(forecast_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+        lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 
-    for (int i = 0; i < FORECAST_BARS; i++) {
-        lv_obj_t *cell = make_container(forecast_row);
-        lv_obj_set_size(cell, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
-        lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
-        lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_END,
-                              LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-        lv_obj_set_style_pad_row(cell, 8, 0);
+        for (int i = 0; i < FORECAST_BARS; i++) {
+            lv_obj_t *cell = make_container(forecast_row);
+            lv_obj_set_size(cell, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+            lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
+            lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_END,
+                                  LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+            lv_obj_set_style_pad_row(cell, 8, 0);
 
-        forecast_temp_lbls[i] = make_label(cell, &lv_font_saira_light_46,
-                                           BS_HAIR, 0, "--");
-        forecast_lbls[i] = make_label(cell, &lv_font_overpass_16,
-                                      BS_HAIR, 0, "--");
+            forecast_temp_lbls[i] = make_label(cell, &lv_font_saira_light_46,
+                                               BS_HAIR, 0, "--");
+            forecast_lbls[i] = make_label(cell, &lv_font_overpass_16,
+                                          BS_HAIR, 0, "--");
+        }
     }
 }
 
@@ -1316,13 +1335,21 @@ static void make_ev_row(lv_obj_t *parent, int idx, const char *key,
 static void build_layout_evensong(void) {
     /* Vertical budget (720px, worst case = forecast visible):
      * pad_top 28 + head 59 (39 + 20 reserved gap) + words 273
-     * (154 + 116 + 51 - 2*24 pad_row) + date 25 + table 234 (6*39)
-     * + forecast 68 (39 + 4 + 25) + pad_bottom 24 = 711, leaving +9
+     * (154 + 116 + 51 - 2*24 pad_row) + date 25 + table 195 (5*39)
+     * + forecast 68 (39 + 4 + 25) + pad_bottom 24 = 672, leaving +48
      * slack so SPACE_BETWEEN never goes negative (a negative flex gap
      * stacks the blocks and rams the hour word into "IT IS"). */
-    lv_obj_set_style_pad_top(clock_root, 28, 0);
-    lv_obj_set_style_pad_bottom(clock_root, 24, 0);
-    lv_obj_set_style_pad_hor(clock_root, 50, 0);
+    /* Horizontal: 50 on square, the safe inset on round (105 at 720, 118 at
+     * 800). Vertical: the block above budgets 620 px of content (this
+     * includes the forecast row round no longer builds; the extra slack on
+     * round is deliberate). Raising the vertical pads to the safe inset would
+     * leave 510 and drive the SPACE_BETWEEN gaps negative, which stacks the
+     * blocks. Clamp the vertical pad to the slack that actually exists: 28
+     * and 24 on square (the literals win), 50 at 720 round, 90 at 800 round. */
+    const int ev_pad_v = LV_MIN(ui_page_inset(), (screen_size() - 620) / 2);
+    lv_obj_set_style_pad_top(clock_root, LV_MAX(28, ev_pad_v), 0);
+    lv_obj_set_style_pad_bottom(clock_root, LV_MAX(24, ev_pad_v), 0);
+    lv_obj_set_style_pad_hor(clock_root, LV_MAX(50, ui_page_inset()), 0);
     lv_obj_set_style_pad_row(clock_root, 0, 0);
     lv_obj_set_flex_flow(clock_root, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(clock_root, LV_FLEX_ALIGN_SPACE_BETWEEN,
@@ -1388,38 +1415,47 @@ static void build_layout_evensong(void) {
     make_ev_row(table, 2, "HUMIDITY",    &lbl_humid_val);
     make_ev_row(table, 3, "DEW POINT",   &lbl_dew_val);
     make_ev_row(table, 4, "WIND",        &lbl_wind_val);
-    make_ev_row(table, 5, "UV INDEX",    &lbl_uv_val);
 
-    /* ── Forecast: temps row over hours row ── */
-    forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_START,
-                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_row(forecast_row, 4, 0);
-    lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Every row stays; each steps in to the glass chord at its own edge
+     * (bench B5 ruling: keep the rows, fit them). */
+    clock_round_fit_column(clock_root, table);
+#endif
 
-    lv_obj_t *temps_row = make_container(forecast_row);
-    lv_obj_set_size(temps_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(temps_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(temps_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
-    lv_obj_t *hours_row = make_container(forecast_row);
-    lv_obj_set_size(hours_row, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_flow(hours_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(hours_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
-                          LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    /* round: no forecast row on the inset faces (ledger ruling B3); the 620 px
+     * budget above already accounts for it (see the pad clamp above). */
+    if (!SCREEN_ROUND) {
+        /* ── Forecast: temps row over hours row ── */
+        forecast_row = make_container(clock_root);
+        lv_obj_set_size(forecast_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(forecast_row, LV_FLEX_FLOW_COLUMN);
+        lv_obj_set_flex_align(forecast_row, LV_FLEX_ALIGN_START,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+        lv_obj_set_style_pad_row(forecast_row, 4, 0);
+        lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 
-    for (int i = 0; i < FORECAST_BARS; i++) {
-        forecast_temp_lbls[i] = make_label(temps_row, &lv_font_overpass_27,
-                                           EV_PARCH, 0, "--");
-        lv_obj_set_width(forecast_temp_lbls[i], 56);
-        lv_obj_set_style_text_align(forecast_temp_lbls[i],
-                                    LV_TEXT_ALIGN_CENTER, 0);
-        forecast_lbls[i] = make_label(hours_row, &lv_font_overpass_16,
-                                      EV_MUTE, 0, "--");
-        lv_obj_set_width(forecast_lbls[i], 56);
-        lv_obj_set_style_text_align(forecast_lbls[i], LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_t *temps_row = make_container(forecast_row);
+        lv_obj_set_size(temps_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(temps_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(temps_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+        lv_obj_t *hours_row = make_container(forecast_row);
+        lv_obj_set_size(hours_row, LV_PCT(100), LV_SIZE_CONTENT);
+        lv_obj_set_flex_flow(hours_row, LV_FLEX_FLOW_ROW);
+        lv_obj_set_flex_align(hours_row, LV_FLEX_ALIGN_SPACE_BETWEEN,
+                              LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+
+        for (int i = 0; i < FORECAST_BARS; i++) {
+            forecast_temp_lbls[i] = make_label(temps_row, &lv_font_overpass_27,
+                                               EV_PARCH, 0, "--");
+            lv_obj_set_width(forecast_temp_lbls[i], 56);
+            lv_obj_set_style_text_align(forecast_temp_lbls[i],
+                                        LV_TEXT_ALIGN_CENTER, 0);
+            forecast_lbls[i] = make_label(hours_row, &lv_font_overpass_16,
+                                          EV_MUTE, 0, "--");
+            lv_obj_set_width(forecast_lbls[i], 56);
+            lv_obj_set_style_text_align(forecast_lbls[i], LV_TEXT_ALIGN_CENTER, 0);
+        }
     }
 }
 
@@ -1427,10 +1463,10 @@ static void build_layout_evensong(void) {
  * One Blueprint annotation row: leader dot + leader line + value label.
  * Returned label is the value; siblings are chrome (collected for theme).
  */
-static lv_obj_t *make_blu_callout(int y, const lv_font_t *font) {
+lv_obj_t *make_blu_callout(int x, int y, const lv_font_t *font) {
     lv_obj_t *row = make_container(clock_root);
     lv_obj_set_size(row, 218, LV_SIZE_CONTENT);
-    lv_obj_set_pos(row, 472, y);
+    lv_obj_set_pos(row, x, y);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1445,6 +1481,7 @@ static lv_obj_t *make_blu_callout(int y, const lv_font_t *font) {
     return make_label(row, font, BLU_HI, 0, "--");
 }
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Layout 4 — Blueprint. Cyanotype drafting sheet: double frame with
  * registration crosshairs, stencil hero time with an arrowed dimension
@@ -1459,14 +1496,14 @@ static void build_layout_blueprint(void) {
 
     /* ── Sheet frames ── */
     blu_frame_o = make_container(clock_root);
-    lv_obj_set_size(blu_frame_o, SCREEN_SIZE - 36, SCREEN_SIZE - 36);
+    lv_obj_set_size(blu_frame_o, screen_size() - 36, screen_size() - 36);
     lv_obj_set_pos(blu_frame_o, 18, 18);
     lv_obj_set_style_border_width(blu_frame_o, 2, 0);
     lv_obj_set_style_border_color(blu_frame_o, lv_color_hex(BLU_LINE), 0);
     lv_obj_set_style_border_opa(blu_frame_o, LV_OPA_COVER, 0);
 
     blu_frame_i = make_container(clock_root);
-    lv_obj_set_size(blu_frame_i, SCREEN_SIZE - 88, SCREEN_SIZE - 88);
+    lv_obj_set_size(blu_frame_i, screen_size() - 88, screen_size() - 88);
     lv_obj_set_pos(blu_frame_i, 44, 44);
     lv_obj_set_style_border_width(blu_frame_i, 1, 0);
     lv_obj_set_style_border_color(blu_frame_i, lv_color_hex(BLU_DIM), 0);
@@ -1526,15 +1563,14 @@ static void build_layout_blueprint(void) {
     reg_ter_lbl(blu_dimlbl);
 
     /* ── Annotation column (leader-dot callouts) ── */
-    lbl_temp      = make_blu_callout(150, &lv_font_saira_light_46);
-    lbl_cond      = make_blu_callout(216, &lv_font_overpass_27);
+    lbl_temp      = make_blu_callout(472, 150, &lv_font_saira_light_46);
+    lbl_cond      = make_blu_callout(472, 216, &lv_font_overpass_27);
     lv_obj_set_width(lbl_cond, 172);
     lv_label_set_long_mode(lbl_cond, LV_LABEL_LONG_DOT);
-    lbl_hilo      = make_blu_callout(258, &lv_font_overpass_27);
-    lbl_humid_val = make_blu_callout(300, &lv_font_overpass_27);
-    lbl_dew_val   = make_blu_callout(342, &lv_font_overpass_27);
-    lbl_wind_val  = make_blu_callout(384, &lv_font_overpass_27);
-    lbl_uv_val    = make_blu_callout(426, &lv_font_overpass_27);
+    lbl_hilo      = make_blu_callout(472, 258, &lv_font_overpass_27);
+    lbl_humid_val = make_blu_callout(472, 300, &lv_font_overpass_27);
+    lbl_dew_val   = make_blu_callout(472, 342, &lv_font_overpass_27);
+    lbl_wind_val  = make_blu_callout(472, 384, &lv_font_overpass_27);
 
     /* ── Dimensioned elevation chart ── */
     forecast_row = make_container(clock_root);
@@ -1577,7 +1613,9 @@ static void build_layout_blueprint(void) {
     lv_obj_set_pos(blu_max_lbl, 50, 41);
     lv_obj_set_width(blu_max_lbl, 140);
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * Layout 5 — Transit Line. Metro map: red roundel with the time in a navy
  * bar, right column headed by the live weekday, and the day as one metro
@@ -1643,7 +1681,7 @@ static void build_layout_transit(void) {
 
     /* ── Route map (hidden until forecast data arrives) ── */
     forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(forecast_row, screen_size(), screen_size());
     lv_obj_set_pos(forecast_row, 0, 0);
     lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 
@@ -1719,7 +1757,9 @@ static void build_layout_transit(void) {
     lv_obj_add_flag(met_sun_lbl, LV_OBJ_FLAG_HIDDEN);
     reg_dim_lbl(met_sun_lbl);
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
+#if !CONFIG_NINA_FAMILY_ROUND
 /**
  * One Night Network legend swatch chip (colored by apply_theme).
  */
@@ -1779,7 +1819,7 @@ static void build_layout_network(void) {
 
     /* ── Network map (hidden until forecast data arrives) ── */
     forecast_row = make_container(clock_root);
-    lv_obj_set_size(forecast_row, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(forecast_row, screen_size(), screen_size());
     lv_obj_set_pos(forecast_row, 0, 0);
     lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
 
@@ -1924,6 +1964,7 @@ static void build_layout_network(void) {
         }
     }
 }
+#endif /* !CONFIG_NINA_FAMILY_ROUND */
 
 /* ── Forecast styling for the new layouts ────────────────────────────── */
 
@@ -2155,7 +2196,7 @@ static void reset_widget_ptrs(void) {
     lbl_day = lbl_date = lbl_year = lbl_mday = NULL;
     lbl_temp = lbl_deg = lbl_cond = lbl_hilo = NULL;
     lbl_time = lbl_ampm = NULL;
-    lbl_humid_val = lbl_dew_val = lbl_wind_val = lbl_uv_val = NULL;
+    lbl_humid_val = lbl_dew_val = lbl_wind_val = NULL;
     forecast_row = NULL;
     for (int i = 0; i < FORECAST_BARS; i++) {
         forecast_bars[i] = NULL;
@@ -2212,6 +2253,25 @@ static void reset_widget_ptrs(void) {
     for (int i = 0; i < 4; i++) {
         met_band_lbl[i] = NULL;
     }
+
+    /* Round-only handles and the round restyle hook */
+    for (int i = 0; i < FORECAST_BARS; i++) {
+        clk_fc_arc[i] = NULL;
+        clk_blu_ray[i] = NULL;
+    }
+    for (int i = 0; i < 4; i++) {
+        clk_con_tick[i] = NULL;
+    }
+    clk_minute_arc = clk_now_tick = NULL;
+    clk_arc_cond = clk_arc_stats = NULL;
+    clk_blu_peak_tick = clk_blu_max_lbl = NULL;
+    clock_round_restyle = NULL;
+    clock_round_tick_ms = 0;
+    /* The rebuilt arclabels start at "--"; clearing the shadows forces the
+     * next update to write the real strings instead of matching a shadow left
+     * over from the deleted widgets. */
+    clk_arc_cond_prev[0] = '\0';
+    clk_arc_stats_prev[0] = '\0';
 }
 
 /**
@@ -2226,6 +2286,25 @@ static void build_content(void) {
     uint8_t layout = app_config_get()->clock_layout;
     s_layout = (layout <= 6) ? layout : 0;
 
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Round: Broadside (2) and Evensong (3) are inset cases and keep the
+     * shared builders below; every other face has a round composition in
+     * ui/nina_clock_round.c. "Transit Line" (5) has no round composition;
+     * it is rewritten to Classic (0) here, before the dispatch, so every
+     * page path (strings, palette, restyle) sees Classic (spec addendum
+     * section 7). The stored config value is NOT rewritten and the web UI
+     * keeps offering it. */
+    if (s_layout == 5) {
+        s_layout = 0;
+    }
+    if (s_layout == 2) {
+        build_layout_broadside();
+    } else if (s_layout == 3) {
+        build_layout_evensong();
+    } else {
+        clock_round_build(s_layout);
+    }
+#else
     if (s_layout == 1) {
         build_layout_console();
     } else if (s_layout == 2) {
@@ -2241,6 +2320,7 @@ static void build_content(void) {
     } else {
         build_layout_classic();
     }
+#endif
 }
 
 /* ── Page creation ───────────────────────────────────────────────────── */
@@ -2248,8 +2328,12 @@ static void build_content(void) {
 lv_obj_t *clock_page_create(lv_obj_t *parent) {
     /* Root — full screen, own background, overrides parent padding */
     clock_root = lv_obj_create(parent);
-    lv_obj_set_size(clock_root, SCREEN_SIZE, SCREEN_SIZE);
-    lv_obj_set_pos(clock_root, -OUTER_PADDING, -OUTER_PADDING);
+    lv_obj_set_size(clock_root, screen_size(), screen_size());
+    /* Full bleed. Centring rather than negating a literal pad: on square a 720
+     * root centred in main_cont's 688 content box lands at (-16,-16), exactly
+     * what lv_obj_set_pos(-OUTER_PADDING, -OUTER_PADDING) produced, and it
+     * stays centred whatever pad main_cont carries. */
+    lv_obj_center(clock_root);
     lv_obj_set_style_bg_color(clock_root, lv_color_hex(CLK_BG), 0);
     lv_obj_set_style_bg_opa(clock_root, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(clock_root, 0, 0);
@@ -2439,8 +2523,18 @@ void clock_page_update(void) {
         if (lbl_humid_val) lv_label_set_text(lbl_humid_val, "--");
         if (lbl_dew_val)   lv_label_set_text(lbl_dew_val, "--");
         if (lbl_wind_val)  lv_label_set_text(lbl_wind_val, "--");
-        if (lbl_uv_val)    lv_label_set_text(lbl_uv_val, "--");
         if (forecast_row) lv_obj_add_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+#if LV_USE_ARCLABEL
+        if (clk_arc_cond)  lv_arclabel_set_text(clk_arc_cond, "--");
+        if (clk_arc_stats) lv_arclabel_set_text(clk_arc_stats, "--");
+#endif
+        /* Clear the shadows too: a provider that recovers with the same
+         * reading it had before the outage must still repaint over "--". */
+        clk_arc_cond_prev[0] = '\0';
+        clk_arc_stats_prev[0] = '\0';
+        if (clock_round_restyle) {
+            clock_round_restyle(&wd, &tm_now, red_night, is_metric);
+        }
         return;
     }
 
@@ -2497,13 +2591,16 @@ void clock_page_update(void) {
             snprintf(acc_buf, sizeof(acc_buf), "%.0f\xc2\xb0 - %s",
                      wd.temp_current, cond_upper);
             lv_label_set_text(lbl_cond, acc_buf);
+            /* Round keeps the 27 px floor: ellipsise rather than shrink. */
             fit_cond_one_line(lbl_cond, &lv_font_overpass_27,
-                              &lv_font_overpass_16);
+                              SCREEN_ROUND ? &lv_font_overpass_27
+                                           : &lv_font_overpass_16);
         } else {
             lv_label_set_text(lbl_cond, cond_upper);
             if (s_layout == 4) {
                 fit_cond_one_line(lbl_cond, &lv_font_overpass_27,
-                                  &lv_font_overpass_16);
+                                  SCREEN_ROUND ? &lv_font_overpass_27
+                                               : &lv_font_overpass_16);
             }
         }
     }
@@ -2526,13 +2623,6 @@ void clock_page_update(void) {
 
     /* Stats. Blueprint carries its caption inside each value ("HUM 91%");
      * Transit folds all readings into two combined right-column rows. */
-    char uv_s[16];
-    if (wd.uv_index < 0.0f) {
-        snprintf(uv_s, sizeof(uv_s), "--");
-    } else {
-        snprintf(uv_s, sizeof(uv_s), "%.0f", wd.uv_index);
-    }
-
     if (s_layout == 4) {
         char sbuf[64];
         snprintf(sbuf, sizeof(sbuf), "HUM %.0f%%", wd.humidity);
@@ -2542,15 +2632,13 @@ void clock_page_update(void) {
         snprintf(sbuf, sizeof(sbuf), "WIND %s %.0f", wd.wind_dir,
                  wd.wind_speed);
         if (lbl_wind_val) lv_label_set_text(lbl_wind_val, sbuf);
-        snprintf(sbuf, sizeof(sbuf), "UV %s", uv_s);
-        if (lbl_uv_val) lv_label_set_text(lbl_uv_val, sbuf);
     } else if (s_layout == 5) {
         char sbuf[96];
         snprintf(sbuf, sizeof(sbuf), "H %.0f L %.0f  HUM %.0f%%",
                  wd.temp_high, wd.temp_low, wd.humidity);
         if (lbl_humid_val) lv_label_set_text(lbl_humid_val, sbuf);
-        snprintf(sbuf, sizeof(sbuf), "DEW %.0f\xc2\xb0  WIND %s %.0f  UV %s",
-                 wd.dew_point, wd.wind_dir, wd.wind_speed, uv_s);
+        snprintf(sbuf, sizeof(sbuf), "DEW %.0f\xc2\xb0  WIND %s %.0f",
+                 wd.dew_point, wd.wind_dir, wd.wind_speed);
         if (lbl_dew_val) lv_label_set_text(lbl_dew_val, sbuf);
     } else {
         char buf[16];
@@ -2562,8 +2650,35 @@ void clock_page_update(void) {
 
         snprintf(buf, sizeof(buf), "%s %.0f", wd.wind_dir, wd.wind_speed);
         if (lbl_wind_val) lv_label_set_text(lbl_wind_val, buf);
+    }
 
-        if (lbl_uv_val) lv_label_set_text(lbl_uv_val, uv_s);
+    /* Round Classic: the condition row and the stats row live on the rim as
+     * arclabels inside the minute ring. Both handles are NULL on every other
+     * face and on the square family. An arclabel re-lays out every glyph on
+     * a text change, so write only when the string actually moved. */
+    if (clk_arc_cond) {
+        char cbuf[192];
+        snprintf(cbuf, sizeof(cbuf), "%s / H %.0f / L %.0f",
+                 cond_upper, wd.temp_high, wd.temp_low);
+        if (strcmp(cbuf, clk_arc_cond_prev) != 0) {
+#if LV_USE_ARCLABEL
+            lv_arclabel_set_text(clk_arc_cond, cbuf);
+#endif
+            strncpy(clk_arc_cond_prev, cbuf, sizeof(clk_arc_cond_prev) - 1);
+            clk_arc_cond_prev[sizeof(clk_arc_cond_prev) - 1] = '\0';
+        }
+    }
+    if (clk_arc_stats) {
+        char sbuf[160];
+        snprintf(sbuf, sizeof(sbuf), "%.0f%% / %.0f\xc2\xb0 / %s %.0f",
+                 wd.humidity, wd.dew_point, wd.wind_dir, wd.wind_speed);
+        if (strcmp(sbuf, clk_arc_stats_prev) != 0) {
+#if LV_USE_ARCLABEL
+            lv_arclabel_set_text(clk_arc_stats, sbuf);
+#endif
+            strncpy(clk_arc_stats_prev, sbuf, sizeof(clk_arc_stats_prev) - 1);
+            clk_arc_stats_prev[sizeof(clk_arc_stats_prev) - 1] = '\0';
+        }
     }
 
     /* ── Forecast ── */
@@ -2614,6 +2729,13 @@ void clock_page_update(void) {
 
     if (forecast_row) {
         lv_obj_remove_flag(forecast_row, LV_OBJ_FLAG_HIDDEN);
+    }
+
+    /* Round faces: shape geometry and the colours of the widgets only the
+     * round builder creates. NULL on square. Runs after restyle_forecast()
+     * so a round face can overwrite a square placement it inherited. */
+    if (clock_round_restyle) {
+        clock_round_restyle(&wd, &tm_now, red_night, is_metric);
     }
 }
 
@@ -2690,13 +2812,12 @@ void clock_page_apply_theme(void) {
     set_label_color(lbl_humid_val, p.secondary);
     set_label_color(lbl_dew_val,   p.secondary);
     set_label_color(lbl_wind_val,  p.secondary);
-    set_label_color(lbl_uv_val,    p.secondary);
 
     /* Stat caption labels: the sibling children of each value's parent. */
-    lv_obj_t *val_labels[4] = {
-        lbl_humid_val, lbl_dew_val, lbl_wind_val, lbl_uv_val
+    lv_obj_t *val_labels[3] = {
+        lbl_humid_val, lbl_dew_val, lbl_wind_val
     };
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 3; i++) {
         if (!val_labels[i]) continue;
         lv_obj_t *col = lv_obj_get_parent(val_labels[i]);
         if (!col) continue;
@@ -2850,6 +2971,10 @@ void clock_page_apply_theme(void) {
             lv_obj_set_style_bg_color(met_terminus,
                                       lv_color_hex(p.primary), 0);
         }
+        /* Colours only: the round Night Network builder relies on bg_opa 0
+         * and border_width 0, LVGL's defaults after lv_obj_remove_style_all(),
+         * to keep met_panel borderless there (C1); do not add an opacity or
+         * width write here. */
         lv_obj_t *boxes[2] = { met_panel, met_legend };
         for (int b = 0; b < 2; b++) {
             if (boxes[b]) {
@@ -2949,6 +3074,21 @@ void clock_page_apply_theme(void) {
      * resolved for this theme. */
     if (s_layout == 2) {
         set_hilo_text(&wd, red_night);
+    }
+
+    /* Round faces repaint their own shapes through the same hook the update
+     * path uses, so this function needs no round branch. NULL on square. */
+    if (clock_round_restyle) {
+        time_t theme_now = time(NULL);
+        struct tm theme_tm;
+        localtime_r(&theme_now, &theme_tm);
+        clock_round_restyle(&wd, &theme_tm, red_night, last_is_metric);
+    }
+    if (clk_arc_cond) {
+        lv_obj_set_style_text_color(clk_arc_cond, lv_color_hex(p.condition), 0);
+    }
+    if (clk_arc_stats) {
+        lv_obj_set_style_text_color(clk_arc_stats, lv_color_hex(p.secondary), 0);
     }
 }
 

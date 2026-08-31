@@ -13,9 +13,9 @@
  */
 
 #include "nina_empty_state.h"
-#include "nina_dashboard_internal.h"  /* current_theme, SCREEN_SIZE */
+#include "nina_dashboard_internal.h"  /* current_theme, screen_size() */
 #include "app_config.h"               /* app_config_apply_brightness, app_config_get */
-#include "display_defs.h"             /* SCREEN_SIZE */
+#include "display_defs.h"             /* screen_size() */
 #include <string.h>
 #include <stdio.h>
 
@@ -129,16 +129,16 @@ lv_obj_t *nina_empty_state_create(lv_obj_t *parent,
 
     /* ── Optical centering at ~42% height (D-03, Finding 3) ─────────── *
      *                                                                    *
-     * Align the TOP of the container at y = SCREEN_SIZE * 42 / 100.   *
+     * Align the TOP of the container at y = screen_size() * 42 / 100.   *
      * After layout, lv_obj_get_height() gives the rendered height, so  *
      * shift up by half that to place the visual midpoint at 42%.       *
      * All arithmetic uses integer (P4 FPU is single-precision only;    *
      * integer division is safe here and avoids any float path).        *
      * ────────────────────────────────────────────────────────────────── */
-    lv_obj_align(cont, LV_ALIGN_TOP_MID, 0, SCREEN_SIZE * 42 / 100);
+    lv_obj_align(cont, LV_ALIGN_TOP_MID, 0, screen_size() * 42 / 100);
     lv_obj_update_layout(cont);
     int cont_h = (int)lv_obj_get_height(cont);
-    lv_obj_set_y(cont, SCREEN_SIZE * 42 / 100 - cont_h / 2);
+    lv_obj_set_y(cont, screen_size() * 42 / 100 - cont_h / 2);
 
     /* ── Attach label pointers to container via user_data ───────────── */
     lv_obj_set_user_data(cont, lbls);

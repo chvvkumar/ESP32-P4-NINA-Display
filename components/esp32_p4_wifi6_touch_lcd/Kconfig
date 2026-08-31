@@ -121,18 +121,6 @@ menu "Board Support Package(ESP32-P4)"
                 bool "RGB888"
         endchoice   
             
-        choice BSP_LCD_TYPE
-            prompt "Select LCD type"
-            default BSP_LCD_TYPE_800_800_3_4_INCH
-            help
-                Select the LCD.
-
-            config BSP_LCD_TYPE_800_800_3_4_INCH
-                bool "Waveshare board with 800*800 3.4-inch Display"
-            config BSP_LCD_TYPE_720_720_4_INCH
-                bool "Waveshare board with 720*720 4-inch Display"
-
-        endchoice
 
         
     endmenu

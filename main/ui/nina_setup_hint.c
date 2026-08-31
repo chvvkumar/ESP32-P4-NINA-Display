@@ -15,6 +15,7 @@
 #include "app_config.h"
 #include "themes.h"
 #include "display_defs.h"
+#include "ui_round.h"
 #include "bsp/esp-bsp.h"         /* bsp_display_lock / bsp_display_unlock */
 #include "lvgl.h"
 #include "esp_log.h"
@@ -184,10 +185,16 @@ static void build_overlay(const char *url, const char *hostname)
 
     s_cont = lv_obj_create(scr);
     lv_obj_remove_style_all(s_cont);
-    lv_obj_set_size(s_cont, SCREEN_SIZE, SCREEN_SIZE);
+    lv_obj_set_size(s_cont, screen_size(), screen_size());
     lv_obj_set_style_bg_color(s_cont, lv_color_hex(0x000000), 0);
     lv_obj_set_style_bg_opa(s_cont, LV_OPA_COVER, 0);
-    lv_obj_set_style_pad_all(s_cont, 0, 0);
+    /* 0 on square, exactly as before, and the safe inset on round. Every child
+     * of this container is aligned (TOP_MID, CENTER, BOTTOM_MID) or lv_pct
+     * sized, and LVGL aligns against the parent's CONTENT box, so this one pad
+     * carries the title, the URL, the hostname, the help line and the button
+     * row inside the circle together. screen_safe_inset() rather than
+     * ui_page_inset() because the square value must stay 0, not 16. */
+    lv_obj_set_style_pad_all(s_cont, screen_safe_inset(), 0);
     lv_obj_clear_flag(s_cont, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_center(s_cont);
     lv_obj_add_event_cb(s_cont, cont_delete_cb, LV_EVENT_DELETE, NULL);
@@ -250,9 +257,15 @@ static void build_overlay(const char *url, const char *hostname)
     lv_obj_clear_flag(btn_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_align(btn_row, LV_ALIGN_BOTTOM_MID, 0, -60);
 
+    /* Two buttons plus the 32 px column gap must fit the row, which is
+     * lv_pct(100) of the container's content box. 240 on square, where
+     * (688 - 32) / 2 = 328 loses the LV_MIN; 239 at 720 round and 240 at 800
+     * round, where (564 - 32) / 2 = 266. */
+    const int hint_btn_w = LV_MIN(240, (ui_page_root_size() - 32) / 2);
+
     /* Dismiss — ghost outline */
     lv_obj_t *btn_dismiss = lv_button_create(btn_row);
-    lv_obj_set_size(btn_dismiss, 240, 72);
+    lv_obj_set_size(btn_dismiss, hint_btn_w, 72);
     lv_obj_set_style_radius(btn_dismiss, 14, 0);
     lv_obj_set_style_bg_opa(btn_dismiss, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(btn_dismiss, 1, 0);
@@ -271,7 +284,7 @@ static void build_overlay(const char *url, const char *hostname)
 
     /* Don't show again — solid accent */
     lv_obj_t *btn_never = lv_button_create(btn_row);
-    lv_obj_set_size(btn_never, 240, 72);
+    lv_obj_set_size(btn_never, hint_btn_w, 72);
     lv_obj_set_style_radius(btn_never, 14, 0);
     lv_obj_set_style_bg_color(btn_never, lv_color_hex(col_accent), 0);
     lv_obj_set_style_bg_opa(btn_never, LV_OPA_COVER, 0);

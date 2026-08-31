@@ -653,6 +653,7 @@ static const backup_field_t s_backup_fields[] = {
     {"custom_orientation",         "Custom Orientation",   "Custom Image", false, false},
     {"custom_update_interval_s",   "Custom Update Interval","Custom Image", false, false},
     {"moon_bg_style",              "Moon Background Style", "Moon", false, false},
+    {"moon_round_size_pct",        "Moon Disc Size (round)","Moon", false, false},   /* v79 */
     {"moon_lat",                   "Moon Latitude",        "Moon", false, false},
     {"moon_lon",                   "Moon Longitude",       "Moon", false, false},
     {"solar_band",                 "Solar Band",           "Solar", false, false},
@@ -814,9 +815,9 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"octoprint_image_source",  0,    1,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"octoprint_layout",        0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"clock_layout",            0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
-    {"nina_layout_1",           0,    1,     false},  /* app_config.c validate_config (out of range -> 0) */
-    {"nina_layout_2",           0,    1,     false},  /* app_config.c validate_config (out of range -> 0) */
-    {"nina_layout_3",           0,    1,     false},  /* app_config.c validate_config (out of range -> 0) */
+    {"nina_layout_1",           0,    4,     false},  /* app_config.c validate_config (out of range -> 0) */
+    {"nina_layout_2",           0,    4,     false},  /* app_config.c validate_config (out of range -> 0) */
+    {"nina_layout_3",           0,    4,     false},  /* app_config.c validate_config (out of range -> 0) */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
     {"solar_update_interval_s", 300,  7200,  false},  /* settings_table.h INT_RESET row (out of range -> 600) */
@@ -1398,10 +1399,12 @@ static app_config_t *parse_config_from_json(cJSON *root)
     JSON_TO_BOOL(root, "instance_enabled_2", cfg->instance_enabled[1]);
     JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
 
-    /* Per-instance NINA page layout (0 Dashboard, 1 Image-forward).
-     * Array field, so keyed 1-indexed per instance like
-     * instance_enabled_N above rather than as a SETTINGS_TABLE row. Out of
-     * range resets to the Dashboard, matching validate_config(). */
+    /* Per-instance NINA page layout (0 Dashboard, 1 Image-forward, 2 Halo,
+     * 3 Meridian, 4 Orbit; 2 to 4 draw only on a round panel). Array field, so
+     * keyed 1-indexed per instance like instance_enabled_N above rather than as
+     * a SETTINGS_TABLE row. Out of range resets to the Dashboard, matching
+     * validate_config(). A round-only value stored from a round device is kept
+     * as it is on a square one, which draws the Dashboard for it. */
     static const char *const k_nina_layout_keys[] = {
         "nina_layout_1", "nina_layout_2", "nina_layout_3"
     };
@@ -1412,7 +1415,7 @@ static app_config_t *parse_config_from_json(cJSON *root)
         cJSON *jlayout = cJSON_GetObjectItem(root, k_nina_layout_keys[li]);
         if (cJSON_IsNumber(jlayout)) {
             int v = jlayout->valueint;
-            cfg->nina_layout[li] = (v >= 0 && v <= 1) ? (uint8_t)v : 0;
+            cfg->nina_layout[li] = (v >= 0 && v <= 4) ? (uint8_t)v : 0;
         }
     }
 

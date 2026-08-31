@@ -51,7 +51,8 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "radar_wms.h"   /* radar_wms_merc_x/y, radar_wms_find */
+#include "radar_wms.h"    /* radar_wms_merc_x/y, radar_wms_find */
+#include "screen_geom.h"  /* screen_size(): the frame is the panel width */
 
 #define CLOUDS_URL_MAX        RADAR_WMS_URL_MAX   /* 512: the GetMap URL is ~290 chars, 302 worst case
                                                     (longest channel + longest basemap suffix) */
@@ -59,7 +60,10 @@
 #define CLOUDS_TIMES_MAX      10                  /* == max clouds_frames (ring capacity) */
 #define CLOUDS_PERIOD_S       600u                /* GOES ABI cadence, PT10M on every channel */
 #define CLOUDS_FALLBACK_LAG_S 3000u               /* 50 min behind wall clock when the domain fetch fails */
-#define CLOUDS_PX             720                 /* frame size, native panel size */
+/* Frame size in pixels, which is the panel width. The GIBS GetMap WIDTH/HEIGHT
+ * and the EPSG:3857 bbox half-width are BOTH derived from this number: change
+ * one without the other and the map scale silently changes. */
+#define CLOUDS_PX             (screen_size())
 #define CLOUDS_ZOOM_MIN       5
 #define CLOUDS_ZOOM_MAX       9
 #define CLOUDS_DOMAIN_BACK_S  (3u * 3600u)        /* DescribeDomains window: now-3h .. now+1h */
@@ -129,13 +133,13 @@ static inline const char *clouds_basemap_suffix(uint8_t bm)
     return s_clouds_basemaps[(bm < CLOUDS_BASEMAP_COUNT) ? bm : 0];
 }
 
-/* Half-width of the 720 px box in Web-Mercator metres at Web-Mercator zoom
- * @p zoom (clamped 5..9): 720 px * (world circumference / (256 * 2^zoom)) / 2. */
+/* Half-width of the CLOUDS_PX box in Web-Mercator metres at Web-Mercator zoom
+ * @p zoom (clamped 5..9): CLOUDS_PX px * (world circumference / (256 * 2^zoom)) / 2. */
 static inline float clouds_half_m(uint8_t zoom)
 {
     if (zoom < CLOUDS_ZOOM_MIN) zoom = CLOUDS_ZOOM_MIN;
     if (zoom > CLOUDS_ZOOM_MAX) zoom = CLOUDS_ZOOM_MAX;
-    return 360.0f * 40075016.686f / (256.0f * (float)(1u << zoom));
+    return ((float)CLOUDS_PX / 2.0f) * 40075016.686f / (256.0f * (float)(1u << zoom));
 }
 
 /* Square EPSG:3857 box centred on lat/lon. Latitude is clamped to +-85 inside
@@ -479,7 +483,12 @@ static inline bool clouds_px_near_black(uint16_t v)
  * reference that is itself holed in the same place (consecutive partial slots)
  * falls under the floor rather than voting "clean". Both buffers w x h, same
  * stride. Pure: no allocation, sampling grid only, never reads every pixel. */
-#define CLOUDS_HOLE_CELLS      6    /* grid side: 6x6 cells = 120 px on a 720 px frame */
+/* Grid side: 6x6 cells, 120 px each on a 720 px frame and 133 px on an 800 px
+ * one. The two lit-sample thresholds below were tuned against the 120 px cell;
+ * on an 800 px frame the same rule is slightly less sensitive because each cell
+ * carries more samples. Accepted as-is for phase 1 rather than re-derived, and
+ * listed as open verification item 6 in the design. */
+#define CLOUDS_HOLE_CELLS      6
 #define CLOUDS_HOLE_CELL_PCT   75   /* >= this % of a cell's ref-lit samples gone black = hole */
 #define CLOUDS_HOLE_MIN_LIT_Q  4    /* ref cell needs >= samples/4 lit to be judged at all */
 #define CLOUDS_HOLE_MIN_CELL_N 8    /* and at least this many samples (tiny frames say nothing) */

@@ -12,8 +12,9 @@
  *  All callers should use this instead of 0 (infinite) to prevent deadlocks. */
 #define LVGL_LOCK_TIMEOUT_MS 1000
 
-/** Display resolution (720x720 square panel) */
-#define SCREEN_SIZE 720
+/* Panel geometry is a runtime value: screen_size(), screen_center(),
+ * screen_safe_inset(), screen_safe_radius() and SCREEN_ROUND. */
+#include "screen_geom.h"
 
 /**
  * @brief Set the screen rotation (0-3 = 0/90/180/270 degrees).

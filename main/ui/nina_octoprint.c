@@ -37,6 +37,7 @@
 #include "nina_empty_state.h"
 #include "app_config.h"
 #include "display_defs.h"
+#include "ui_round.h"
 #include "page_conn.h"
 #include "jpeg_utils.h"
 #include "bsp/esp-bsp.h"   /* bsp_display_lock / bsp_display_unlock */
@@ -52,9 +53,8 @@
 
 static const char *TAG = "octo_ui";
 
-#define OCTO_PAD   16   /* outer padding, matches OUTER_PADDING */
 #define OCTO_GAP   12   /* inter-card gap (mockup v1) */
-#define OCTO_W     (SCREEN_SIZE - 2 * OCTO_PAD)
+#define OCTO_W     ui_page_root_size()   /* 688 on square, 510 or 564 on round */
 
 /* ── Shared styles ────────────────────────────────────────────────────── */
 
@@ -78,6 +78,11 @@ static lv_obj_t *s_content   = NULL;  /* deleted + rebuilt by refresh_config */
 static lv_obj_t *s_backdrop  = NULL;  /* full-cover host for the empty state */
 static lv_obj_t *s_empty     = NULL;
 static octoprint_widgets_t s_w;
+
+/* Last string written to s_w.rim_state_arclabel. Cleared on every rebuild, so a
+ * fresh arclabel is always written once. Inert on square, where the handle is
+ * NULL and nothing reads this. */
+static char s_rim_state_shadow[32];
 
 /* Current opacity of s_content. Dimmed while the source is STALE (last values
  * kept on screen), full while it is OK. Tracked so the update path only
@@ -636,6 +641,10 @@ lv_obj_t *octo_w_state_line(lv_obj_t *parent, octoprint_widgets_t *w)
 
 /* ── Layout dispatch ──────────────────────────────────────────────────── */
 
+#if !CONFIG_NINA_FAMILY_ROUND
+/* Square only. The round arm in build_content() names the two round builders
+ * outright, so on the round build this table has no reader left and an
+ * unguarded copy warns as an unused static (spec addendum section 6 rule 2). */
 static const octoprint_layout_ops_t *const s_layouts[OCTO_LAYOUT_COUNT] = {
     &octoprint_layout_bento,
     &octoprint_layout_bento,   /* retired alias: slot 1 was "Instrument dial".
@@ -651,16 +660,37 @@ static const octoprint_layout_ops_t *const s_layouts[OCTO_LAYOUT_COUNT] = {
     &octoprint_layout_overlay,   /* slot 5: "Floating overlay" */
     &octoprint_layout_letterbox, /* slot 6: "Letterbox"        */
 };
+#endif
 
 static void build_content(void)
 {
     memset(&s_w, 0, sizeof(s_w));
+    s_rim_state_shadow[0] = '\0';
 
     uint8_t idx = app_config_get()->octoprint_layout;
     if (idx >= OCTO_LAYOUT_COUNT) {
         idx = 0;
     }
+#if CONFIG_NINA_FAMILY_ROUND
+    /* Round removals (spec addendum section 7): "Floating overlay" (5) and
+     * "Letterbox" (6) have no round composition, so both resolve to the glass
+     * "Immersive image" builder. Neither square builder is even linked into the
+     * round binary any more (main/CMakeLists.txt nina_square_srcs) and the web
+     * UI drops both options once /api/version reports shape "round". The stored
+     * config value is still NOT rewritten, so a board swapped back to a square
+     * panel gets its chosen layout again. */
+    if (idx == 5 || idx == 6) {
+        idx = 2;
+    }
+    /* Key on 2, not on 0: slots 1, 3 and 4 are RETIRED ALIASES that render Grid
+     * on square (see the s_layouts comment), and they must render Grid here too.
+     * The round build reaches no square OctoPrint layout at all: 0, 1, 3 and 4
+     * render the round Grid, and 2, 5 and 6 the round Immersive. */
+    const octoprint_layout_ops_t *ops = (idx == 2) ? &octoprint_layout_glass_round
+                                                   : &octoprint_layout_bento_round;
+#else
     const octoprint_layout_ops_t *ops = s_layouts[idx];
+#endif
 
     /* Canvas first: a full-bleed layout gets the whole screen, shifted up and
      * left to negate main_cont's OUTER_PADDING (the same negation the image,
@@ -671,10 +701,14 @@ static void build_content(void)
      * held copy and re-flags a rescale just before this runs). */
     s_img_cover = ops->image_cover;
 
-    int size = ops->full_bleed ? SCREEN_SIZE : OCTO_W;
-    int off  = ops->full_bleed ? -OCTO_PAD : 0;
+    /* A full-bleed layout takes the whole panel, an inset one the inscribed
+     * square (688 on square, 510 at 720 round, 564 at 800 round). Centring
+     * replaces the explicit offset: on square a 720 root centred in
+     * main_cont's 688 content box lands at -16,-16 and a 688 root at 0,0,
+     * which is exactly what the two branches produced. */
+    int size = ops->full_bleed ? screen_size() : OCTO_W;
     lv_obj_set_size(s_root, size, size);
-    lv_obj_set_pos(s_root, off, off);
+    lv_obj_center(s_root);
 
     s_content = octo_w_row(s_root, false, OCTO_GAP);
     lv_obj_set_size(s_content, LV_PCT(100), LV_PCT(100));
@@ -928,7 +962,7 @@ static void temp_update(octo_temp_el_t *t, float actual, float target)
  * second pass scales by exactly 1.
  *
  * COVER guard: a very lopsided source (a tall thumbnail) would cover a 720
- * square with an enormous copy, so anything past 2 * SCREEN_SIZE on either axis
+ * square with an enormous copy, so anything past 2 * screen_size() on either axis
  * falls back to FIT for that frame. The decision depends only on the aspect and
  * the box, never on the size, so the fallback is idempotent too: re-running
  * COVER on a fitted copy of the same aspect trips the same guard and returns
@@ -940,11 +974,11 @@ static bool fit_into_box(uint16_t src_w, uint16_t src_h, int32_t bw, int32_t bh,
     if (bw < 8 || bh < 8 || src_w == 0 || src_h == 0) {
         return false;
     }
-    if (bw > SCREEN_SIZE) {
-        bw = SCREEN_SIZE;
+    if (bw > screen_size()) {
+        bw = screen_size();
     }
-    if (bh > SCREEN_SIZE) {
-        bh = SCREEN_SIZE;
+    if (bh > screen_size()) {
+        bh = screen_size();
     }
 
     if (cover) {
@@ -964,7 +998,7 @@ static bool fit_into_box(uint16_t src_w, uint16_t src_h, int32_t bw, int32_t bh,
                 cw = bw;
             }
         }
-        if (cw <= 2 * SCREEN_SIZE && ch <= 2 * SCREEN_SIZE) {
+        if (cw <= 2 * screen_size() && ch <= 2 * screen_size()) {
             *out_w = (uint16_t)cw;
             *out_h = (uint16_t)ch;
             return true;
@@ -1186,8 +1220,8 @@ static void image_update(octoprint_data_t *data, octo_staged_t *st,
     int32_t bh = lv_obj_get_content_height(s_w.img_hero);
     bool box_known = (bw >= 8 && bh >= 8);
     if (box_known) {
-        s_box_w = (uint16_t)((bw > SCREEN_SIZE) ? SCREEN_SIZE : bw);
-        s_box_h = (uint16_t)((bh > SCREEN_SIZE) ? SCREEN_SIZE : bh);
+        s_box_w = (uint16_t)((bw > screen_size()) ? screen_size() : bw);
+        s_box_h = (uint16_t)((bh > screen_size()) ? screen_size() : bh);
     }
 
     if (st->buf && box_known) {
@@ -1392,12 +1426,58 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
     }
 
     /* -- identity / state -------------------------------------------------- */
-    set_txt(s_w.lbl_state, state_text(data));
+    const char *state_str = state_text(data);
+    set_txt(s_w.lbl_state, state_str);
+    if (s_w.rim_state_arclabel) {
+        /* lv_arclabel_set_text() reallocates and re-lays out the run on EVERY
+         * call, change or not, so the page keeps a shadow copy: the update path
+         * runs once per poll and G1 only sanctions arc text that changes about
+         * once a minute. s_rim_state_shadow is cleared in build_content(), so a
+         * layout or theme rebuild re-writes the fresh, empty arclabel. */
+        if (strcmp(s_rim_state_shadow, state_str) != 0) {
+            snprintf(s_rim_state_shadow, sizeof(s_rim_state_shadow), "%s", state_str);
+#if LV_USE_ARCLABEL
+            lv_arclabel_set_text(s_w.rim_state_arclabel, s_rim_state_shadow);
+#endif
+        }
+    }
+
+    /* Merged temperature cell (round Immersive only): "215 / 60" as the board
+     * draws it. Each half is formatted on its own, because a printer that
+     * reports one tool and not the other hands us a NAN for the missing side
+     * and "%.0f" would put "nan" on the panel. */
+    if (s_w.lbl_temps) {
+        char t[48];
+        char nz[16] = "--";
+        char bd[16] = "--";
+        if (!isnan(data->nozzle_actual)) {
+            snprintf(nz, sizeof(nz), "%.0f", (double)data->nozzle_actual);
+        }
+        if (!isnan(data->bed_actual)) {
+            snprintf(bd, sizeof(bd), "%.0f\xC2\xB0", (double)data->bed_actual);
+        }
+        snprintf(t, sizeof(t), "%s / %s", nz, bd);
+        set_txt(s_w.lbl_temps, t);
+    }
 
     bool closed = (strcasecmp(data->conn_state, "Closed") == 0);
+    uint32_t state_col = data->error ? col_alert()
+                                     : (data->printing ? col_accent() : col_label());
     if (s_w.state_dot) {
-        uint32_t c = data->error ? col_alert() : (data->printing ? col_accent() : col_label());
-        lv_obj_set_style_bg_color(s_w.state_dot, lv_color_hex(c), 0);
+        lv_obj_set_style_bg_color(s_w.state_dot, lv_color_hex(state_col), 0);
+    }
+    /* Round Immersive only: rim_crown/rim_state_arclabel are the page's one
+     * status element (no conn chip built there), so a closed serial link or a
+     * stale source turns them alert colored instead of leaving the crown grey
+     * while only the fault strip carries the news. state_dot has its own
+     * conn/fault chip beside it on every other layout, so it is untouched
+     * (review_impl_D12.md I-1). */
+    uint32_t crown_col = (s_w.rim_crown && (closed || stale)) ? col_alert() : state_col;
+    if (s_w.rim_crown) {
+        lv_obj_set_style_arc_color(s_w.rim_crown, lv_color_hex(crown_col), LV_PART_MAIN);
+    }
+    if (s_w.rim_state_arclabel) {
+        lv_obj_set_style_text_color(s_w.rim_state_arclabel, lv_color_hex(crown_col), 0);
     }
 
     /* /api/connection mirrors the printer state ("Printing"/"Operational") while
@@ -1440,10 +1520,12 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
             fault_text = "Printer error";
         }
         /* The strip would only repeat the visible connection element (Bento
-         * places both in one header row), so suppress it when the texts match.
-         * When they differ -- a real error alongside a conn line -- both show,
-         * exactly as before. */
-        if (conn_show && strcmp(fault_text, conn_text) == 0) {
+         * places both in one header row), so suppress it when the texts match
+         * AND that element was actually built -- round layouts have no
+         * lbl_conn, so a closed link must still speak through the strip there
+         * (review_impl_D12.md I-1). When conn_text differs -- a real error
+         * alongside a conn line -- both show, exactly as before. */
+        if (conn_show && s_w.lbl_conn && strcmp(fault_text, conn_text) == 0) {
             fault = false;
         } else {
             set_txt(s_w.lbl_error, fault_text);
@@ -1525,6 +1607,11 @@ static void apply_styles(void)
                                    LV_PART_MAIN);
         lv_obj_set_style_arc_color(s_w.arc_completion, lv_color_hex(col_accent()),
                                    LV_PART_INDICATOR);
+    }
+    if (s_w.rim_crown) {
+        /* Resting colour only. The update path repaints it with the live state
+         * colour on the very next poll, exactly like state_dot. */
+        lv_obj_set_style_arc_color(s_w.rim_crown, lv_color_hex(col_label()), LV_PART_MAIN);
     }
     if (s_w.bar_progress) {
         /* Only the accent indicator. The MAIN track is painted by

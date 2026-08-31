@@ -445,6 +445,34 @@
     }
     .top-nav .qc-btn:hover { color: #f4f4f5; border-color: rgba(var(--accent-rgb), 0.3); background: rgba(255, 255, 255, 0.04); }
     .top-nav .qc-btn.muted { color: #60a5fa; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.15); }
+    /* volume: one pill holding the mute icon, the slider and the readout */
+    .top-nav .qc-vol {
+      display: flex; align-items: center; gap: 6px;
+      padding: 3px 10px 3px 4px; border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 10px; background: rgba(255, 255, 255, 0.02); transition: all 0.2s ease;
+    }
+    .top-nav .qc-vol:hover { border-color: rgba(var(--accent-rgb), 0.3); }
+    .top-nav .qc-vol.muted { border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.15); }
+    .top-nav .qc-vol .qc-btn { padding: 5px 6px; border: 0; background: none; }
+    .top-nav .qc-vol .qc-btn:hover { border: 0; background: none; }
+    .top-nav .qc-vol.muted .qc-btn { color: #60a5fa; }
+    .top-nav .qc-range {
+      -webkit-appearance: none; appearance: none; width: 86px; height: 4px;
+      border-radius: 2px; background: rgba(255, 255, 255, 0.16); cursor: pointer;
+    }
+    .top-nav .qc-range::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 12px; height: 12px; border-radius: 50%;
+      background: var(--accent); border: 0; cursor: pointer;
+    }
+    .top-nav .qc-range::-moz-range-thumb {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: var(--accent); border: 0; cursor: pointer;
+    }
+    .top-nav .qc-vol.muted .qc-range { opacity: 0.4; }
+    .top-nav .qc-vol-val {
+      font-size: 0.72rem; color: var(--text-hint); font-variant-numeric: tabular-nums;
+      min-width: 34px; text-align: right;
+    }
     .top-nav .update-pill {
       color: var(--accent); font-family: inherit; font-size: 0.72rem; font-weight: 600;
       display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
@@ -848,6 +876,7 @@
       box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.3);
     }
     .progress-status { font-size: 0.8rem; color: #a1a1aa; margin-top: 10px; text-align: center; }
+    .progress-status.is-error { color: var(--danger); font-weight: 600; }
 
     /* === NODE CARD DISABLED === */
     .node-card-disabled { opacity: 0.5; pointer-events: none; transition: opacity 0.3s ease; }
@@ -1039,10 +1068,13 @@
       <div class="nav-right">
         <button class="update-pill" id="updatePill" style="display:none" title="Update available - click to install"></button>
         <span class="quick-controls" id="quickControls">
-          <button type="button" class="qc-btn" id="muteBtn" title="Mute all audio">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path id="muteIconOn" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path id="muteIconOff" style="display:none" d="M16 9l6 6M22 9l-6 6"/></svg>
-            <span id="muteLabel">Mute</span>
-          </button>
+          <span class="qc-vol" id="volGroup">
+            <button type="button" class="qc-btn" id="muteBtn" title="Mute all audio" aria-label="Mute all audio">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path id="muteIconOn" d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/><path id="muteIconOff" style="display:none" d="M16 9l6 6M22 9l-6 6"/></svg>
+            </button>
+            <input type="range" class="qc-range" id="volRange" min="0" max="100" step="5" value="90" title="Speaker volume" aria-label="Speaker volume">
+            <span class="qc-vol-val" id="volVal">--</span>
+          </span>
         </span>
         <a class="github-link" href="https://github.com/chvvkumar/ESP32-P4-NINA-Display" target="_blank" rel="noopener">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
@@ -1327,8 +1359,10 @@
             '<select class="input" id="nina_layout_'+i+'" onchange="checkDirty()">'+
             '<option value="0">Dashboard</option>'+
             '<option value="1">Image-forward</option>'+
+            '<option value="2">Halo</option>'+
+            '<option value="4">Orbit</option>'+
             '</select>'+
-            '<div class="field-hint">How the page for this instance is drawn. Dashboard shows the exposure arc with the guider, focuser and sequence tiles. Image-forward shows the exposure readout and sub progress in large type over the latest captured image.</div></div>'+
+            '<div class="field-hint">How the page for this instance is drawn. Dashboard shows the exposure arc with the guider, focuser and sequence tiles, and is available on every screen. Image-forward puts the exposure readout and sub progress in large type over the latest captured image, and is a square-screen design. On a round screen every design shows the picture filling the whole circle, with the safety shield at the top and the exposure progress running around the rim: Dashboard keeps its dials and tiles for the readings view, Halo and Orbit each arrange the readings their own way. On all three, tapping the picture steps through four views, picture with all the readings, picture with just the rim progress, picture on its own, and readings on their own, then back to the start. Holding your finger on the picture opens the full, uncropped image full screen. Only the designs your screen can draw are offered here; the others are not shown, and a choice you made on another screen shape is kept for when you go back to it.</div></div>'+
             '</div>'+
             '<div class="subsection">'+
             '<div class="subsection-title">Notifications</div>'+
@@ -1973,6 +2007,37 @@
     function setWidgetStyle(v){postJson('/api/widget-style',{widget_style:parseInt(v)})}
     function setScreenRotation(v){postJson('/api/screen-rotation',{screen_rotation:parseInt(v)})}
 
+    /* Panel Size is not a config field: it writes straight to /api/panel
+       (NVS "board"/"panel"), so it is not part of populateConfig/
+       getConfigData and never rides along with a config Save. A restart is
+       required for the device to pick it up, so this only reports success
+       and never reboots the device itself. */
+    function setPanelSize(v){
+      var sel=$('panel_size_select');
+      var prev=sel?sel.dataset.prev:null;
+      postJson('/api/panel',{panel:parseInt(v)}).then(function(r){
+        if(!r.ok) throw new Error('HTTP '+r.status);
+        return r.json();
+      }).then(function(){
+        if(sel) sel.dataset.prev=v;
+        showToast('Panel size saved. Restart the device for it to take effect.','success');
+      }).catch(function(){
+        if(sel){
+          /* prev is unset when the initial read never landed. Re-read rather
+             than leave the select showing a value the device rejected. */
+          if(prev!=null) sel.value=prev;
+          else fetch('/api/panel').then(function(r){
+            if(!r.ok) throw new Error('HTTP '+r.status);
+            return r.json();
+          }).then(function(p){
+            sel.value=String(p.panel===1?1:2);
+            sel.dataset.prev=sel.value;
+          }).catch(function(){});
+        }
+        showToast('Could not save panel size','error');
+      });
+    }
+
     function updateAggregationLabel(v){
       $('toast_aggregation_val').textContent=parseInt(v)===0?'Off':v+'s';
     }
@@ -2403,6 +2468,7 @@
       data.moon_update_interval_s=parseInt($('moonInterval').value,10)||60;
       data.moon_bg_style=parseInt($('moonBg').value,10)||0;
       data.moon_drag_light_mode=parseInt($('moonDragLight').value,10)||0;
+      data.moon_round_size_pct=parseInt($('moon_round_size_pct').value,10)||100;
       data.moon_lat=currentMoonLat();
       data.moon_lon=currentMoonLon();
       data.moon_north_up=$('moon_north_up').checked?1:0;
@@ -2815,6 +2881,22 @@
       $('nina_layout_0').value=String(data.nina_layout_1||0);
       $('nina_layout_1').value=String(data.nina_layout_2||0);
       $('nina_layout_2').value=String(data.nina_layout_3||0);
+      /* Each screen shape draws its own set: Halo (2) and Orbit (4) are round
+         designs, Image-forward (1) is a square one. HIDE and DISABLE the ones
+         this screen cannot draw rather than removing them: a removed option
+         blanks the select, and the save path's parseInt('')||0 would then
+         quietly rewrite a value the user picked on the other shape. Both
+         attributes are needed: iOS Safari still lists a hidden option in its
+         native picker, and disabled keeps it unpickable there. The stored value
+         is left alone either way, and the device draws the Dashboard for an
+         option it cannot render. */
+      fetchJsonMemo('/api/version').then(function(v){
+        var off=(v.shape==='round')?['1']:['2','4'];
+        for(var i=0;i<3;i++){
+          var sel=$('nina_layout_'+i); if(!sel) continue;
+          off.forEach(function(k){var o=sel.querySelector('option[value="'+k+'"]');if(o){o.hidden=true;o.disabled=true;}});
+        }
+      }).catch(function(){});
 
       for(var i=0;i<3;i++){
         var key='filter_colors_'+(i+1);
@@ -2891,6 +2973,7 @@
       if($('moonInterval')) $('moonInterval').value=String(data.moon_update_interval_s||60);
       if($('moonBg')) $('moonBg').value=String(data.moon_bg_style||0);
       if($('moonDragLight')) $('moonDragLight').value=String(data.moon_drag_light_mode||0);
+      if($('moon_round_size_pct')){ $('moon_round_size_pct').value=String(data.moon_round_size_pct||100); updateMoonSizeReadout(); }
       if($('moon_north_up')) $('moon_north_up').checked=(data.moon_north_up==null)?true:!!data.moon_north_up;
       if($('moon_flip_u')) $('moon_flip_u').checked=!!data.moon_flip_u;
       if($('moon_flip_v')) $('moon_flip_v').checked=!!data.moon_flip_v;
@@ -2993,7 +3076,18 @@
          here; they resolve to Grid on the device, so show that rather than
          leaving the select blank. Live layouts: 0 Grid, 2 Immersive
          image, 5 Floating overlay, 6 Letterbox. */
-      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;if(ol!==0&&ol!==2&&ol!==5&&ol!==6)ol=0;$('octoLayout').value=String(ol);}
+      if($('octoLayout')){var ol=parseInt(data.octoprint_layout,10)||0;if(ol!==0&&ol!==2&&ol!==5&&ol!==6)ol=0;$('octoLayout').value=String(ol);
+        /* Round panels have no Floating overlay and no Letterbox composition
+           (both builders resolve to Immersive image on the device and are not
+           even linked into the round binary), so drop the two options there.
+           The stored value is left alone: a board moved back to a square panel
+           gets its chosen layout again. */
+        fetchJsonMemo('/api/version').then(function(v){
+          var sel=$('octoLayout'); if(!sel||v.shape!=='round') return;
+          ['5','6'].forEach(function(k){var o=sel.querySelector('option[value="'+k+'"]');if(o)o.remove();});
+          if(ol===5||ol===6) sel.value='2';
+        }).catch(function(){});
+      }
       if($('octoImageSource')) $('octoImageSource').value=String(data.octoprint_image_source||0);
       if($('octoSnapshotUrl')) $('octoSnapshotUrl').value=data.octoprint_snapshot_url||'';
       if($('octoOverlayVisible')) $('octoOverlayVisible').checked=data.octoprint_overlay_visible!=null?!!data.octoprint_overlay_visible:true;
@@ -3036,6 +3130,25 @@
       $('color_brightness_val').textContent=cb+'%';
       $('screen_sleep_enabled').checked=!!data.screen_sleep_enabled;
       $('screen_sleep_timeout').value=data.screen_sleep_timeout_s||60;
+      /* Panel Size lives in NVS outside app_config_t (board_profile), not in
+         the config blob this function otherwise reads, and only exists on
+         round boards. Shown/populated from separate device calls rather than
+         from `data`. */
+      return fetchJsonMemo('/api/version').then(function(v){
+        var f=$('panel_size_field');
+        if(!f) return;
+        if(v.shape!=='round'){ f.style.display='none'; return; }
+        f.style.display='';
+        return fetch('/api/panel').then(function(r){
+          if(!r.ok) throw new Error('HTTP '+r.status);
+          return r.json();
+        }).then(function(p){
+          var sel=$('panel_size_select');
+          if(!sel) return;
+          sel.value=String(p.panel===1?1:2);
+          sel.dataset.prev=sel.value;
+        });
+      }).catch(function(){});
     }
 
     async function populateTab_behavior(data){
@@ -3063,6 +3176,7 @@
       var vVol=data.alert_voice_volume!=null?data.alert_voice_volume:90;
       $('alert_voice_volume').value=vVol;
       $('alert_voice_volume_val').textContent=vVol+'%';
+      if(typeof volState!=='undefined'){ volState.vol=vVol; renderVol(); }
       var vMask=data.alert_voice_types!=null?data.alert_voice_types:7;
       for(var vb=0;vb<3;vb++){$('alert_voice_type_'+vb).checked=!!(vMask&(1<<vb));}
       $('alert_voice_repeat_min').value=data.alert_voice_repeat_min!=null?data.alert_voice_repeat_min:5;
@@ -4246,6 +4360,7 @@
       progressDiv.style.display='block';
       btn.disabled=true;
       fill.style.width='0%';
+      status.classList.remove('is-error');
       status.textContent='Uploading...';
       var xhr=new XMLHttpRequest();
       xhr.open('POST','/api/ota',true);
@@ -4263,17 +4378,36 @@
           status.textContent='Update complete! Rebooting...';
           showToast('Firmware updated. Rebooting...','success');
         }else{
-          status.textContent='Update failed (HTTP '+xhr.status+')';
-          showToast('OTA failed','error');
+          var reason='';
+          try{reason=JSON.parse(xhr.responseText).error||'';}catch(e){}
+          status.classList.add('is-error');
+          status.textContent=reason?('Update refused: '+reason):('Update failed (HTTP '+xhr.status+')');
+          showToast(reason||'OTA failed','error');
           btn.disabled=false;
         }
       });
       xhr.addEventListener('error',function(){
-        status.textContent='Upload error';
+        status.classList.add('is-error');
+        status.textContent='Upload error: the device closed the connection. Check that the file is the firmware for this panel.';
         showToast('OTA upload error','error');
         btn.disabled=false;
       });
-      xhr.send(file);
+      /* Ask the device to judge the file header first: a wrong-shape file is
+         refused in one round trip instead of after the whole upload. If the
+         check itself cannot be reached, fall through and let /api/ota decide. */
+      status.textContent='Checking file...';
+      file.slice(0,4096).arrayBuffer().then(function(head){
+        return fetch('/api/ota-check',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:head});
+      }).then(function(r){
+        if(r.ok){status.textContent='Uploading...';xhr.send(file);return;}
+        return r.json().catch(function(){return {};}).then(function(j){
+          var reason=j.error||('HTTP '+r.status);
+          status.classList.add('is-error');
+          status.textContent='Update refused: '+reason;
+          showToast(reason,'error');
+          btn.disabled=false;
+        });
+      }).catch(function(){status.textContent='Uploading...';xhr.send(file);});
     }
 
     /* === Screenshot === */
@@ -4869,6 +5003,11 @@
           if(d&&d.error_msg) showToast(d.error_msg,'error');
         }).catch(function(){});
       }).catch(function(){});
+    }
+
+    function updateMoonSizeReadout(){
+      var el=$('moon_round_size_pct'); var out=$('moon_round_size_val');
+      if(el&&out) out.textContent=(parseInt(el.value,10)||100)+'%';
     }
 
     function updateMoonOrientReadout(which){
@@ -6011,31 +6150,66 @@
        so they don't fire onto the device's few httpd workers mid-load. The GitHub
        update check (~7s) runs once in the background, lightly delayed, after that
        work so the badge populates on every tab without opening System. */
-    /* === Quick controls: global audio mute (nav bar) ===
-       Instant path through the Control API (deferred NVS save, no dirty
-       state); independent of the Behavior tab save model. */
-    function renderMute(muted){
-      var btn=$('muteBtn');
-      if(!btn) return;
-      btn.classList.toggle('muted',!!muted);
-      btn.title=muted?'Audio muted - click to unmute':'Mute all audio';
-      $('muteLabel').textContent=muted?'Muted':'Mute';
-      $('muteIconOn').style.display=muted?'none':'';
-      $('muteIconOff').style.display=muted?'':'none';
+    /* === Quick controls: speaker volume + global audio mute (nav bar) ===
+       One pill: the icon toggles audio_muted, the slider sets alert_voice_volume.
+       Instant path through the Control API (deferred NVS save, no dirty state);
+       independent of the Behavior tab save model, which edits the same volume
+       field and re-reads it on load. The slider writes on 'change' (pointer
+       release), not 'input', so one drag is one request instead of twenty. */
+    var volState={muted:false,vol:90};
+    function ctrlJSON(url){
+      return fetch(url,{method:'POST'})
+        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+    }
+    function renderVol(){
+      if(!$('volGroup')) return;
+      $('volGroup').classList.toggle('muted',volState.muted);
+      $('muteBtn').title=volState.muted?'Audio muted - click to unmute':'Mute all audio';
+      $('muteIconOn').style.display=volState.muted?'none':'';
+      $('muteIconOff').style.display=volState.muted?'':'none';
+      $('volRange').value=volState.vol;
+      $('volVal').textContent=volState.vol+'%';
+      /* The Behavior tab edits the same field on a save-on-Save model: keep its
+         slider in step so a later tab Save cannot write back the stale value. */
+      if($('alert_voice_volume')){
+        $('alert_voice_volume').value=volState.vol;
+        $('alert_voice_volume_val').textContent=volState.vol+'%';
+      }
     }
     $('muteBtn').addEventListener('click',function(){
-      fetch('/api/control/toggle?name=audio_muted',{method:'POST'})
-        .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-        .then(function(it){ renderMute(it.value); })
+      ctrlJSON('/api/control/toggle?name=audio_muted')
+        .then(function(it){ volState.muted=!!it.value; renderVol(); })
         .catch(function(){});
+    });
+    $('volRange').addEventListener('input',function(){ $('volVal').textContent=this.value+'%'; });
+    $('volRange').addEventListener('change',function(){
+      var v=parseInt(this.value,10)||0;
+      ctrlJSON('/api/control/set?name=alert_voice_volume&value='+v)
+        .then(function(it){
+          volState.vol=it.value;
+          /* Turning it up means the user wants to hear something: lift a standing mute. */
+          if(volState.muted&&v>0){
+            return ctrlJSON('/api/control/toggle?name=audio_muted')
+              .then(function(m){ volState.muted=!!m.value; });
+          }
+        })
+        .then(renderVol)
+        .catch(function(){ renderVol(); });
     });
 
     cfgOverlay('loading');
     loadConfig().then(function(){
       fetch('/api/control/get?name=audio_muted')
         .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-        .then(function(it){ renderMute(it.value); })
-        .catch(function(){});
+        .then(function(it){ volState.muted=!!it.value; })
+        .catch(function(){})
+        .then(function(){
+          return fetch('/api/control/get?name=alert_voice_volume')
+            .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+            .then(function(it){ volState.vol=it.value; })
+            .catch(function(){});
+        })
+        .then(renderVol);
       loadVersion();
       refreshNavMetrics();
       setInterval(refreshNavMetrics, 5000);

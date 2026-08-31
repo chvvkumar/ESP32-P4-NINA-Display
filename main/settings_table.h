@@ -145,6 +145,7 @@
     INT       (custom_hflip,                 "custom_hflip",                 0,     0,     1) \
     /* -- Moon phase -- */ \
     INT_RESET (moon_bg_style,                "moon_bg_style",                0,     0,     3) \
+    INT       (moon_round_size_pct,          "moon_round_size_pct",          100,   50,    150)   /* v79 round Moon disc size, percent of the rim diameter */ \
     FLT       (moon_lat,                     "moon_lat",                     0.0f,  -90.0f, 90.0f)  /* no prior clamp; obviously-correct latitude bound */ \
     FLT       (moon_lon,                     "moon_lon",                     0.0f,  -180.0f,180.0f) /* no prior clamp; obviously-correct longitude bound */ \
     INT_RESET (solar_band,                   "solar_band",                   0,     0,     23) \
@@ -196,10 +197,10 @@
     BOOL      (goes_crop,                    "goes_crop",                    false) \
     BOOL      (solar_crop,                   "solar_crop",                   false) \
     BOOL      (custom_crop,                  "custom_crop",                  false) \
-    BOOL      (goes_show_overlay,            "goes_show_overlay",            true) \
-    BOOL      (moon_show_overlay,            "moon_show_overlay",            true) \
-    BOOL      (solar_show_overlay,           "solar_show_overlay",           true) \
-    BOOL      (custom_show_overlay,          "custom_show_overlay",          true) \
+    BOOL      (goes_show_overlay,            "goes_show_overlay",            false) \
+    BOOL      (moon_show_overlay,            "moon_show_overlay",            false) \
+    BOOL      (solar_show_overlay,           "solar_show_overlay",           false) \
+    BOOL      (custom_show_overlay,          "custom_show_overlay",          false) \
     /* -- Weather Radar page (v63) -- */ \
     BOOL      (radar_enabled,                "radar_enabled",                false) \
     STR       (radar_token,                  "radar_token",                  "")    /* WSR-88D site id ("KTLX"), a regional/CONUS name, or "" = resolve the nearest site at runtime. Pasted into the image URL, so it is a trust boundary: the charset rule lives in validate_config() (load path) and in parse_config_from_json() (web save path) — STR here only bounds the copy and NUL-terminates */ \
@@ -211,10 +212,10 @@
     INT_RESET (radar_map_style,              "radar_map_style",              1,     0,     2)     /* v65: which map the radar echoes are drawn over: 0 = standard NWS picture with roads and city names (the pre-v65 behaviour), 1 = state lines only (the default), 2 = state and county lines. RESET, not clamp: an unknown value (stale blob byte, or a future style this firmware does not know) falls back to state lines only rather than the nearest bound */ \
     /* -- Clouds page (v66): NASA GIBS GOES GeoColor around weather_lat/lon -- */ \
     BOOL      (clouds_enabled,               "clouds_enabled",               false) \
-    BOOL      (clouds_show_overlay,          "clouds_show_overlay",          true) \
+    BOOL      (clouds_show_overlay,          "clouds_show_overlay",          false) \
     INT       (clouds_update_interval_s,     "clouds_update_interval_s",     900,   300,   7200)  /* 15 min default (GIBS publishes every 10 min). True clamp, matching the image POST handler's clamp-to-bound */ \
     INT_RESET (clouds_frames,                "clouds_frames",                6,     1,     10)    /* animation depth, ~1 MB PSRAM per 720x720 frame. RESET: 0 (unset blob) and >10 both fall back to the default */ \
-    INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the 720 px picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */ \
+    INT_RESET (clouds_zoom,                  "clouds_zoom",                  7,     5,     9)     /* Web-Mercator zoom of the panel-sized picture: 5 ~2500 km wide .. 9 ~150 km. RESET: an unknown value falls back to the default, never to a bound */ \
     /* -- Clouds satellite channel (v67) -- */ \
     INT_RESET (clouds_channel,               "clouds_channel",               0,     0,     2)     /* which GOES ABI product the Clouds page shows: 0 = GeoColor (default), 1 = Clean Infrared (Band 13), 2 = Air Mass. RESET, not clamp: an unknown channel falls back to GeoColor, which every satellite publishes, rather than to the nearest bound */ \
     /* -- Clouds map overlay (v73) -- */ \
