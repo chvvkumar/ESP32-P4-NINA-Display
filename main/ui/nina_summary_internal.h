@@ -11,17 +11,11 @@
  * tell. Only included by nina_summary.c and nina_summary_round.c.
  */
 
+#include <stdint.h>
+
 #include "lvgl.h"
 
 #include "nina_subbar.h"
-
-/* Bullseye bearings on the round card, degrees clockwise from twelve o'clock
- * (radial.html board 3). Single owner shared by the builder
- * (nina_summary_round.c) and the update path (nina_summary.c); the round
- * Dashboard uses the same pair under its own name, so a dot's direction means
- * the same thing on both boards. */
-#define SR_BEARING_RMS  305
-#define SR_BEARING_HFR  125
 
 /* ── Per-card widget references ────────────────────────────────────── */
 typedef struct {
@@ -80,20 +74,28 @@ typedef struct {
     uint32_t cached_hfr_color;
     uint32_t cached_flip_color;
     uint32_t cached_detail_color;
-    /* Safety state colour. The square card spends it on lbl_safety, the round
-     * card on ring_crown; exactly one of the two handles exists per card, so
-     * the two writers never collide. */
+    /* Safety state colour, for the square card's lbl_safety. The round band
+     * draws no safety glyph of its own. */
     uint32_t cached_safety_color;
 
-    /* Round shape handles (radial board 3). NULL on the square card; the
+    /* Round shape handles (board "Bands A"). NULL on the square card; the
      * update path drives each one only when it is set. */
     nina_subbar_t ring;            /* this rig's concentric sub-block ring */
-    lv_obj_t *ring_crown;          /* safety crown at twelve o'clock */
+    lv_obj_t *ring_crown;          /* retired: never built, kept as a null check */
     lv_obj_t *ring_flip_tick;      /* meridian flip tick on the same ring */
-    lv_obj_t *rms_bull;
-    lv_obj_t *rms_dot;
-    lv_obj_t *hfr_bull;
-    lv_obj_t *hfr_dot;
+    lv_obj_t *tick;                /* colour line at the top of the band */
+    lv_obj_t *lbl_row;             /* the recoloured reading row */
+    uint32_t  cached_tick_color;
+    int       round_target_w;      /* target line width: the chord at that line's far edge */
+    int       round_row_w;         /* reading row width: the chord at that row's far edge */
+    /* Reading-row parts, filled by the update path under the data lock and by
+     * the interpolation tick, then composed into lbl_row's one recoloured
+     * string. The round card leaves lbl_exp_val, lbl_filter and lbl_hfr_val
+     * NULL and fills these instead. */
+    char round_subs[24];           /* "4/10" */
+    char round_filter[48];         /* already recoloured, e.g. "#00E5FF Oiii#" */
+    char round_hfr[24];            /* "HFR 1.67" */
+    char round_time[28];           /* "137/300 s", or "--" when not exposing */
 } summary_card_t;
 
 /* The shipped glass card style, owned and re-themed by nina_summary.c. */
@@ -112,10 +114,30 @@ void summary_bind_card_tap(lv_obj_t *card, int instance_index);
 void nina_summary_round_create_card(summary_card_t *sc, lv_obj_t *parent, int slot);
 
 /**
- * @brief Rank the shown rigs outward (round family only).
+ * @brief Rank the shown rigs outward and stack their bands (round family only).
  *
  * Online rigs take the outermost rings in slot order: with rigs 1 and 2
- * offline, rig 3 sits on the rim ring instead of two pitches in. Called once
- * per summary update after visibility is settled; @p shown is indexed by slot.
+ * offline, rig 3 sits on the rim ring instead of two pitches in. The same rank
+ * places that rig's band on the vertical centre line and cuts each text line
+ * to the chord at its own far edge. Called once per summary update after visibility is
+ * settled; @p shown is indexed by slot.
  */
 void nina_summary_round_place_rings(summary_card_t *cards, const bool *shown);
+
+/**
+ * @brief Fit the target line to the band width (round family only).
+ *
+ * Call right after writing sc->lbl_target. Bold 28 down to regular 20, then
+ * dots. LVGL lock held by caller.
+ */
+void nina_summary_round_fit_target(summary_card_t *sc);
+
+/**
+ * @brief Fit the reading row beside the RMS figure (round family only).
+ *
+ * @p text is the string just written to sc->lbl_row. It is passed in rather
+ * than read back because the row carries recolour tags (which the shared
+ * fitter would measure as glyphs) and because LVGL rewrites an ellipsised
+ * label's text in place. LVGL lock held by caller.
+ */
+void nina_summary_round_fit_row(summary_card_t *sc, const char *text);

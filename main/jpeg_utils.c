@@ -387,7 +387,7 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
         .buffer_direction = JPEG_DEC_ALLOC_OUTPUT_BUFFER,
     };
     size_t alloc_size = 0;
-    uint8_t *buf = jpeg_alloc_decoder_mem((size_t)pad_w * pad_h * (is_gray ? 1 : 2),
+    uint8_t *buf = jpeg_alloc_decoder_mem((size_t)pad_w * pad_h * (is_gray ? 1 : 3),
                                           &mem_cfg, &alloc_size);
     if (!buf) return ESP_ERR_NO_MEM;
 
@@ -408,11 +408,12 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
      * NOW so no dirty line outlives the transfer. */
     esp_cache_msync(buf, alloc_size, ESP_CACHE_MSYNC_FLAG_DIR_C2M);
 
-    /* BGR element order gives the same in-memory RGB565 layout the SW path
-     * produces (R high, B low) -- see the packing comment above. */
+    /* Colour decodes as RGB888 so the 565 pack below can dither it; rgb_order
+     * BGR is the engine's little-endian order, so the bytes land B, G, R (the
+     * IDF jpeg_decode example uses the same pair). */
     jpeg_decode_cfg_t decode_cfg = {
         .output_format = is_gray ? JPEG_DECODE_OUT_FORMAT_GRAY
-                                 : JPEG_DECODE_OUT_FORMAT_RGB565,
+                                 : JPEG_DECODE_OUT_FORMAT_RGB888,
         .rgb_order = JPEG_DEC_RGB_ELEMENT_ORDER_BGR,
     };
     uint32_t decoded_size = 0;
@@ -424,22 +425,22 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
         return (err != ESP_OK) ? err : ESP_FAIL;
     }
 
-    /* Diagnostic: fraction of sampled pixels exactly 0x0000 in the raw DMA
-     * output. Confirmed 2026-08-24 on dash4: the HW colour conversion crushes
+    /* Diagnostic: fraction of sampled pixels exactly 0,0,0 in the raw RGB888
+     * DMA output. Confirmed 2026-08-24 on dash4: the HW colour conversion crushes
      * dark values to 0 (7-8 % of a night GeoColor frame vs <1 % from stb),
      * which is why clouds_frame_incomplete() tests NEAR black. Debug only. */
     if (!is_gray) {
-        const uint16_t *px = (const uint16_t *)buf;
         uint32_t n = 0, z = 0;
         for (uint32_t y = 0; y < h; y += 8) {
+            const uint8_t *row = buf + (size_t)y * pad_w * 3;
             for (uint32_t x = 0; x < w; x += 8) {
+                const uint8_t *px = row + (size_t)x * 3;
                 n++;
-                if (px[(size_t)y * pad_w + x] == 0) z++;
+                if (px[0] == 0 && px[1] == 0 && px[2] == 0) z++;
             }
         }
-        ESP_LOGD(TAG, "HW JPEG raw: %lu/%lu samples zero, px[0]=%04x mid=%04x",
-                 (unsigned long)z, (unsigned long)n, px[0],
-                 px[(size_t)(h / 2) * pad_w + w / 2]);
+        ESP_LOGD(TAG, "HW JPEG raw: %lu/%lu samples zero",
+                 (unsigned long)z, (unsigned long)n);
     }
 
     /* GRAY8 -> RGB565 into a tight w*h*2 buffer (the padded GRAY8 one is freed).
@@ -474,14 +475,49 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
         return ESP_OK;
     }
 
-    /* Callers expect tightly packed w*h*2 rows, so drop the MCU pad in place.
-     * Destination row y starts at or before source row y, and we walk top-down,
-     * so no row is overwritten before it is copied. */
-    if (pad_w != w) {
-        for (uint32_t y = 1; y < h; y++) {
-            memmove(buf + (size_t)y * w * 2,
-                    buf + (size_t)y * pad_w * 2,
-                    (size_t)w * 2);
+    /* RGB888 -> RGB565 in place, ordered-dithered like the grey path, with the
+     * MCU pad dropped in the same pass. In place is safe: the destination
+     * bytes of pixel (y, x) end at y*w*2 + 2x + 1, always below the first
+     * byte of the next unread source pixel at y*pad_w*3 + 3x + 3, and each
+     * pixel is read before it is written. */
+    for (uint32_t y = 0; y < h; y++) {
+        const uint8_t *srow = buf + (size_t)y * pad_w * 3;
+        const uint8_t *th   = s_bayer4[y & 3];
+        uint16_t *drow = (uint16_t *)(buf + (size_t)y * w * 2);
+        for (uint32_t x = 0; x < w; x++) {
+            const uint8_t *px = srow + (size_t)x * 3;
+            int t  = th[x & 3];
+            int b5 = px[0] + (t >> 1);          /* +0..7 before the >> 3 */
+            int g6 = px[1] + (t >> 2);          /* +0..3 before the >> 2 */
+            int r5 = px[2] + (t >> 1);
+            if (b5 > 255) b5 = 255;
+            if (g6 > 255) g6 = 255;
+            if (r5 > 255) r5 = 255;
+            drow[x] = (uint16_t)(((r5 >> 3) << 11) | ((g6 >> 2) << 5) | (b5 >> 3));
+        }
+    }
+
+    /* Give the unused half of the 3-byte decode buffer back. TLSF trims a
+     * shrinking block in place (block_trim_used), so the address and its
+     * 128 B alignment normally survive; if the heap ever moves it, the data
+     * moved too, and a misaligned home is fixed by one aligned copy because
+     * the PPA refuses unaligned input. */
+    {
+        size_t tight = (((size_t)w * h * 2) + 127) & ~(size_t)127;
+        if (tight < alloc_size) {
+            uint8_t *shrunk = heap_caps_realloc(buf, tight, MALLOC_CAP_SPIRAM);
+            if (shrunk) {
+                buf = shrunk;
+                alloc_size = tight;
+                if (((uintptr_t)buf & 127) != 0) {
+                    uint8_t *aligned = heap_caps_aligned_alloc(128, tight, MALLOC_CAP_SPIRAM);
+                    if (aligned) {
+                        memcpy(aligned, buf, (size_t)w * h * 2);
+                        heap_caps_free(buf);
+                        buf = aligned;
+                    }
+                }
+            }
         }
     }
 

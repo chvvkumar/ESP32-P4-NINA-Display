@@ -293,6 +293,18 @@ static void record_disconnect_event(int index, equipment_type_t eq) {
     const app_config_t *cfg = app_config_get();
     int64_t now = esp_timer_get_time() / 1000;
 
+    /* Safety monitor gone: stop feeding the breach engine (tasks.c) a state
+     * that no longer exists.  Done before the aggregation branch so both the
+     * deferred and the immediate path clear it; the next successful safety
+     * fetch (active bundle or background poll) re-sets safety_connected. */
+    if (eq == EQ_SAFETY) {
+        nina_client_t *sd = ws_client_data[index];
+        if (sd && nina_client_lock(sd, 50)) {
+            sd->safety_connected = false;
+            nina_client_unlock(sd);
+        }
+    }
+
     /* When aggregation is enabled, defer disconnects to the window boundary */
     if (cfg->toast_aggregation_window_s > 0) {
         bool start_timer = false;
