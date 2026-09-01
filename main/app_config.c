@@ -940,6 +940,8 @@ static void set_defaults(app_config_t *cfg) {
     // for every upgrader (opt in for existing installs).
     cfg->telemetry_enabled = true;
     cfg->moon_round_size_pct = 100;     // v79: round Moon disc fills the rim
+    // v80 addition (NINA notification scope). Also a SETTINGS_TABLE row.
+    cfg->nina_notify_scope = 0;         // 0 = every online rig may notify
 
     // Spotify client ID: secret-like sentinel, not table-driven
     cfg->spotify_client_id[0] = '\0';
@@ -3165,6 +3167,20 @@ static void migrate_from_v78(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v78 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v79 -> v80 migration: appends nina_notify_scope (which rigs may raise
+ * notifications). The prefix through moon_round_size_pct is the v79 layout
+ * byte for byte. --- */
+static void migrate_from_v79(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t v79_size = offsetof(app_config_t, nina_notify_scope);
+    size_t copy = raw_size < v79_size ? raw_size : v79_size;
+    memcpy(cfg, raw, copy);
+    cfg->nina_notify_scope = 0;
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v79 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v77(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -4141,6 +4157,14 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 79) {
+        /* v79 -> v80: appended nina_notify_scope. tiles_loaded stays false:
+         * a v79 device already keeps its tiles in the "json_tiles"/"ha_tiles"
+         * NVS keys, so the tail loads them. */
+        migrate_from_v79(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 78) {
         /* v78 -> v79: appended moon_round_size_pct. tiles_loaded stays false:
          * a v78 device already keeps its tiles in the "json_tiles"/"ha_tiles"

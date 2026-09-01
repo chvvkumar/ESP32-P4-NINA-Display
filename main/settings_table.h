@@ -239,7 +239,9 @@
     /* -- Global audio mute (v77) -- */ \
     BOOL      (audio_muted,                  "audio_muted",                  false) /* silence EVERY sound (voice alerts, event phrases, connection announcements, boot jingle) at the audio_alert enqueue gate; the web test/preview endpoints bypass it so the speaker stays testable while muted */ \
     /* -- Anonymous telemetry (v78) -- */ \
-    BOOL      (telemetry_enabled,            "telemetry_enabled",            true)  /* one anonymous daily health report (fw version, uptime, crash counters, memory, feature bitmask; never URLs, names, coordinates or secrets). Fresh installs default ON; the v78 migration tail forces OFF for every upgrader (opt in) */
+    BOOL      (telemetry_enabled,            "telemetry_enabled",            true)  /* one anonymous daily health report (fw version, uptime, crash counters, memory, feature bitmask; never URLs, names, coordinates or secrets). Fresh installs default ON; the v78 migration tail forces OFF for every upgrader (opt in) */ \
+    /* -- NINA notification scope (v80) -- */ \
+    INT_RESET (nina_notify_scope,            "nina_notify_scope",            0,     0,     1)     /* which rigs may raise toasts, border flashes and spoken alerts: 0 = every online rig (default), 1 = only the rig whose page is on screen (Summary counts as every rig, any other page fires none). RESET, not clamp: an unknown value falls back to "every rig" */
 
 /* Apply every row's default value to *cfg. Called from set_defaults()
  * immediately after the memset(). Does not touch excluded/complex fields

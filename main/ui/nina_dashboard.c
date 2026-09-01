@@ -1995,6 +1995,14 @@ int nina_dashboard_page_to_instance(int abs_page_idx) {
     return inst;
 }
 
+/* True when this rig may notify you right now: always when notifications are
+ * for every online rig, else only while its page or the Summary is on screen. */
+bool nina_dashboard_instance_notifies(int instance) {
+    if (app_config_get()->nina_notify_scope == 0) return true;
+    return active_page == PAGE_IDX_SUMMARY ||
+           nina_dashboard_page_to_instance(active_page) == instance;
+}
+
 /* Pure-offset inverse of page_to_instance. Returns the ABSOLUTE page index for
  * an instance, or -1 only for an out-of-range instance index. */
 int nina_dashboard_instance_to_page(int instance_idx) {

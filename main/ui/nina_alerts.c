@@ -14,6 +14,7 @@
 
 #include "nina_alerts.h"
 #include "nina_dashboard_internal.h"
+#include "nina_dashboard.h"
 #include "themes.h"
 #include "display_defs.h"
 #include "ui_round.h"       /* ui_rim_radius (round alert ring) */
@@ -285,7 +286,7 @@ static void alert_eval_edge(alert_type_t type, int instance, float value, int ed
     /* Flash is attempted on every breached sample, exactly as before this
      * engine existed — nina_alert_trigger()'s 30 s per-type cooldown is what
      * actually paces it. */
-    if (breached && cfg->alert_flash_enabled) {
+    if (breached && cfg->alert_flash_enabled && nina_dashboard_instance_notifies(instance)) {
         nina_alert_trigger(type, instance, value);
     }
 
