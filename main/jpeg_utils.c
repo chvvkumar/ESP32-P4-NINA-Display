@@ -334,6 +334,20 @@ static bool jpeg_scan_sof0(const uint8_t *d, size_t n, uint32_t *w, uint32_t *h,
     return false;
 }
 
+/* 4x4 Bayer thresholds for the GRAY8 -> RGB565 expansion below. A NINA
+ * prepared thumbnail is a grey JPEG whose stretched sky spans about 15 grey
+ * levels; plain truncation collapses that to 2 red/blue steps and 4 green
+ * steps and the disc shows tinted concentric bands (seen on the 4C, hidden
+ * on a star-noisy frame). The offsets run 0..7 (5-bit channels) and 0..3
+ * (6-bit), so the rounded-down result averages to the source value instead
+ * of sitting half a quantum dark. */
+static const uint8_t s_bayer4[4][4] = {
+    { 0,  8,  2, 10 },
+    { 12, 4, 14,  6 },
+    { 3, 11,  1,  9 },
+    { 15, 7, 13,  5 },
+};
+
 static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
                                        uint8_t **out_buf, uint32_t *out_w,
                                        uint32_t *out_h, size_t *out_size)
@@ -428,8 +442,8 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
                  px[(size_t)(h / 2) * pad_w + w / 2]);
     }
 
-    /* GRAY8 -> RGB565 into a tight w*h*2 buffer (the padded GRAY8 one is freed),
-     * using the same grey expansion the thumbnail path uses. */
+    /* GRAY8 -> RGB565 into a tight w*h*2 buffer (the padded GRAY8 one is freed).
+     * The expansion is ordered-dithered with s_bayer4 above, not truncated. */
     if (is_gray) {
         size_t rgb_sz = (((size_t)w * h * 2) + 127) & ~(size_t)127;
         uint8_t *rgb = heap_caps_aligned_calloc(128, 1, rgb_sz, MALLOC_CAP_SPIRAM);
@@ -440,10 +454,16 @@ static esp_err_t jpeg_hw_decode_rgb565(const uint8_t *jpg, size_t len,
         uint16_t *d = (uint16_t *)rgb;
         for (uint32_t y = 0; y < h; y++) {
             const uint8_t *srow = buf + (size_t)y * pad_w;
+            const uint8_t *th   = s_bayer4[y & 3];
             uint16_t *drow = d + (size_t)y * w;
             for (uint32_t x = 0; x < w; x++) {
-                uint8_t g = srow[x];
-                drow[x] = (uint16_t)(((g >> 3) << 11) | ((g >> 2) << 5) | (g >> 3));
+                int g  = srow[x];
+                int t  = th[x & 3];
+                int r5 = g + (t >> 1);          /* +0..7 before the >> 3 */
+                int g6 = g + (t >> 2);          /* +0..3 before the >> 2 */
+                if (r5 > 255) r5 = 255;
+                if (g6 > 255) g6 = 255;
+                drow[x] = (uint16_t)(((r5 >> 3) << 11) | ((g6 >> 2) << 5) | (r5 >> 3));
             }
         }
         heap_caps_free(buf);
