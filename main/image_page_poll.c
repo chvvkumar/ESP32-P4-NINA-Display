@@ -827,13 +827,15 @@ static void anim_rejudge_head(image_page_t *p, const app_config_t *cfg, uint32_t
  * (~1.04 MB) at the same time. The hardware JPEG path needs only the latter;
  * the conservative figure is the one that has to hold. */
 #define ANIM_DECODE_TRANSIENT_BYTES ((size_t)2600 * 1024)
-/* Cloud Cover frames are baseline JPEG and decode on the hardware engine: the
- * decoder writes straight into the frame-sized buffer, so the only extra is the
- * compressed download (~150-300 KB). 2.6 MB here was the stb figure, and with
- * the three 1 MB playback scratch buffers resident it left the largest free
- * block (~3.3 MB on dash4) permanently under the bar: every optional fetch was
- * refused, the newest slot was a GIBS blank, and the page froze on one frame. */
-#define ANIM_DECODE_TRANSIENT_HW_BYTES ((size_t)512 * 1024)
+/* Cloud Cover frames are baseline JPEG and decode on the hardware engine, which
+ * now writes RGB888 (1.5x the frame) that is packed to RGB565 in place and
+ * trimmed, so the extra over the frame itself is half a frame (~520 KB at
+ * 720x720) plus the compressed download (~150-300 KB). 2.6 MB here was the
+ * stb figure, and with the three 1 MB playback scratch buffers resident it
+ * left the largest free block (~3.3 MB on dash4) permanently under the bar:
+ * every optional fetch was refused, the newest slot was a GIBS blank, and the
+ * page froze on one frame. */
+#define ANIM_DECODE_TRANSIENT_HW_BYTES ((size_t)1024 * 1024)
 
 /* PSRAM headroom for one more animated frame, and the ONE place the ring is
  * allowed to shrink. Without it the ring grows until the largest free block no

@@ -40,15 +40,19 @@ bool jpeg_sw_decode_rgb565(const uint8_t *jpg_data, size_t jpg_size,
  * Tries the HW decoder for baseline JPEG and falls back to
  * jpeg_sw_decode_rgb565() for anything it refuses (progressive, CMYK, grayscale,
  * odd sampling, engine busy/out of memory) and for the non-JPEG formats stb
- * handles (PNG, GIF). The HW path avoids stb's RGB888 intermediate (~1.55 MB at
- * 720x720), which is what makes the image pages fit in a fragmented PSRAM heap.
+ * handles (PNG, GIF). The HW path decodes RGB888 (~1.55 MB at 720x720) but packs
+ * it to RGB565 in place and trims the block, so unlike stb it never holds the
+ * two at once, which is what makes the image pages fit in a fragmented PSRAM heap.
  *
  * Output contract is identical to jpeg_sw_decode_rgb565(): tightly packed
  * RGB565 rows top-down, out_w/out_h are the image's real pixel dimensions (the
  * HW MCU padding is removed), 128-byte aligned PSRAM, caller frees with free().
- * *out_size is the ALLOCATION size, which on the HW path is the MCU-padded
- * decoder buffer (larger than w*h*2); never derive a stride or a pixel count
- * from it, use out_w/out_h. Needs about 10 KB of caller stack.
+ * *out_size is the ALLOCATION size (w*h*2 rounded up to 128 B once the HW
+ * path has packed and trimmed its decode buffer, but never assume that);
+ * never derive a stride or a pixel count from it, use out_w/out_h. Both HW
+ * paths (GRAY8 and RGB888) pack to RGB565 through a 4x4 ordered dither, so a
+ * smooth gradient does not band on the 5/6-bit panel. Needs about 10 KB of
+ * caller stack.
  *
  * @return true on success (from either path)
  */

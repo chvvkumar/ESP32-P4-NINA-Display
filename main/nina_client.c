@@ -787,6 +787,11 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     } else {
         // Camera-only heartbeat for connection status
         fetch_camera_info_robust(base_url, data);
+        /* Plus the safety monitor (~1 KB): the breach engine in tasks.c evaluates
+         * every connected rig, and a WS SAFETY-CHANGED safe edge is not
+         * guaranteed after a monitor reconnect, so a background rig must refresh
+         * its own state or it re-announces a stale "unsafe" forever. */
+        fetch_safety_monitor_info(base_url, data);
     }
 
     nina_client_register(instance, data);
