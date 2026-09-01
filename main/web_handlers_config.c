@@ -496,6 +496,7 @@ static const backup_field_t s_backup_fields[] = {
     {"boot_jingle_enabled",         "Startup Sound",           "Behavior", false, false},
     {"audio_muted",                 "Mute All Audio",          "Behavior", false, false},
     {"telemetry_enabled",           "Anonymous Telemetry",     "Behavior", false, false},
+    {"nina_notify_scope",           "Rig Notification Scope",  "Behavior", false, false},
     {"screen_sleep_enabled",        "Screen Sleep",             "Behavior", false, false},
     {"screen_sleep_timeout_s",      "Screen Sleep Timeout",     "Behavior", false, false},
 

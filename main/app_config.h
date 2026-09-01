@@ -83,7 +83,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 79
+#define APP_CONFIG_VERSION 80
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -585,6 +585,14 @@ typedef struct {
                                        // (default 100). With the text shown the
                                        // disc is capped so it clears the rim
                                        // rows. Square panels ignore it.
+
+    // Added after v79 (NINA notification scope) -- must stay at end to preserve NVS binary compatibility
+    uint8_t  nina_notify_scope;        // v80: which rigs may raise toasts,
+                                       // border flashes and spoken alerts.
+                                       // 0 = every online rig (default),
+                                       // 1 = only the rig whose page is on
+                                       // screen (Summary counts as every rig;
+                                       // any other page fires none).
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -5983,6 +5991,10 @@ _Static_assert(offsetof(app_config_t, moon_round_size_pct) ==
                    offsetof(app_config_t, telemetry_enabled) +
                        sizeof(((app_config_t *)0)->telemetry_enabled),
                "moon_round_size_pct must directly follow telemetry_enabled (v78 prefix rule)");
+_Static_assert(offsetof(app_config_t, nina_notify_scope) ==
+                   offsetof(app_config_t, moon_round_size_pct) +
+                       sizeof(((app_config_t *)0)->moon_round_size_pct),
+               "nina_notify_scope must directly follow moon_round_size_pct (v79 prefix rule)");
 
 
 

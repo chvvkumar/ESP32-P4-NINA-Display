@@ -16,6 +16,7 @@
 
 #include "audio_alert.h"
 #include "app_config.h"
+#include "ui/nina_dashboard.h"
 #include "bsp/esp-bsp.h"        /* bsp_audio_codec_speaker_init */
 #include "esp_codec_dev.h"
 #include "esp_heap_caps.h"
@@ -591,13 +592,18 @@ void audio_alert_set_override(int idx, const uint8_t *pcm, size_t len) {
     }
 }
 
+/* Per-instance mute plus the on-screen rig scope, live path only; the test
+ * and preview entry points bypass both so the speaker stays testable while an
+ * instance is muted or off screen. */
+static bool voice_instance_silenced(const app_config_t *cfg, int idx) {
+    return cfg->alert_voice_muted[idx] || !nina_dashboard_instance_notifies(idx);
+}
+
 void audio_alert_speak(alert_type_t type, int instance_idx, float value) {
     if (!s_queue) return;
     app_config_t *cfg = app_config_get();
     if (!cfg->alert_voice_enabled) return;
-    /* Per-instance mute — live path only; the test endpoints bypass it so the
-     * speaker stays testable while an instance is muted. */
-    if (instance_idx >= 0 && instance_idx < 3 && cfg->alert_voice_muted[instance_idx]) return;
+    if (instance_idx >= 0 && instance_idx < 3 && voice_instance_silenced(cfg, instance_idx)) return;
 
     sentence_t s;
     if (build_sentence(&s, type, instance_idx, value)) enqueue(&s);
@@ -610,7 +616,7 @@ void audio_alert_speak_event(int category_bit, int instance_idx, int equipment_i
 
     app_config_t *cfg = app_config_get();
     if (!cfg->alert_voice_enabled) return;
-    if (cfg->alert_voice_muted[instance_idx]) return;
+    if (voice_instance_silenced(cfg, instance_idx)) return;
     if (!(cfg->voice_notify_mask & (1u << category_bit))) return;
     if (!event_cooldown_pass(category_bit, instance_idx)) return;
 
@@ -627,7 +633,7 @@ void audio_alert_speak_equipment_group(int category_bit, int instance_idx,
 
     app_config_t *cfg = app_config_get();
     if (!cfg->alert_voice_enabled) return;
-    if (cfg->alert_voice_muted[instance_idx]) return;
+    if (voice_instance_silenced(cfg, instance_idx)) return;
     if (!(cfg->voice_notify_mask & (1u << category_bit))) return;
     if (!event_cooldown_pass(category_bit, instance_idx)) return;
 
@@ -642,7 +648,7 @@ void audio_alert_speak_event_id(voice_event_t ev, int instance_idx) {
 
     app_config_t *cfg = app_config_get();
     if (!cfg->alert_voice_enabled) return;
-    if (cfg->alert_voice_muted[instance_idx]) return;
+    if (voice_instance_silenced(cfg, instance_idx)) return;
     /* The per-event bit is checked ALONE, deliberately NOT ANDed with the
      * event's category bit: ticking "Sequence finished" must be enough to hear
      * it.  The category bits keep governing only the generic fallback clips. */
@@ -672,7 +678,7 @@ void audio_alert_speak_conn(int instance_idx, bool connected) {
 
     app_config_t *cfg = app_config_get();
     if (!cfg->alert_voice_enabled) return;
-    if (cfg->alert_voice_muted[instance_idx]) return;
+    if (voice_instance_silenced(cfg, instance_idx)) return;
     if (!(connected ? cfg->alert_voice_conn : cfg->alert_voice_disc)) return;
 
     sentence_t s;

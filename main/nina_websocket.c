@@ -26,6 +26,7 @@
 #include "nina_connection.h"
 #include "tasks.h"
 #include "ui/nina_toast.h"
+#include "ui/nina_dashboard.h"
 #include "ui/nina_event_log.h"
 #include "ui/nina_alerts.h"
 #include "ui/nina_safety.h"
@@ -139,6 +140,15 @@ static void ws_toast_fmt(int index, toast_severity_t sev, const char *fmt, ...) 
     ws_toast(index, sev, msg);
 }
 
+/* Check if a notification category is enabled for this instance: the
+ * notify-mask bit, the per-instance mute switch and the on-screen rig scope. */
+static bool toast_allowed(int index, int category_bit) {
+    const app_config_t *cfg = app_config_get();
+    return (cfg->toast_notify_mask & (1 << category_bit)) &&
+           !cfg->toast_instance_muted[index] &&
+           nina_dashboard_instance_notifies(index);
+}
+
 /* ── Aggregation timer callback ──────────────────────────────────────── */
 static void agg_timer_cb(void *arg) {
     int index = (int)(intptr_t)arg;
@@ -152,8 +162,6 @@ static void agg_timer_cb(void *arg) {
     s_agg[index].disconnected_mask = 0;
     s_agg[index].window_start_ms = 0;
     portEXIT_CRITICAL(&s_agg_lock);
-
-    const app_config_t *cfg = app_config_get();
 
     /* Masks already reflect final state (last event wins — connect clears disconnect
      * bit and vice versa), so no cancellation logic needed here. */
@@ -193,7 +201,7 @@ static void agg_timer_cb(void *arg) {
             }
         }
 
-        if ((cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[index]) {
+        if (toast_allowed(index, 0)) {
             nina_toast_show(TOAST_SUCCESS, buf);
         }
         /* Voice has its own mask/gates; one grouped sentence for the burst. */
@@ -219,7 +227,7 @@ static void agg_timer_cb(void *arg) {
             if (i == EQ_SAFETY) sev = TOAST_ERROR;
             else if (seq_running) sev = TOAST_ERROR;
 
-            if ((cfg->toast_notify_mask & (1 << 1)) && !cfg->toast_instance_muted[index]) {
+            if (toast_allowed(index, 1)) {
                 ws_toast_fmt(index, sev, "%s disconnected", equipment_names[i]);
             }
             nina_event_log_add_fmt(sev == TOAST_ERROR ? EVENT_SEV_ERROR : EVENT_SEV_WARNING,
@@ -236,7 +244,7 @@ static void record_connect_event(int index, equipment_type_t eq) {
 
     // If aggregation disabled, show individual toast
     if (cfg->toast_aggregation_window_s == 0) {
-        if ((cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[index]) {
+        if (toast_allowed(index, 0)) {
             ws_toast(index, TOAST_SUCCESS, equipment_names[eq]);
         }
         audio_alert_speak_event(0, index, (int)eq);
@@ -362,19 +370,12 @@ static void record_disconnect_event(int index, equipment_type_t eq) {
         }
     }
 
-    if ((cfg->toast_notify_mask & (1 << 1)) && !cfg->toast_instance_muted[index]) {
+    if (toast_allowed(index, 1)) {
         ws_toast_fmt(index, sev, "%s disconnected", equipment_names[eq]);
     }
     audio_alert_speak_event(1, index, (int)eq);
     nina_event_log_add_fmt(sev == TOAST_ERROR ? EVENT_SEV_ERROR : EVENT_SEV_WARNING,
                            index, "%s disconnected", equipment_names[eq]);
-}
-
-/* Check if a notification category is enabled for this instance */
-static bool toast_allowed(int index, int category_bit) {
-    const app_config_t *cfg = app_config_get();
-    return (cfg->toast_notify_mask & (1 << category_bit)) &&
-           !cfg->toast_instance_muted[index];
 }
 
 /**

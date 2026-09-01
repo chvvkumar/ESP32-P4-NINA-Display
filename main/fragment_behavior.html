@@ -122,6 +122,14 @@
           </div>
           <div class="field-hint">Combine rapid-fire notifications within this window. 0 = Off (show each individually).</div>
         </div>
+        <div class="field" style="margin-top:16px">
+          <label class="field-label">Notify for</label>
+          <select class="input" id="nina_notify_scope" onchange="checkDirty()">
+            <option value="0">Every online rig</option>
+            <option value="1">Only the rig on screen</option>
+          </select>
+          <div class="field-hint">Only the rig on screen: pop-ups, border flashes and spoken alerts come from the rig whose page is showing. The Summary page counts as every rig; other pages show no rig alerts.</div>
+        </div>
         </div>
         <div class="subsection">
         <div class="subsection-title">Voice Alerts</div>

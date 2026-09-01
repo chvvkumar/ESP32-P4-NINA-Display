@@ -42,7 +42,8 @@ void audio_alert_speak(alert_type_t type, int instance_idx, float value);
 
 /**
  * Queue a spoken event announcement (live path).  Thread-safe; gated on
- * alert_voice_enabled, alert_voice_muted[instance], the voice_notify_mask
+ * alert_voice_enabled, alert_voice_muted[instance] and the on-screen rig
+ * scope, the voice_notify_mask
  * category bit, and a per-(category,instance) 30 s cooldown.
  */
 void audio_alert_speak_event(int category_bit, int instance_idx, int equipment_idx);
@@ -111,7 +112,7 @@ typedef enum {
 
 /**
  * Queue a spoken per-event phrase (live path).  Thread-safe.  Gated on
- * alert_voice_enabled, alert_voice_muted[instance], the
+ * alert_voice_enabled, alert_voice_muted[instance] and the on-screen rig scope, the
  * (VOICE_EVENT_BIT_BASE + ev) bit of voice_notify_mask, and a per-(event,
  * instance) 30 s cooldown that is INDEPENDENT of the category cooldown.
  *
@@ -138,8 +139,8 @@ const char *audio_alert_event_clip_name(voice_event_t ev);
 
 /**
  * Queue a spoken NINA link connect/disconnect announcement (live path).
- * Thread-safe; gated on alert_voice_enabled, alert_voice_muted[instance] and
- * the alert_voice_conn / alert_voice_disc toggle for the given edge.
+ * Thread-safe; gated on alert_voice_enabled, alert_voice_muted[instance], the
+ * on-screen rig scope and the alert_voice_conn / alert_voice_disc toggle for the given edge.
  */
 void audio_alert_speak_conn(int instance_idx, bool connected);
 
