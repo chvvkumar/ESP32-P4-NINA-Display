@@ -1454,10 +1454,18 @@ esp_err_t crash_get_handler(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    /* last_reset_reason is the reason for THIS boot (SW after an OTA or a
+     * web reboot, POWERON, PANIC, ...). last_crash_reason is the reason of the
+     * most recent abnormal reset since power-on, 0 (UNKNOWN) when there was
+     * none; it used to be reported under the last_reset_reason name, which
+     * read UNKNOWN on every healthy device. */
+    uint32_t reset_reason = power_mgmt_get_last_reset_reason();
     cJSON_AddNumberToObject(root, "crash_count", info.crash_count);
-    cJSON_AddStringToObject(root, "last_reset_reason",
+    cJSON_AddStringToObject(root, "last_reset_reason", reset_reason_to_str(reset_reason));
+    cJSON_AddNumberToObject(root, "last_reset_reason_code", reset_reason);
+    cJSON_AddStringToObject(root, "last_crash_reason",
                             reset_reason_to_str(info.last_crash_reason));
-    cJSON_AddNumberToObject(root, "last_reset_reason_code", info.last_crash_reason);
+    cJSON_AddNumberToObject(root, "last_crash_reason_code", info.last_crash_reason);
     cJSON_AddNumberToObject(root, "boot_count", info.boot_count);
     cJSON_AddNumberToObject(root, "uptime_s",
                             (double)esp_timer_get_time() / 1000000.0);
