@@ -3,12 +3,12 @@
   "psram": "32MB @ 200MHz",
   "factory_size": "6.74 MB",
   "ota_size": "6.61 MB",
-  "round_ota_size": "6.62 MB",
+  "round_ota_size": "6.65 MB",
   "dram_used": "",
   "iram_used": "",
   "esp_idf": "v5.5.2",
   "target": "esp32p4",
-  "build_date": "2026-08-31",
+  "build_date": "2026-09-01",
   "branch": "main",
-  "commit": "6c61159"
+  "commit": "08c822f"
 }
