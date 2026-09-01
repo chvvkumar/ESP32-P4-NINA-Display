@@ -2619,6 +2619,7 @@
       data.alert_voice_disc=$('alert_voice_disc').checked?1:0;
       data.boot_jingle_enabled=$('boot_jingle_enabled').checked?1:0;
       data.toast_aggregation_window_s=parseInt($('toast_aggregation_window').value)||0;
+      data.nina_notify_scope=parseInt($('nina_notify_scope').value,10)||0;
       data.toast_notify_mask=(function(){var m=0;for(var i=0;i<12;i++){if($('notify_cat_'+i).checked) m|=(1<<i);}return m>>>0;})();
       /* One value carries both voice switches: the 12 category switches in the
          low bits, then one switch per named event starting at bit 12. The
@@ -3183,6 +3184,7 @@
       $('alert_voice_brief').checked=!!data.alert_voice_brief;
       $('alert_voice_conn').checked=!!data.alert_voice_conn;
       $('alert_voice_disc').checked=data.alert_voice_disc!=null?!!data.alert_voice_disc:true;
+      $('nina_notify_scope').value=String(data.nina_notify_scope||0);
       var aggWin=data.toast_aggregation_window_s!=null?data.toast_aggregation_window_s:5;
       $('toast_aggregation_window').value=aggWin;
       updateAggregationLabel(aggWin);

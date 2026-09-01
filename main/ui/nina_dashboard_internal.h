@@ -228,8 +228,9 @@ typedef struct dashboard_page_s {
             lv_obj_t *row_vals;      /* row 2: RMS | hero seconds | HFR */
             lv_obj_t *lbl_rms_cap;
             lv_obj_t *lbl_rms;
-            lv_obj_t *lbl_hero;      /* hero digits, hanken_bold_64 */
+            lv_obj_t *lbl_hero;      /* hero digits, hanken_bold_64, steps to _44 when the row is tight */
             lv_obj_t *lbl_hero_unit; /* "s", and the idle "--" */
+            int       hero_avail;    /* px the hero digits may take before the face steps down */
             lv_obj_t *lbl_hfr_cap;
             lv_obj_t *lbl_hfr;
             lv_obj_t *row_meta;      /* row 3: filter name + sub counter */

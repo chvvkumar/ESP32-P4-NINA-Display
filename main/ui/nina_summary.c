@@ -88,6 +88,72 @@ static inline void set_bg_opa_cached(lv_obj_t *obj, lv_opa_t *cached, lv_opa_t o
     }
 }
 
+/* ── Round band: name shortening and the composed reading row ──────── */
+
+/* Recolour pieces for the round reading row. The separator is the built-in
+ * Montserrat bullet U+2022; U+00B7 is NOT in the built-in faces' glyph set. */
+#define SR_ROW_DIM  "#55555C "
+#define SR_ROW_SEP  " #55555C \xE2\x80\xA2# "
+
+/**
+ * @brief Shorten a rig name for the round band.
+ *
+ * Takes the telescope name (falling back the same way the square card does),
+ * cuts it at the SECOND underscore when there is one, then spells the rest with
+ * spaces: Askar_140APO_ASI2600MM reads "Askar 140APO", RedCat51_ASI183MM reads
+ * "RedCat51".
+ */
+static void summary_round_short_name(const nina_client_t *d,
+                                     const char *fallback_host,
+                                     char *out, size_t n) {
+    if (!out || n == 0) return;
+    const char *src;
+    if (d->telescope_name[0])      src = d->telescope_name;
+    else if (d->camera_name[0])    src = d->camera_name;
+    else if (d->profile_name[0])   src = d->profile_name;
+    else if (fallback_host && fallback_host[0]) src = fallback_host;
+    else                           src = "N.I.N.A.";
+
+    strlcpy(out, src, n);
+
+    char *u = strchr(out, '_');
+    if (u) {
+        u = strchr(u + 1, '_');
+        if (u) *u = '\0';
+    }
+    for (char *p = out; *p; p++) {
+        if (*p == '_') *p = ' ';
+    }
+}
+
+#if CONFIG_NINA_FAMILY_ROUND
+/**
+ * @brief Build the round band's one reading row from its four cached parts.
+ *
+ * "RMS" and the separators are dim, the sub count and the exposure seconds take
+ * the theme text colour, the filter name arrives already recoloured, and HFR
+ * falls through to the label's own colour.
+ */
+static void summary_round_compose_row(summary_card_t *sc) {
+    if (!sc->lbl_row || !current_theme) return;
+    int gb = app_config_get()->color_brightness;
+    unsigned long tc = (unsigned long)app_config_apply_brightness(
+        current_theme->text_color, gb);
+
+    char buf[256];
+    snprintf(buf, sizeof(buf),
+             SR_ROW_DIM "RMS#" SR_ROW_SEP "#%06lX %s#" SR_ROW_SEP "#%06lX %s#"
+             SR_ROW_SEP "%s" SR_ROW_SEP "%s",
+             tc, sc->round_subs, tc, sc->round_time,
+             sc->round_filter, sc->round_hfr);
+
+    set_label_if_changed(sc->lbl_row, buf);
+    nina_summary_round_fit_row(sc, buf);
+}
+#else
+static inline void summary_round_compose_row(summary_card_t *sc) { (void)sc; }
+#endif
+
 /* ── Safety icon glyphs (Material Symbols, UTF-8) ─────────────────── */
 #define ICON_VERIFIED_USER  "\xee\xa3\xa8"  /* U+E8E8 — shield + check */
 #define ICON_GPP_BAD        "\xef\x80\x92"  /* U+F012 — shield + X     */
@@ -192,6 +258,7 @@ static void bar_reset_exposure_state(summary_card_t *sc) {
     sc->cached_nina_mono_us = 0;
     if (sc->bar_progress) set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
     if (sc->lbl_pct)      set_label_if_changed(sc->lbl_pct, "");
+    strlcpy(sc->round_time, "--", sizeof(sc->round_time));
 }
 
 /* Scaled copy of arc_start_exposure_anim (nina_dashboard_update.c). Drives one
@@ -265,6 +332,21 @@ static void summary_bar_interp_cb(lv_timer_t *timer) {
          * card's bar, from this one timer. */
         if (sc->ring.cont) {
             nina_subbar_set_progress(&sc->ring, elapsed / sc->cached_total);
+
+            /* The round band's exposure seconds. Recomposed only when the whole
+             * integer second moves, not on every 200 ms tick. */
+            int es = (int)elapsed;
+            int ts = (int)sc->cached_total;
+            if (es < 0) es = 0;
+            if (es > 9999) es = 9999;
+            if (ts < 0) ts = 0;
+            if (ts > 9999) ts = 9999;
+            char t[28];
+            snprintf(t, sizeof(t), "%d/%d s", es, ts);
+            if (strcmp(t, sc->round_time) != 0) {
+                strlcpy(sc->round_time, t, sizeof(sc->round_time));
+                summary_round_compose_row(sc);
+            }
         }
 
         if (!sc->bar_progress) continue;
@@ -1120,8 +1202,17 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             continue;
         }
 
-        /* Instance name — telescope + camera, fallback to profile, then host */
-        if (d->telescope_name[0] && d->camera_name[0]) {
+        /* Instance name: telescope + camera, fallback to profile, then host.
+         * The round band has one short line instead: the scope, cut at its
+         * second underscore. */
+        if (sc->ring.cont) {
+            const char *url = app_config_get_instance_url(i);
+            char host[64] = {0};
+            extract_host_from_url(url, host, sizeof(host));
+            char shortname[72];
+            summary_round_short_name(d, host, shortname, sizeof(shortname));
+            set_label_if_changed(sc->lbl_name, shortname);
+        } else if (d->telescope_name[0] && d->camera_name[0]) {
             char combined[128];
             snprintf(combined, sizeof(combined), "%s | %s", d->telescope_name, d->camera_name);
             set_label_if_changed(sc->lbl_name, combined);
@@ -1139,13 +1230,11 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
         }
 
         /* Name color: theme header color (always connected at this point).
-         * The radial card draws the identity dim and the target bright, so the
-         * hierarchy reads on a 326 px chord; ring.cont is the round marker. */
-        if (current_theme) {
-            uint32_t name_color = app_config_apply_brightness(
-                sc->ring.cont ? current_theme->label_color
-                              : current_theme->header_text_color, gb);
-            set_text_color_cached(sc->lbl_name, &sc->cached_name_color, name_color);
+         * The round band takes the ring colour instead, written further down
+         * where the ring has just told us what it drew with. */
+        if (current_theme && !sc->ring.cont) {
+            set_text_color_cached(sc->lbl_name, &sc->cached_name_color,
+                app_config_apply_brightness(current_theme->header_text_color, gb));
         }
 
         /* Filter badge. The round card has none: its ring carries the filter
@@ -1177,6 +1266,15 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     current_theme ? current_theme->bento_bg : 0x000000, 0);
                 set_bg_opa_cached(sc->filter_box, &sc->cached_filter_bg_opa, LV_OPA_50, 0);
             }
+        } else if (sc->ring.cont && current_theme) {
+            /* The round band spends the filter as one recoloured word inside
+             * its reading row, on the same colour rule as the badge. */
+            uint32_t fc = theme_is_red_night(current_theme)
+                ? 0 : app_config_get_filter_color(d->current_filter, i);
+            if (fc == 0 || !d->current_filter[0]) fc = current_theme->label_color;
+            snprintf(sc->round_filter, sizeof(sc->round_filter), "#%06lX %s#",
+                     (unsigned long)app_config_apply_brightness(fc, gb),
+                     d->current_filter[0] ? d->current_filter : "--");
         }
 
         /* Target name */
@@ -1185,6 +1283,9 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
         } else {
             set_label_if_changed(sc->lbl_target, "Idle");
         }
+#if CONFIG_NINA_FAMILY_ROUND
+        if (sc->ring.cont) nina_summary_round_fit_target(sc);
+#endif
 
         if (current_theme) {
             uint32_t tgt_color = app_config_apply_brightness(
@@ -1241,6 +1342,13 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     lv_anim_start(&a);
                 }
                 if (sc->lbl_pct) SET_LABEL_FMT_IF_CHANGED(sc->lbl_pct, 8, "%d%%", 100);
+                if (sc->ring.cont) {
+                    int ts = (int)sc->cached_total;
+                    if (ts < 0) ts = 0;
+                    if (ts > 9999) ts = 9999;
+                    snprintf(sc->round_time, sizeof(sc->round_time),
+                             "%d/%d s", ts, ts);
+                }
             }
 
             if (d->exposure_total > 0 && d->exposure_end_epoch > 0 && d->is_exposing) {
@@ -1355,6 +1463,9 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                             lv_anim_start(&a);
                         }
                         if (sc->lbl_pct) set_label_if_changed(sc->lbl_pct, "");
+                        if (sc->ring.cont) {
+                            strlcpy(sc->round_time, "--", sizeof(sc->round_time));
+                        }
                     }
                     /* else: within grace — hold, do nothing. */
                 } else {
@@ -1368,6 +1479,9 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                         set_bar_if_changed(sc->bar_progress, 0, LV_ANIM_OFF);
                     }
                     if (sc->lbl_pct) set_label_if_changed(sc->lbl_pct, "");
+                    if (sc->ring.cont) {
+                        strlcpy(sc->round_time, "--", sizeof(sc->round_time));
+                    }
                 }
             }
         }
@@ -1377,6 +1491,23 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
          * snap lands before this update moves the fill on (I-1), matching the
          * Dashboard's order in nina_dashboard_update.c. */
         if (sc->ring.cont) nina_subbar_update(&sc->ring, d, i, gb);
+
+        /* The band's colour line and rig name carry the ring colour, so the
+         * band and its ring read as one rig. The subbar has just resolved the
+         * filter colour it drew with, so take it from there rather than
+         * computing a second answer that could disagree. */
+        if (sc->ring.cont && current_theme) {
+            uint32_t ring_col = sc->ring.cached_block_color;
+            if (ring_col == 0) {
+                ring_col = app_config_apply_brightness(current_theme->label_color, gb);
+            }
+            if (sc->tick) {
+                set_bg_color_cached(sc->tick, &sc->cached_tick_color, ring_col, 0);
+            }
+            if (sc->lbl_name) {
+                set_text_color_cached(sc->lbl_name, &sc->cached_name_color, ring_col);
+            }
+        }
 
         /* Progress bar color: filter color or theme progress */
         if (sc->bar_progress) {
@@ -1447,10 +1578,27 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             }
         }
 
-        /* RMS */
+        /* Sub count on the round band, the figure the square card spends on
+         * lbl_exp_val. Clamped so the format cannot outrun the buffer. */
+        if (sc->ring.cont) {
+            int done = d->exposure_count;
+            int want = d->exposure_iterations;
+            if (done < 0) done = 0;
+            if (done > 9999) done = 9999;
+            if (want < 0) want = 0;
+            if (want > 9999) want = 9999;
+            snprintf(sc->round_subs, sizeof(sc->round_subs), "%d/%d", done, want);
+        }
+
+        /* RMS. The round band drops the arcsecond mark: the row already says
+         * RMS, and the mark costs width the rest of the row needs. */
         if (d->guider.rms_total > 0.001f) {
             char buf[16];
-            snprintf(buf, sizeof(buf), "%.2f\"", d->guider.rms_total);
+            if (sc->ring.cont) {
+                snprintf(buf, sizeof(buf), "%.2f", d->guider.rms_total);
+            } else {
+                snprintf(buf, sizeof(buf), "%.2f\"", d->guider.rms_total);
+            }
             set_label_if_changed(sc->lbl_rms_val, buf);
             uint32_t rms_col = theme_is_red_night(current_theme)
                 ? 0 : app_config_get_rms_color(d->guider.rms_total, i);
@@ -1469,18 +1617,7 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
             }
         }
 
-        /* Bullseye dot: distance from centre is the value against its
-         * configured tolerance (ok_max), clamped by ui_dial_place_dot so an
-         * out-of-tolerance value stays on the card. */
-        if (sc->rms_dot && sc->rms_bull) {
-            threshold_config_t t;
-            app_config_get_rms_threshold_config(i, &t);
-            float lim = (t.ok_max > 0.01f) ? t.ok_max : 1.0f;
-            float ratio = (d->guider.rms_total > 0.0f) ? d->guider.rms_total / lim : 0.0f;
-            ui_dial_place_dot(sc->rms_dot, sc->rms_bull, ratio, SR_BEARING_RMS);
-        }
-
-        /* HFR. The round card shows it as a bullseye only, with no figure. */
+        /* HFR. The round band writes it into the reading row instead. */
         if (sc->lbl_hfr_val) {
             if (d->hfr > 0.001f) {
                 char buf[16];
@@ -1502,15 +1639,18 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                         app_config_apply_brightness(current_theme->text_color, gb));
                 }
             }
+        } else if (sc->ring.cont) {
+            if (d->hfr > 0.001f) {
+                snprintf(sc->round_hfr, sizeof(sc->round_hfr), "HFR %.2f", d->hfr);
+            } else {
+                strlcpy(sc->round_hfr, "HFR --", sizeof(sc->round_hfr));
+            }
         }
 
-        if (sc->hfr_dot && sc->hfr_bull) {
-            threshold_config_t t;
-            app_config_get_hfr_threshold_config(i, &t);
-            float lim = (t.ok_max > 0.01f) ? t.ok_max : 3.5f;
-            float ratio = (d->hfr > 0.0f) ? d->hfr / lim : 0.0f;
-            ui_dial_place_dot(sc->hfr_dot, sc->hfr_bull, ratio, SR_BEARING_HFR);
-        }
+        /* The round band's reading row is composed last: the RMS figure, the
+         * sub count, the filter and HFR are all settled by here, and the row is
+         * fitted against whatever width the RMS figure left. */
+        if (sc->ring.cont) summary_round_compose_row(sc);
 
         /* Time to flip, "HH:MM:SS" formatted as "Xh XXm". The round card has no
          * figure: the parsed minutes go to the tick on its rim ring. */
@@ -1614,27 +1754,6 @@ void summary_page_update(const nina_client_t *instances, int count, const bool *
                     theme_is_red_night(current_theme) ? current_theme->label_color : 0x999999);
             }
         }
-
-        /* Safety crown. A sibling of the block above, never inside it: the
-         * round card draws the crown INSTEAD of lbl_safety, so a crown paint
-         * nested in that branch would never run. */
-        if (sc->ring_crown && current_theme) {
-            uint32_t crown;
-            if (!d->safety_connected)   crown = theme_is_red_night(current_theme)
-                                                ? current_theme->label_color : 0x999999;
-            else if (d->safety_is_safe) crown = theme_is_red_night(current_theme)
-                                                ? 0x7f1d1d : 0x4CAF50;
-            else                        crown = theme_is_red_night(current_theme)
-                                                ? 0xff0000 : 0xF44336;
-            crown = app_config_apply_brightness(crown, gb);
-            /* Every lv_obj_set_style_* call invalidates whether or not the
-             * value changed, and an invalidation is a full-frame redraw here. */
-            if (sc->cached_safety_color != crown) {
-                sc->cached_safety_color = crown;
-                lv_obj_set_style_arc_color(sc->ring_crown, lv_color_hex(crown),
-                                           LV_PART_MAIN);
-            }
-        }
     }
 }
 
@@ -1668,6 +1787,7 @@ void summary_page_apply_theme(void) {
         sc->cached_flip_color       = UINT32_MAX;
         sc->cached_detail_color     = UINT32_MAX;
         sc->cached_safety_color     = UINT32_MAX;
+        sc->cached_tick_color       = UINT32_MAX;
     }
 
     /* Update per-card widgets */
@@ -1693,21 +1813,19 @@ void summary_page_apply_theme(void) {
                 lv_color_hex(current_theme->bento_border), 0);
         }
 
-        /* Round shape handles (radial board 3). All NULL on square. The crown
-         * repaints on the next poll, from the cache cleared above. */
+        /* Round shape handles. All NULL on square. The band's colour line and
+         * rig name repaint on the next poll, from the caches cleared above. */
         if (sc->ring.cont) nina_subbar_apply_theme(&sc->ring);
         if (sc->ring_flip_tick) {
             lv_obj_set_style_arc_color(sc->ring_flip_tick,
                 lv_color_hex(app_config_apply_brightness(current_theme->text_color, gb)),
                 LV_PART_MAIN);
         }
-        if (sc->rms_dot) {
-            lv_obj_set_style_bg_color(sc->rms_dot,
-                lv_color_hex(app_config_apply_brightness(current_theme->rms_color, gb)), 0);
-        }
-        if (sc->hfr_dot) {
-            lv_obj_set_style_bg_color(sc->hfr_dot,
-                lv_color_hex(app_config_apply_brightness(current_theme->hfr_color, gb)), 0);
+        if (sc->lbl_row) {
+            /* The row's own colour is what HFR falls through to; every other
+             * part of it carries a recolour tag rebuilt on the next compose. */
+            lv_obj_set_style_text_color(sc->lbl_row,
+                lv_color_hex(app_config_apply_brightness(current_theme->label_color, gb)), 0);
         }
     }
 

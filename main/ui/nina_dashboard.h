@@ -263,6 +263,14 @@ bool nina_dashboard_thumbnail_visible(void);
 int nina_dashboard_page_to_instance(int abs_page_idx);
 
 /**
+ * @brief Whether a rig's toasts, voice and border flashes are wanted right now.
+ *
+ * True for every rig when nina_notify_scope is 0; otherwise only while that
+ * rig's page or the Summary is on screen. Plain read, no LVGL lock taken.
+ */
+bool nina_dashboard_instance_notifies(int instance);
+
+/**
  * @brief Map a NINA instance index to its ABSOLUTE page index.
  *
  * Pure offset (NINA_PAGE_OFFSET + instance) over the reserved NINA band; exact

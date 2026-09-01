@@ -13,6 +13,7 @@
 #include "audio_alert.h"
 #include "net_diag.h"
 #include "ui/nina_toast.h"
+#include "ui/nina_dashboard.h"
 #include "esp_timer.h"
 #include "esp_log.h"
 #include <string.h>
@@ -32,10 +33,12 @@ static bool valid_index(int i) {
 }
 
 /* Outage toasts use the same gate as the WebSocket connect toasts in
- * nina_websocket.c: notify-mask bit 0 plus the per-instance mute switch. */
+ * nina_websocket.c: notify-mask bit 0, the per-instance mute switch and the
+ * on-screen rig scope. */
 static bool outage_toasts_enabled(int instance) {
     const app_config_t *cfg = app_config_get();
-    return (cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[instance];
+    return (cfg->toast_notify_mask & (1 << 0)) && !cfg->toast_instance_muted[instance] &&
+           nina_dashboard_instance_notifies(instance);
 }
 
 /* Display name for an instance ("astromele2.lan"), with a generic fallback so

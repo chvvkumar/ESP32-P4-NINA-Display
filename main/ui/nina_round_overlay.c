@@ -26,6 +26,7 @@
 LV_FONT_DECLARE(lv_font_material_safety);
 LV_FONT_DECLARE(lv_font_hanken_bold_64);
 LV_FONT_DECLARE(lv_font_hanken_bold_28);
+LV_FONT_DECLARE(lv_font_hanken_bold_44);
 
 /* ---- design tokens ------------------------------------------------------ */
 
@@ -43,7 +44,7 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define ROV_ROW3_DY       122    /* filter + counter */
 
 #define ROV_NAME_PAD       48    /* chord at the name row minus this */
-#define ROV_VALS_PAD       60    /* chord at the value row minus this */
+#define ROV_VALS_PAD       44    /* chord at the value row minus this; 44 keeps the 64 px hero for three digits on the 720 disc */
 #define ROV_META_GAP       18
 #define ROV_HERO_GAP        4    /* digits to the "s" */
 #define ROV_CAP_GAP         6    /* caption to its value, on one baseline */
@@ -60,6 +61,16 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define ROV_LADDER_FILTER_N 2
 static const lv_font_t *const ROV_LADDER_FILTER[ROV_LADDER_FILTER_N] = {
     &lv_font_montserrat_28, &lv_font_montserrat_24,
+};
+
+/* The hero digits step down one face when they would run into the RMS and
+ * HFR cells: three digits fit the 64 px face on both discs, four digits fit
+ * it on the 800 disc only. hanken_bold_44 is a DIGIT-ONLY subset, which is
+ * fine here because the digit cell never holds anything but digits (the idle
+ * "--" lives in the unit label); never put a mixed string in it. */
+#define ROV_LADDER_HERO_N 2
+static const lv_font_t *const ROV_LADDER_HERO[ROV_LADDER_HERO_N] = {
+    &lv_font_hanken_bold_64, &lv_font_hanken_bold_44,
 };
 
 /* Material Symbols codepoints (UTF-8), the same glyphs every other page uses. */
@@ -213,6 +224,16 @@ static void rov_elapsed_cb(dashboard_page_t *p, int secs)
             snprintf(buf, sizeof(buf), "%d", secs);
         }
         ui_label_set_text(p->alt.ov.lbl_hero, buf);
+        /* Step the face down before the digits reach the side cells. Every
+         * face is kept on the 64 px baseline the unit and the side cells are
+         * already lifted to, so the row never wobbles when the face changes. */
+        ui_fit_label_font(p->alt.ov.lbl_hero, ROV_LADDER_HERO, ROV_LADDER_HERO_N,
+                          p->alt.ov.hero_avail);
+        const lv_font_t *pick = lv_obj_get_style_text_font(p->alt.ov.lbl_hero, 0);
+        int lift = pick->base_line - ROV_FONT_HERO->base_line;
+        if (lv_obj_get_style_translate_y(p->alt.ov.lbl_hero, 0) != lift) {
+            lv_obj_set_style_translate_y(p->alt.ov.lbl_hero, lift, 0);
+        }
     }
     /* The unit carries the idle marker, so the digit cell only ever holds
      * digits and a layout hero in a digits-only face can mirror it verbatim. */
@@ -315,6 +336,20 @@ void nina_round_overlay_create(dashboard_page_t *p, lv_obj_t *parent, int page_i
          * the rim arc (seen on the 800 panel). */
         const int avail = rov_row_avail(plate_top + ROV_ROW2_DY + row_h,
                                         ROV_VALS_PAD);
+        /* Width left for the hero once both side cells hold their widest
+         * sane reading ("HFR" is the wider caption, 9.99" the widest value a
+         * guided rig shows), with one ROV_HERO_GAP of air on each side. */
+        {
+            lv_point_t cap = { 0, 0 }, val = { 0, 0 };
+            lv_text_get_size(&cap, "HFR", ROV_FONT_CAP, 0, 0, LV_COORD_MAX,
+                             LV_TEXT_FLAG_NONE);
+            lv_text_get_size(&val, "9.99\"", ROV_FONT_VAL, 0, 0, LV_COORD_MAX,
+                             LV_TEXT_FLAG_NONE);
+            p->alt.ov.hero_avail = avail
+                - 2 * ((int)cap.x + ROV_CAP_GAP + (int)val.x)
+                - 2 * ROV_HERO_GAP;
+            if (p->alt.ov.hero_avail < 60) p->alt.ov.hero_avail = 60;
+        }
         p->alt.ov.row_vals = lv_obj_create(parent);
         lv_obj_remove_style_all(p->alt.ov.row_vals);
         lv_obj_remove_flag(p->alt.ov.row_vals, LV_OBJ_FLAG_SCROLLABLE);
