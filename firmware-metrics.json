@@ -8,7 +8,7 @@
   "iram_used": "",
   "esp_idf": "v5.5.2",
   "target": "esp32p4",
-  "build_date": "2026-09-01",
+  "build_date": "2026-09-02",
   "branch": "main",
-  "commit": "08c822f"
+  "commit": "0667eab"
 }
