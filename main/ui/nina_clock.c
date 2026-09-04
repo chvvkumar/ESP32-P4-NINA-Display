@@ -743,6 +743,27 @@ static void minute_words(int m, char *buf, size_t n) {
     }
 }
 
+/**
+ * Shrink the Evensong hour word to the column. TWELVE is 724 px and
+ * ELEVEN 649 px at bodoni_black_150 against 620 px of column on square
+ * (510 on the 720 round); scale the label uniformly instead of carrying
+ * a second 150 KB face. Layout keeps the native box, so the only
+ * visible cost is a slightly taller seam under the shrunk word.
+ */
+static void ev_fit_hour_word(void) {
+    if (!ev_w1 || !clock_root) return;
+    int32_t ls = lv_obj_get_style_text_letter_space(ev_w1, LV_PART_MAIN);
+    lv_point_t sz;
+    lv_text_get_size(&sz, lv_label_get_text(ev_w1), &lv_font_bodoni_black_150,
+                     ls, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+    int32_t avail = screen_size()
+                  - lv_obj_get_style_pad_left(clock_root, LV_PART_MAIN)
+                  - lv_obj_get_style_pad_right(clock_root, LV_PART_MAIN);
+    int32_t scale = LV_SCALE_NONE;
+    if (avail > 0 && sz.x > avail) scale = avail * LV_SCALE_NONE / sz.x;
+    lv_obj_set_style_transform_scale(ev_w1, scale, 0);
+}
+
 /** Part-of-day words for the Evensong third line. */
 static const char *part_of_day_words(int hour) {
     if (hour >= 5 && hour <= 11)  return "in the morning";
@@ -1391,6 +1412,10 @@ static void build_layout_evensong(void) {
     lv_obj_set_style_pad_row(words, -24, 0);
 
     ev_w1 = make_label(words, &lv_font_bodoni_black_150, EV_PARCH, 1, "");
+    /* Scaled down from the top-left by ev_fit_hour_word() when the word
+     * overruns the column (TWELVE is 724 px at this face). */
+    lv_obj_set_style_transform_pivot_x(ev_w1, 0, 0);
+    lv_obj_set_style_transform_pivot_y(ev_w1, 0, 0);
     ev_w2 = make_label(words, &lv_font_bodoni_ital_90, EV_PARCH, 1, "");
     lv_obj_set_style_pad_bottom(ev_w2, 24, 0);
     ev_w3 = make_label(words, &lv_font_bodoni_ital_44, EV_BRASS, 1, "");
@@ -2405,6 +2430,7 @@ void clock_page_update(void) {
      * digital format) */
     if (s_layout == 3 && ev_w1) {
         lv_label_set_text(ev_w1, ev_hour_words[tm_now.tm_hour % 12]);
+        ev_fit_hour_word();
         if (ev_w2) {
             char wbuf[24];
             minute_words(tm_now.tm_min, wbuf, sizeof(wbuf));
