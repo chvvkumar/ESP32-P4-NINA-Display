@@ -9,6 +9,7 @@
 #include "nina_allsky.h"
 #include "nina_dashboard_internal.h"
 #include "nina_empty_state.h"
+#include "net_diag.h"          /* net_sta_has_ip (connecting-title wording) */
 #include "page_conn.h"
 #include "app_config.h"
 #include "themes.h"
@@ -644,7 +645,7 @@ lv_obj_t *allsky_page_create(lv_obj_t *parent) {
     lv_obj_add_flag(s_backdrop, LV_OBJ_FLAG_HIDDEN);
 
     s_empty = nina_empty_state_create(s_backdrop, ICON_CLOUD_OFF,
-                                      "Connecting to AllSky...",
+                                      nina_empty_state_wait_title("Connecting to AllSky..."),
                                       "Check the AllSky settings.", 0);
     s_state_key = -1;
 
@@ -693,13 +694,17 @@ void allsky_page_update(const allsky_data_t *data) {
         : PAGE_CONN_DOWN;
 
     /* Restyle on transitions only — opacity and label churn every poll cycle
-     * would force needless LVGL invalidations. */
-    int state_key = (int)st | (configured ? 0 : 0x100);
+     * would force needless LVGL invalidations. The link state is part of the
+     * key because the connecting title depends on it: without that bit a page
+     * that came up saying "Waiting for WiFi" would keep saying it after the
+     * station got an address, since the connection tier never changed. */
+    bool wifi_up = net_sta_has_ip();
+    int state_key = (int)st | (configured ? 0 : 0x100) | (wifi_up ? 0 : 0x200);
     if (state_key != s_state_key) {
         s_state_key = state_key;
         switch (st) {
         case PAGE_CONN_CONNECTING:
-            overlay_show("Connecting to AllSky...", true);
+            overlay_show(nina_empty_state_wait_title("Connecting to AllSky..."), true);
             reconnect_label_show(false);
             quads_set_opa(LV_OPA_COVER);
             break;

@@ -885,6 +885,8 @@ static void set_defaults(app_config_t *cfg) {
     cfg->radar_frames = 10;   // full NOAA loop; ~660 KB of PSRAM per retained frame
     cfg->radar_dark_mode = true;   // v64: dark basemap by default (night-friendly)
     cfg->radar_map_style = 1;      // v65: state lines only (0 = standard NWS picture with roads and city names)
+    cfg->radar_zoom = 6;           // v81: ~650 km across at mid latitudes
+    cfg->radar_palette = 6;        // v81: NEXRAD Level III
 
     // Clouds page defaults (v66). Centre comes from weather_lat/weather_lon at
     // fetch time; nothing location-specific is stored here.
@@ -3181,6 +3183,23 @@ static void migrate_from_v79(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v79 to v%d", APP_CONFIG_VERSION);
 }
 
+/* --- v80 -> v81 migration: appends radar_zoom and radar_palette (the
+ * worldwide radar source's area and colour scheme). The prefix through
+ * nina_notify_scope is the v80 layout byte for byte. --- */
+static void migrate_from_v80(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t v80_size = offsetof(app_config_t, radar_zoom);
+    size_t copy = raw_size < v80_size ? raw_size : v80_size;
+    memcpy(cfg, raw, copy);
+    /* Both fields sit past the copied prefix, so set_defaults() already holds
+     * them; re-assert for documentation, as migrate_from_v78/v79 do. */
+    cfg->radar_zoom    = 6;
+    cfg->radar_palette = 6;
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v80 to v%d", APP_CONFIG_VERSION);
+}
+
 static void migrate_from_v77(const void *raw, size_t raw_size, app_config_t *cfg)
 {
     set_defaults(cfg);
@@ -3943,11 +3962,30 @@ static bool validate_config(app_config_t *cfg) {
     cfg->radar_show_overlay = cfg->radar_show_overlay ? true : false;
     cfg->radar_dark_mode    = cfg->radar_dark_mode ? true : false;
     /* radar_map_style: 0..2, anything else (stale blob byte) falls back to the
-     * default, state lines only (1). The INT_RESET row in settings_table.h already does
+     * default (1, state lines only) rather than to the nearest bound. The
+     * worldwide source is picked in the Radar Area select (radar_token
+     * "WORLD"), not here. The INT_RESET row in settings_table.h already does
      * this in settings_clamp_apply(); kept explicit here as the last line of
      * defence, like the flags above. */
     if (cfg->radar_map_style > 2) {
         cfg->radar_map_style = 1;
+        fixed = true;
+    }
+    /* v81 worldwide radar: zoom is a range, the palette is a fixed set of
+     * RainViewer ids, so an unknown palette resets rather than clamps.
+     * Task 2 (rainviewer.h, not yet in the tree) will own the canonical
+     * RAINVIEWER_ZOOM_MIN/MAX/DEF and rainviewer_palette_ok() -- this block
+     * uses the same literal values inline so app_config.c has no dependency
+     * on a file this task does not touch; a later pass can swap these two
+     * checks for the header's helpers without changing behaviour. */
+    if (cfg->radar_zoom < 4 || cfg->radar_zoom > 7) {
+        cfg->radar_zoom = 6;
+        fixed = true;
+    }
+    if (cfg->radar_palette != 1 && cfg->radar_palette != 2 &&
+        cfg->radar_palette != 4 && cfg->radar_palette != 6 &&
+        cfg->radar_palette != 8) {
+        cfg->radar_palette = 6;
         fixed = true;
     }
     /* Clouds page (v66). The SETTINGS_TABLE rows already clamp/reset these in
@@ -4157,6 +4195,14 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 80) {
+        /* v80 -> v81: appended radar_zoom and radar_palette. tiles_loaded stays
+         * false: a v80 device already keeps its tiles in the
+         * "json_tiles"/"ha_tiles" NVS keys, so the tail loads them. */
+        migrate_from_v80(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 79) {
         /* v79 -> v80: appended nina_notify_scope. tiles_loaded stays false:
          * a v79 device already keeps its tiles in the "json_tiles"/"ha_tiles"

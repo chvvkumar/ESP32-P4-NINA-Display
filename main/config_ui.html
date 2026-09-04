@@ -2519,6 +2519,10 @@
       data.radar_token=$('radar_token').value;
       data.radar_update_interval_s=parseInt($('radar_update_interval_s').value,10)||900;
       data.radar_frames=parseInt($('radar_frames').value,10)||10;
+      /* 4..7, widest to closest; only the worldwide style reads it. */
+      data.radar_zoom=parseInt($('radar_zoom').value,10)||6;
+      /* RainViewer colour scheme id (1,2,4,6,8); the device re-checks the set. */
+      data.radar_palette=parseInt($('radar_palette').value,10)||6;
     }
     function collectTab_image_clouds(data){
       data.clouds_enabled=!!$('clouds_enabled').checked;
@@ -3030,7 +3034,17 @@
         var rms=(data.radar_map_style===undefined||data.radar_map_style===null)?1:(parseInt(data.radar_map_style,10)||0);
         $('radar_map_style').value=String((rms>=0&&rms<=2)?rms:1);
       }
-      radarMapStyleSync();
+      if($('radar_zoom')){
+        $('radar_zoom').value=String(data.radar_zoom||6);
+        /* A value this page does not offer (newer firmware) shows the default. */
+        if($('radar_zoom').selectedIndex<0) $('radar_zoom').value='6';
+      }
+      if($('radar_palette')){
+        var rp=parseInt(data.radar_palette,10)||6;
+        $('radar_palette').value=String(rp);
+        /* A value this page does not offer (newer firmware) shows the default. */
+        if($('radar_palette').selectedIndex<0) $('radar_palette').value='6';
+      }
       /* '' is the Automatic option and a legitimate stored value, so keep it
          (|| '' only covers a missing key). An area saved by a newer firmware
          than this page knows about would not match any option; fall back to
@@ -3043,6 +3057,9 @@
       if($('radar_update_interval_s')) $('radar_update_interval_s').value=String(data.radar_update_interval_s||900);
       if($('radar_frames')) $('radar_frames').value=String(data.radar_frames||10);
       updateImagePageEnabledUI('image-radar');
+      /* Run after radar_token is populated: the coverage-note check below reads
+         the token's live value, so this must not run on a stale/default token. */
+      radarMapStyleSync();
     }
     function populateTab_image_clouds(data){
       if($('clouds_enabled')) $('clouds_enabled').checked=!!data.clouds_enabled;
@@ -4940,12 +4957,22 @@
       if($(t.fields)) $(t.fields).style.display=on?'':'none';
     }
 
-    /* Dark mode and Crop only affect the standard radar map picture; the two
-       line-only styles have neither a banner to trim nor a light background to
-       darken, so grey those controls out while such a style is selected. */
+    /* Driven by the Radar area select, not by Map style: Worldwide is an area
+       now. Map style, Dark mode and Crop are US-only, so the whole block hides
+       for Worldwide; the Area and Rain colours controls belong to Worldwide
+       alone. Within the US block, Dark mode and Crop only affect the standard
+       picture -- the two line-only styles have neither a banner to trim nor a
+       light background to darken -- so they grey out there. The coverage note
+       is shown whenever the area is Automatic, because that is exactly when the
+       device may switch to the worldwide map on its own. */
     function radarMapStyleSync(){
-      var sel=$('radar_map_style'); if(!sel) return;
-      var std=(parseInt(sel.value,10)||0)===0;
+      var tok=$('radar_token')?$('radar_token').value:'';
+      var world=(tok==='WORLD');
+      var sel=$('radar_map_style');
+      var style=sel?(parseInt(sel.value,10)||0):0;
+      var std=(!world&&style===0);
+      if($('radarUsOnly')) $('radarUsOnly').style.display=world?'none':'';
+      if($('radarWorldOnly')) $('radarWorldOnly').style.display=world?'':'none';
       var wrap=$('radarStdOnly');
       if(wrap){
         wrap.style.opacity=std?'':'0.5';
@@ -4953,6 +4980,7 @@
       }
       if($('radar_dark_mode')) $('radar_dark_mode').disabled=!std;
       if($('radar_crop')) $('radar_crop').disabled=!std;
+      if($('radarCoverageNote')) $('radarCoverageNote').style.display=(!world&&tok==='')?'':'none';
     }
 
     /* weather_lat/weather_lon are System-tab fields (Location card) reused as

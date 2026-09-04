@@ -2,15 +2,22 @@
 
 /*
  * clouds_wms.h - pure URL, geometry and time decisions for the Clouds page
- * (NASA GIBS WMS, a GOES ABI channel under a selectable vector basemap
- * overlay: borders and roads, coastlines only, borders plus a graticule, or none).
+ * (a geostationary satellite picture under a selectable vector basemap overlay:
+ * borders and roads, coastlines only, borders plus a graticule, or none).
+ *
+ * The satellite is whichever of the five rows below sits nearest the weather
+ * longitude, so the page works anywhere on Earth: GOES-East and GOES-West from
+ * NASA GIBS, Himawari from GIBS, and the two Meteosat services (MTG at 0 and
+ * MSG IODC at 45.5E) from EUMETView. The provider decides the URL shape and
+ * where the frame times come from.
  *
  * Header-only and free of ESP-IDF, FreeRTOS and LVGL, so the host test suite
  * (test/host/test_clouds_wms.c) can exercise the parts that are easy to get
- * wrong: the East/West pick, the Web-Mercator box, the GetMap URL shape, the
- * DescribeDomains parser and the UTC calendar arithmetic. Same precedent as
- * radar_wms.h, whose Mercator helpers this file reuses. Fetching and the frame
- * ring live in image_page_poll.c and ui/nina_image_page.c.
+ * wrong: the satellite pick, the Web-Mercator box and its date-line clamp, both
+ * GetMap URL shapes, the DescribeDomains parser and the UTC calendar
+ * arithmetic. Same precedent as radar_wms.h, whose Mercator helpers this file
+ * reuses. Fetching and the frame ring live in image_page_poll.c and
+ * ui/nina_image_page.c.
  *
  * Verified against the live server 2026-08-18 (scratchpad gibs-robustness.md).
  * Traps this header is written around:
@@ -53,12 +60,16 @@
 
 #include "radar_wms.h"    /* radar_wms_merc_x/y, radar_wms_find */
 #include "screen_geom.h"  /* screen_size(): the frame is the panel width */
+#include "sun_pos.h"      /* sun_elevation_deg(): day/night pick for a photo layer */
 
-#define CLOUDS_URL_MAX        RADAR_WMS_URL_MAX   /* 512: the GetMap URL is ~290 chars, 302 worst case
-                                                    (longest channel + longest basemap suffix) */
+#define CLOUDS_URL_MAX        RADAR_WMS_URL_MAX   /* 512: the GIBS GetMap URL is ~290 chars, 302 worst
+                                                    case; the EUMETView one ~347 worst case (longest
+                                                    layer + longest basemap suffix + the 17-character
+                                                    &bgcolor=0x000000 tail) */
 #define CLOUDS_TIME_MAX       21                  /* "2026-08-18T04:00:00Z" + NUL */
 #define CLOUDS_TIMES_MAX      10                  /* == max clouds_frames (ring capacity) */
-#define CLOUDS_PERIOD_S       600u                /* GOES ABI cadence, PT10M on every channel */
+#define CLOUDS_GIBS_PERIOD_S  600u                /* GOES/Himawari ABI-AHI cadence, PT10M; also the
+                                                    DescribeDomains default when a segment omits PTnM */
 #define CLOUDS_FALLBACK_LAG_S 3000u               /* 50 min behind wall clock when the domain fetch fails */
 /* Frame size in pixels, which is the panel width. The GIBS GetMap WIDTH/HEIGHT
  * and the EPSG:3857 bbox half-width are BOTH derived from this number: change
@@ -70,46 +81,199 @@
 #define CLOUDS_DOMAIN_FWD_S   3600u
 
 #define CLOUDS_GIBS_BASE   "https://gibs.earthdata.nasa.gov/"
-#define CLOUDS_SPLIT_LON   (-106.2f)              /* midpoint of the two sub-satellite longitudes */
+#define CLOUDS_EUMET_BASE  "https://view.eumetsat.int/geoserver/"
+#define CLOUDS_SUN_MIN_EL_DEG 10.0f   /* visible-light layers need the sun this high */
+#define CLOUDS_BLANK_PCT      90      /* near-black sample share above which a frame is a blank slot */
+#define CLOUDS_EUMET_LAG_S    1800u   /* 30 min behind wall clock when the capabilities fetch fails */
 
-/* Channel table (config field clouds_channel, 0..2). All six layer names and
- * their PT10M DescribeDomains lists verified live 2026-08-18; a wrong name
- * returns a 460 B XML ServiceException, so a typo cannot silently serve the
- * wrong picture. blank_pct is the near-black sample fraction above which
- * clouds_frame_incomplete() calls the frame a blank slot (see the measurements
- * at that function). */
+/* Which product a frame is drawn from. The GeoColor-role channel resolves to
+ * PHOTO_DAY or PHOTO_NIGHT per frame from the sun at the weather location at
+ * that frame's own time, so a loop through dusk legitimately mixes styles. */
+typedef enum {
+    CLOUDS_ROLE_PHOTO_DAY   = 0,
+    CLOUDS_ROLE_PHOTO_NIGHT = 1,
+    CLOUDS_ROLE_IR          = 2,
+    CLOUDS_ROLE_AIR         = 3,
+} clouds_role_t;
+
+typedef enum { CLOUDS_PROV_GIBS = 0, CLOUDS_PROV_EUMET = 1 } clouds_provider_t;
+
+/* One geostationary satellite the page can draw from.
+ *
+ *   name        the caption word ("GOES", "Himawari", "Meteosat")
+ *   sub_lon     sub-satellite longitude, degrees east; the pick is nearest
+ *               wrap-around distance to the weather longitude
+ *   period_s    the publishing grid, 600 or 900 seconds
+ *   photo_day / photo_night
+ *               the GeoColor-role layer with the sun up / down. EQUAL when the
+ *               satellite publishes a true day-night composite (GOES GeoColor,
+ *               MTG GeoColour); different when it does not, where the night
+ *               half falls back to the infrared layer.
+ *   photo_word  the caption word for photo_day ("GeoColor", "GeoColour",
+ *               "Visible", "Natural"). The night word is this one when the
+ *               composite is real, "Clean IR" otherwise.
+ *   ws_photo / ws_air
+ *               EUMETView workspace the photo/IR layers and the air-mass layer
+ *               live in, which is where their advertised time is read from.
+ *               NULL on a GIBS row, which uses DescribeDomains instead.
+ *
+ * Layer names are exactly the ones verified live on 2026-09-03 (design doc
+ * section 1). A wrong name returns an XML ServiceException on both providers,
+ * so a typo cannot silently serve the wrong picture. */
 typedef struct {
-    const char *east;       /* GIBS layer name, GOES-East */
-    const char *west;       /* GIBS layer name, GOES-West */
-    const char *label;      /* overlay strip caption */
-    uint8_t     blank_pct;  /* > this % of samples near black = blank (not ingested) frame */
-} clouds_channel_t;
+    const char       *name;
+    float             sub_lon;
+    clouds_provider_t provider;
+    uint16_t          period_s;
+    const char       *photo_day;
+    const char       *photo_night;
+    const char       *clean_ir;
+    const char       *air_mass;
+    const char       *photo_word;
+    const char       *ws_photo;
+    const char       *ws_air;
+} clouds_sat_t;
 
-#define CLOUDS_CHANNEL_COUNT 3
+#define CLOUDS_SAT_COUNT 5
 
-static const clouds_channel_t s_clouds_channels[CLOUDS_CHANNEL_COUNT] = {
-    { "GOES-East_ABI_GeoColor",              "GOES-West_ABI_GeoColor",              "GeoColor", 90 },
-    { "GOES-East_ABI_Band13_Clean_Infrared", "GOES-West_ABI_Band13_Clean_Infrared", "Clean IR", 90 },
-    { "GOES-East_ABI_Air_Mass",              "GOES-West_ABI_Air_Mass",              "Air Mass", 90 },
+/* ORDER MATTERS at exactly one longitude: -106.2 is equidistant from GOES-East
+ * and GOES-West, and clouds_sat_for_lon() keeps the FIRST row on a tie, which
+ * preserves the pre-worldwide behaviour (-106.2 East, -106.3 West). */
+static const clouds_sat_t s_clouds_sats[CLOUDS_SAT_COUNT] = {
+    { "GOES",     -75.2f,  CLOUDS_PROV_GIBS,  600,
+      "GOES-East_ABI_GeoColor", "GOES-East_ABI_GeoColor",
+      "GOES-East_ABI_Band13_Clean_Infrared", "GOES-East_ABI_Air_Mass",
+      "GeoColor",  NULL, NULL },
+    { "GOES",     -137.2f, CLOUDS_PROV_GIBS,  600,
+      "GOES-West_ABI_GeoColor", "GOES-West_ABI_GeoColor",
+      "GOES-West_ABI_Band13_Clean_Infrared", "GOES-West_ABI_Air_Mass",
+      "GeoColor",  NULL, NULL },
+    { "Himawari",  140.7f, CLOUDS_PROV_GIBS,  600,
+      "Himawari_AHI_Band3_Red_Visible_1km", "Himawari_AHI_Band13_Clean_Infrared",
+      "Himawari_AHI_Band13_Clean_Infrared", "Himawari_AHI_Air_Mass",
+      "Visible",   NULL, NULL },
+    /* MTG-I1 at 0 degrees. Its air-mass product is not published for MTG, so
+     * that channel comes from the MSG 0-degree service in the msg_fes
+     * workspace, on a 15-minute grid; the server snaps a requested time to the
+     * nearest real slot, so the 10-minute step-back still returns a picture. */
+    { "Meteosat",  0.0f,   CLOUDS_PROV_EUMET, 600,
+      "mtg_fd:rgb_geocolour", "mtg_fd:rgb_geocolour",
+      "mtg_fd:ir105_hrfi", "msg_fes:rgb_airmass",
+      "GeoColour", "mtg_fd", "msg_fes" },
+    /* MSG Indian Ocean Data Coverage at 45.5 degrees east, 15-minute grid.
+     * No GeoColor product: natural colour by day (rgb_natural is a colour RGB,
+     * not a single monochrome band), IR 10.8 by night. */
+    { "Meteosat",  45.5f,  CLOUDS_PROV_EUMET, 900,
+      "msg_iodc:rgb_natural", "msg_iodc:ir108",
+      "msg_iodc:ir108", "msg_iodc:rgb_airmass",
+      "Natural",   "msg_iodc", "msg_iodc" },
 };
 
-/* Row for @p ch; an out-of-range value falls back to GeoColor rather than
- * failing, so a config from a newer build never blanks the page. */
-static inline const clouds_channel_t *clouds_channel(uint8_t ch)
+/* Nearest satellite by wrap-around longitude distance. Never NULL. */
+static inline const clouds_sat_t *clouds_sat_for_lon(float lon)
 {
-    return &s_clouds_channels[(ch < CLOUDS_CHANNEL_COUNT) ? ch : 0];
+    const clouds_sat_t *best = &s_clouds_sats[0];
+    float best_d = 360.0f;
+    for (int i = 0; i < CLOUDS_SAT_COUNT; i++) {
+        float d = s_clouds_sats[i].sub_lon - lon;
+        d = fabsf(fmodf(d + 540.0f, 360.0f) - 180.0f);
+        if (d < best_d) {            /* strict: a tie keeps the earlier row */
+            best_d = d;
+            best = &s_clouds_sats[i];
+        }
+    }
+    return best;
 }
 
-/* Satellite by longitude only: west of the -75.2/-137.2 midpoint gets GOES-West. */
-static inline const char *clouds_layer(uint8_t ch, float lon)
+/* Which product channel @p ch means for a frame at @p stamp. Channels 1 and 2
+ * are fixed; channel 0 (GeoColor) asks the sun. An out-of-range channel falls
+ * back to the GeoColor role rather than failing, so a config from a newer build
+ * never blanks the page. */
+static inline clouds_role_t clouds_role(uint8_t ch, float lat, float lon, uint32_t stamp)
 {
-    const clouds_channel_t *c = clouds_channel(ch);
-    return (lon < CLOUDS_SPLIT_LON) ? c->west : c->east;
+    if (ch == 1) return CLOUDS_ROLE_IR;
+    if (ch == 2) return CLOUDS_ROLE_AIR;
+    return (sun_elevation_deg(lat, lon, stamp) >= CLOUDS_SUN_MIN_EL_DEG)
+               ? CLOUDS_ROLE_PHOTO_DAY : CLOUDS_ROLE_PHOTO_NIGHT;
 }
 
-static inline const char *clouds_channel_label(uint8_t ch)
+static inline const char *clouds_sat_layer(const clouds_sat_t *s, clouds_role_t role)
 {
-    return clouds_channel(ch)->label;
+    if (s == NULL) return "";
+    switch (role) {
+        case CLOUDS_ROLE_PHOTO_NIGHT: return s->photo_night;
+        case CLOUDS_ROLE_IR:          return s->clean_ir;
+        case CLOUDS_ROLE_AIR:         return s->air_mass;
+        case CLOUDS_ROLE_PHOTO_DAY:   break;
+    }
+    return s->photo_day;
+}
+
+/* The same layer as GeoServer names it INSIDE its workspace-scoped service.
+ *
+ * The table stores the workspace-qualified name ("mtg_fd:rgb_geocolour"), which
+ * is what the GetMap layers= parameter on the global /geoserver/ows endpoint
+ * needs. The per-workspace virtual service at /geoserver/{ws}/wms publishes the
+ * SAME layer without the prefix (<Name>rgb_geocolour</Name>; the real mtg_fd
+ * capture of 2026-09-03 contains zero occurrences of "mtg_fd:"), so a lookup in
+ * that document must use the bare tail. Returns a pointer INTO @p layer, no
+ * copy; a name with no ':' is already bare and comes back unchanged. */
+static inline const char *clouds_layer_bare_name(const char *layer)
+{
+    if (layer == NULL) return NULL;
+    const char *c = strchr(layer, ':');
+    return (c != NULL) ? c + 1 : layer;
+}
+
+/* EUMETView workspace the layer for @p role lives in; NULL on a GIBS row. */
+static inline const char *clouds_sat_workspace(const clouds_sat_t *s, clouds_role_t role)
+{
+    if (s == NULL) return NULL;
+    return (role == CLOUDS_ROLE_AIR) ? s->ws_air : s->ws_photo;
+}
+
+/* Caption word for @p role on @p s. A night photo slot on a satellite with no
+ * real day-night composite is the infrared layer, so it says so. The day/night
+ * sameness is a strcmp, not a pointer compare: whether two identical string
+ * literals in this table share one address is up to the compiler. */
+static inline const char *clouds_role_word(const clouds_sat_t *s, clouds_role_t role)
+{
+    if (s == NULL) return "";
+    switch (role) {
+        case CLOUDS_ROLE_IR:  return "Clean IR";
+        case CLOUDS_ROLE_AIR: return "Air Mass";
+        case CLOUDS_ROLE_PHOTO_NIGHT:
+            return (strcmp(s->photo_night, s->photo_day) == 0) ? s->photo_word : "Clean IR";
+        case CLOUDS_ROLE_PHOTO_DAY:
+            break;
+    }
+    return s->photo_word;
+}
+
+/* The layer one frame is drawn from: satellite by longitude, product by channel
+ * and by the sun at @p stamp. */
+static inline const char *clouds_layer(uint8_t ch, float lat, float lon, uint32_t stamp)
+{
+    const clouds_sat_t *s = clouds_sat_for_lon(lon);
+    return clouds_sat_layer(s, clouds_role(ch, lat, lon, stamp));
+}
+
+/* Overlay-strip caption for one frame: "<satellite> <product>", e.g.
+ * "Himawari Clean IR" or "Meteosat GeoColour". The frame time is written
+ * separately by the page. false and "" when it would not fit. */
+static inline bool clouds_caption(char *out, size_t sz, uint8_t ch, float lat,
+                                  float lon, uint32_t stamp)
+{
+    if (out == NULL || sz == 0) return false;
+    out[0] = '\0';
+    const clouds_sat_t *s = clouds_sat_for_lon(lon);
+    int n = snprintf(out, sz, "%s %s", s->name,
+                     clouds_role_word(s, clouds_role(ch, lat, lon, stamp)));
+    if (n < 0 || (size_t)n >= sz) {
+        out[0] = '\0';
+        return false;
+    }
+    return true;
 }
 
 /* Basemap table (config field clouds_basemap, 0..3): the vector layers appended
@@ -133,6 +297,21 @@ static inline const char *clouds_basemap_suffix(uint8_t bm)
     return s_clouds_basemaps[(bm < CLOUDS_BASEMAP_COUNT) ? bm : 0];
 }
 
+/* The same four user choices mapped onto the closest EUMETView background
+ * layers. Layer order is satellite first, overlays after, as with GIBS. */
+static const char *const s_clouds_eumet_basemaps[CLOUDS_BASEMAP_COUNT] = {
+    ",backgrounds:ne_10m_coastline,backgrounds:ne_boundary_lines_land",   /* 0: borders and roads */
+    ",backgrounds:ne_10m_coastline",                                      /* 1: coastlines only */
+    ",backgrounds:ne_10m_coastline,backgrounds:ne_boundary_lines_land"
+        ",backgrounds:graticules-dark",                                   /* 2: borders and grid */
+    "",                                                                   /* 3: none */
+};
+
+static inline const char *clouds_eumet_basemap_suffix(uint8_t bm)
+{
+    return s_clouds_eumet_basemaps[(bm < CLOUDS_BASEMAP_COUNT) ? bm : 0];
+}
+
 /* Half-width of the CLOUDS_PX box in Web-Mercator metres at Web-Mercator zoom
  * @p zoom (clamped 5..9): CLOUDS_PX px * (world circumference / (256 * 2^zoom)) / 2. */
 static inline float clouds_half_m(uint8_t zoom)
@@ -142,18 +321,147 @@ static inline float clouds_half_m(uint8_t zoom)
     return ((float)CLOUDS_PX / 2.0f) * 40075016.686f / (256.0f * (float)(1u << zoom));
 }
 
-/* Square EPSG:3857 box centred on lat/lon. Latitude is clamped to +-85 inside
- * radar_wms_merc_y(). (0,0) is a valid centre (Gulf of Guinea), no special case. */
+/* Full width of the Web-Mercator world in metres. A box that would run past
+ * either edge is SHIFTED back inside, not shrunk, so the picture stays
+ * CLOUDS_PX wide with no black band near the date line (spec 3.5). */
+#define CLOUDS_MERC_MAX 20037508.0f
+
+/* How far east the box has to move, in metres, to keep it inside the world:
+ * positive near 180W, negative near 180E, 0 everywhere else. Read only by
+ * clouds_bbox(), and after the date-line split (clouds_split() below) only
+ * ever a SUB-PIXEL amount: a crossing worth a whole pixel is served by two
+ * requests instead of by moving the box, so the location is the centre pixel
+ * at every longitude and the marker needs no offset. */
+static inline float clouds_clamp_shift_m(float lon, uint8_t zoom)
+{
+    float cx = radar_wms_merc_x(lon);
+    float half = clouds_half_m(zoom);
+    if (cx - half < -CLOUDS_MERC_MAX) return -CLOUDS_MERC_MAX - (cx - half);
+    if (cx + half >  CLOUDS_MERC_MAX) return  CLOUDS_MERC_MAX - (cx + half);
+    return 0.0f;
+}
+
+/* Square EPSG:3857 box centred on lat/lon, clamped into the world in x.
+ * Latitude is clamped to +-85 inside radar_wms_merc_y(). (0,0) is a valid
+ * centre (Gulf of Guinea), no special case. */
 static inline void clouds_bbox(float lat, float lon, uint8_t zoom,
                                float *minx, float *miny, float *maxx, float *maxy)
 {
-    float cx = radar_wms_merc_x(lon);
+    float cx = radar_wms_merc_x(lon) + clouds_clamp_shift_m(lon, zoom);
     float cy = radar_wms_merc_y(lat);
     float half = clouds_half_m(zoom);
     if (minx) *minx = cx - half;
     if (miny) *miny = cy - half;
     if (maxx) *maxx = cx + half;
     if (maxy) *maxy = cy + half;
+}
+
+/* clouds_bbox(), rounded to whole metres for the GetMap BBOX and then widened
+ * (radar_wms_square_pixels(), main/radar_wms.h) so the request is never
+ * VERTICALLY coarser per pixel than horizontally by more than about
+ * 0.001 m/px -- the same GIBS coarse-render rule already fixed for the radar
+ * basemap in rainviewer.h. Whole-metre rounding alone is enough to land on
+ * the wrong side: measured 2026-09-03, Wellington NZ (-41.29, 174.78) zoom 6,
+ * the unwidened box has resx 2445.983333, resy 2445.984722 (+0.001389 m/px)
+ * and GIBS served a blocky 26 KB frame; widening minx 2 m west flips the sign
+ * to -0.001389 and GIBS served the crisp 73 KB frame at the identical
+ * position (full URLs and byte counts in
+ * .superpowers/sdd/2026-09-03-world-radar-phase2/clouds-dateline-investigation.md).
+ * The world-edge side pinned by clouds_clamp_shift_m() above is read straight
+ * off the UNROUNDED box so the pin test matches the clamp exactly. No
+ * clouds_zoom this file offers can pin both x sides at once (zoom 5's
+ * half_m tops out at ~1.76M m against a 40.0M m wide world), so the "trim
+ * maxy" fallback in radar_wms_square_pixels() never fires here; it exists for
+ * the shared helper's other caller, radar's worldwide basemap window, whose
+ * box can be much larger relative to the world. */
+static inline void clouds_bbox_rounded(float lat, float lon, uint8_t zoom,
+                                       long *minx, long *miny, long *maxx, long *maxy)
+{
+    float fminx, fminy, fmaxx, fmaxy;
+    clouds_bbox(lat, lon, zoom, &fminx, &fminy, &fmaxx, &fmaxy);
+    if (minx) *minx = (long)lroundf(fminx);
+    if (miny) *miny = (long)lroundf(fminy);
+    if (maxx) *maxx = (long)lroundf(fmaxx);
+    if (maxy) *maxy = (long)lroundf(fmaxy);
+    if (minx == NULL || miny == NULL || maxx == NULL || maxy == NULL) return;
+    const bool west_pinned = fminx <= -CLOUDS_MERC_MAX;
+    const bool east_pinned = fmaxx >=  CLOUDS_MERC_MAX;
+    radar_wms_square_pixels(minx, miny, maxx, maxy, CLOUDS_PX, CLOUDS_PX, west_pinned, east_pinned);
+}
+
+/* Where the CLOUDS_PX window sits on the world, in one or two pieces.
+ *
+ * parts == 1 is every ordinary location: box[0] is exactly what clouds_bbox()
+ * gives (its clamp shift included, which is then 0 or under half a pixel),
+ * px_x[0] == 0 and px_w[0] == CLOUDS_PX, so the single-request URL is byte for
+ * byte the string this header produced before the split existed.
+ *
+ * parts == 2 means the CENTRED window crosses +-180. Part 0 is the WEST half
+ * of the panel and ends exactly on the world edge; part 1 is the EAST half and
+ * starts exactly on the other world edge. The seam is the antimeridian, both
+ * halves are real satellite data, and the location is the centre pixel -- which
+ * is why the box is no longer shifted and the marker no longer offset. */
+typedef struct {
+    int   parts;              /* 1 or 2 */
+    float minx[2], maxx[2];   /* per-part x box, EPSG:3857 metres */
+    float miny, maxy;         /* shared y box, from clouds_bbox() */
+    int   px_x[2], px_w[2];   /* paste column and width in panel pixels */
+} clouds_split_t;
+
+/* Resolve the window for @p lat / @p lon at @p zoom. Never fails; @p s is
+ * always fully written.
+ *
+ * Only a GIBS row can ever be split: an EUMETView satellite is never the
+ * nearest one within clouds_half_m() of a world edge (its rows sit at 0 and
+ * 45.5 east, more than 85 degrees from either edge, against a widest box of
+ * ~1.76M m at zoom 5), and its GetMap shape is a different builder. Testing the
+ * provider HERE rather than at each caller is what guarantees the EUMETView
+ * path can never be handed a part.
+ *
+ * The degenerate case is a crossing worth less than a whole pixel: parts stays
+ * 1 and the box is clouds_bbox()'s, whose clamp shift is that same sub-pixel
+ * amount. So no split is ever one pixel wide, and clouds_bbox() keeps serving
+ * both the no-crossing and the sub-pixel-crossing paths unchanged. */
+static inline void clouds_split(float lat, float lon, uint8_t zoom, clouds_split_t *s)
+{
+    if (s == NULL) return;
+    const int   px   = CLOUDS_PX;
+    const float half = clouds_half_m(zoom);
+    const float mpp  = 2.0f * half / (float)px;      /* metres per pixel, both parts */
+    const float cx   = radar_wms_merc_x(lon);        /* NO clamp shift: centred */
+    int w0 = -1;
+    if (clouds_sat_for_lon(lon)->provider == CLOUDS_PROV_GIBS && mpp > 0.0f) {
+        if (cx + half > CLOUDS_MERC_MAX) {
+            /* East crossing: the panel's right end wraps to -180. */
+            w0 = px - (int)lroundf((cx + half - CLOUDS_MERC_MAX) / mpp);
+        } else if (cx - half < -CLOUDS_MERC_MAX) {
+            /* West crossing: the panel's left end wraps to +180. */
+            w0 = (int)lroundf((-CLOUDS_MERC_MAX - (cx - half)) / mpp);
+        }
+    }
+    if (w0 < 1 || w0 > px - 1) {
+        s->parts = 1;
+        clouds_bbox(lat, lon, zoom, &s->minx[0], &s->miny, &s->maxx[0], &s->maxy);
+        s->px_x[0] = 0;
+        s->px_w[0] = px;
+        s->minx[1] = 0.0f;
+        s->maxx[1] = 0.0f;
+        s->px_x[1] = 0;
+        s->px_w[1] = 0;
+        return;
+    }
+    const float cy = radar_wms_merc_y(lat);
+    s->parts   = 2;
+    s->miny    = cy - half;
+    s->maxy    = cy + half;
+    s->maxx[0] = CLOUDS_MERC_MAX;
+    s->minx[0] = CLOUDS_MERC_MAX - (float)w0 * mpp;
+    s->px_x[0] = 0;
+    s->px_w[0] = w0;
+    s->minx[1] = -CLOUDS_MERC_MAX;
+    s->maxx[1] = -CLOUDS_MERC_MAX + (float)(px - w0) * mpp;
+    s->px_x[1] = w0;
+    s->px_w[1] = px - w0;
 }
 
 /* ---- UTC calendar arithmetic (proleptic Gregorian, no localtime) ---- */
@@ -253,52 +561,147 @@ static inline bool clouds_date_parse(const char *s, size_t len, uint32_t *out)
     return true;
 }
 
-static inline uint32_t clouds_floor_period(uint32_t t)
+static inline uint32_t clouds_floor_to(uint32_t t, uint32_t period_s)
 {
-    return t - (t % CLOUDS_PERIOD_S);
+    if (period_s == 0u) return t;
+    return t - (t % period_s);
 }
 
-/* Newest stamp to assume when DescribeDomains is unavailable. */
+/* Newest stamp to assume when the GIBS DescribeDomains fetch fails. */
 static inline uint32_t clouds_fallback_newest(uint32_t now)
 {
-    uint32_t t = clouds_floor_period(now);
+    uint32_t t = clouds_floor_to(now, CLOUDS_GIBS_PERIOD_S);
     return (t > CLOUDS_FALLBACK_LAG_S) ? t - CLOUDS_FALLBACK_LAG_S : 0u;
 }
 
-/* Frame @p i (0 = newest) counted back from @p newest on the period grid. */
-static inline uint32_t clouds_time_step(uint32_t newest, int i)
+/* Newest stamp to assume when the EUMETView capabilities fetch fails: now minus
+ * 30 minutes, floored to the row's own period (spec 3.3). */
+static inline uint32_t clouds_eumet_fallback_newest(uint32_t now, uint32_t period_s)
 {
-    uint32_t back = (uint32_t)(i > 0 ? i : 0) * CLOUDS_PERIOD_S;
+    uint32_t t = (now > CLOUDS_EUMET_LAG_S) ? now - CLOUDS_EUMET_LAG_S : 0u;
+    return clouds_floor_to(t, period_s);
+}
+
+/* Frame @p i (0 = newest) counted back from @p newest on a @p period_s grid. */
+static inline uint32_t clouds_time_step(uint32_t newest, int i, uint32_t period_s)
+{
+    uint32_t back = (uint32_t)(i > 0 ? i : 0) * period_s;
     return (newest > back) ? newest - back : 0u;
 }
 
-/* GetMap URL for one frame. @p stamp is the frame time in UTC seconds; it is
- * formatted here (never copied from a server string), so no query-splitting
- * character can reach the URL. Layer order: raster first, vector overlay after.
- * Returns false and writes "" when the result would not fit. */
-static inline bool clouds_frame_url(char *out, size_t sz, float lat, float lon,
-                                    uint8_t zoom, uint8_t ch, uint8_t basemap,
-                                    uint32_t stamp)
+/* EUMETView GetMap for one frame. Lowercase parameter names as the service
+ * documents them; EPSG:3857 is an easting/northing CRS so the WMS 1.3.0 axis
+ * order is the same minx,miny,maxx,maxy as GIBS. @p stamp is formatted here,
+ * never copied from a server string. Returns false and writes "" when it would
+ * not fit.
+ *
+ * bgcolor=0x000000 is not optional: GeoServer paints anything it has no data
+ * for WHITE by default, and this page is dark. Measured 2026-09-03 on the live
+ * service: a box outside the MTG disc came back 100 % white, msg_iodc natural
+ * colour at night 100 % white, and a dusk frame carried a white wedge. Black
+ * matches GIBS, whose no-data is already black, and keeps the blank and holes
+ * gates reading the same colour on both providers. */
+static inline bool clouds_eumet_frame_url(char *out, size_t sz, const clouds_sat_t *sat,
+                                          clouds_role_t role, float lat, float lon,
+                                          uint8_t zoom, uint8_t basemap, uint32_t stamp)
 {
-    if (out == NULL || sz == 0) return false;
+    if (out == NULL || sz == 0 || sat == NULL) return false;
     out[0] = '\0';
     char tstr[CLOUDS_TIME_MAX];
     if (!clouds_time_format(tstr, sizeof(tstr), stamp)) return false;
-    float minx, miny, maxx, maxy;
-    clouds_bbox(lat, lon, zoom, &minx, &miny, &maxx, &maxy);
+    long minx, miny, maxx, maxy;
+    clouds_bbox_rounded(lat, lon, zoom, &minx, &miny, &maxx, &maxy);
     int n = snprintf(out, sz,
-                     CLOUDS_GIBS_BASE "wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0"
-                     "&REQUEST=GetMap&LAYERS=%s%s&CRS=EPSG:3857"
-                     "&BBOX=%ld,%ld,%ld,%ld&WIDTH=%d&HEIGHT=%d&FORMAT=image/jpeg&TIME=%s",
-                     clouds_layer(ch, lon), clouds_basemap_suffix(basemap),
-                     (long)lroundf(minx), (long)lroundf(miny),
-                     (long)lroundf(maxx), (long)lroundf(maxy),
+                     CLOUDS_EUMET_BASE "ows?service=WMS&version=1.3.0&request=GetMap"
+                     "&layers=%s%s&crs=EPSG:3857"
+                     "&bbox=%ld,%ld,%ld,%ld&width=%d&height=%d&format=image/jpeg&time=%s"
+                     "&bgcolor=0x000000",
+                     clouds_sat_layer(sat, role), clouds_eumet_basemap_suffix(basemap),
+                     minx, miny, maxx, maxy,
                      CLOUDS_PX, CLOUDS_PX, tstr);
     if (n < 0 || (size_t)n >= sz) {
         out[0] = '\0';
         return false;
     }
     return true;
+}
+
+/* GIBS GetMap for part @p i of @p sp. The GIBS URL shape only: an EUMETView
+ * satellite is never split (clouds_split() refuses it) and has its own builder,
+ * so this returns false rather than sending a GIBS request for one.
+ *
+ * WIDTH is the part width, HEIGHT is always CLOUDS_PX. The rounded box is
+ * widened for the GIBS square-or-wider-pixel rule through the same shared
+ * helper clouds_bbox_rounded() uses, with the part's PINNED side declared: a
+ * part of a split is edge-pinned on exactly one x side (part 0 on its east
+ * side, part 1 on its west), so the widening has to move the OTHER side or the
+ * seam would no longer land on the antimeridian.
+ *
+ * With sp->parts == 1 this is the single-request path: the box, the pin tests,
+ * WIDTH and HEIGHT are all identical to what clouds_bbox_rounded() produces, so
+ * the string is byte for byte the one this header sent before the split
+ * existed. Host-asserted (test_clouds_wms.c, "byte for byte unchanged"). */
+static inline bool clouds_frame_url_part(char *out, size_t sz, float lat, float lon,
+                                         uint8_t zoom, uint8_t ch, uint8_t basemap,
+                                         uint32_t stamp, const clouds_split_t *sp, int i)
+{
+    if (out == NULL || sz == 0 || sp == NULL) return false;
+    out[0] = '\0';
+    if (i < 0 || i >= sp->parts) return false;
+    (void)zoom;                 /* the box already carries it; kept so both URL
+                                 * builders read with the same parameters */
+    const clouds_sat_t *sat = clouds_sat_for_lon(lon);
+    if (sat->provider != CLOUDS_PROV_GIBS) return false;
+    char tstr[CLOUDS_TIME_MAX];
+    if (!clouds_time_format(tstr, sizeof(tstr), stamp)) return false;
+    long minx = (long)lroundf(sp->minx[i]);
+    long miny = (long)lroundf(sp->miny);
+    long maxx = (long)lroundf(sp->maxx[i]);
+    long maxy = (long)lroundf(sp->maxy);
+    const bool west_pinned = (sp->parts == 2) ? (i == 1) : (sp->minx[0] <= -CLOUDS_MERC_MAX);
+    const bool east_pinned = (sp->parts == 2) ? (i == 0) : (sp->maxx[0] >=  CLOUDS_MERC_MAX);
+    radar_wms_square_pixels(&minx, &miny, &maxx, &maxy, sp->px_w[i], CLOUDS_PX,
+                            west_pinned, east_pinned);
+    int n = snprintf(out, sz,
+                     CLOUDS_GIBS_BASE "wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0"
+                     "&REQUEST=GetMap&LAYERS=%s%s&CRS=EPSG:3857"
+                     "&BBOX=%ld,%ld,%ld,%ld&WIDTH=%d&HEIGHT=%d&FORMAT=image/jpeg&TIME=%s",
+                     clouds_sat_layer(sat, clouds_role(ch, lat, lon, stamp)),
+                     clouds_basemap_suffix(basemap),
+                     minx, miny, maxx, maxy,
+                     sp->px_w[i], CLOUDS_PX, tstr);
+    if (n < 0 || (size_t)n >= sz) {
+        out[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
+/* GetMap URL for one frame, on whichever provider owns the satellite nearest
+ * @p lon. @p stamp is the frame time in UTC seconds; it is formatted here
+ * (never copied from a server string), so no query-splitting character can
+ * reach the URL. Layer order: raster first, vector overlay after. Returns false
+ * and writes "" when the result would not fit.
+ *
+ * THE SINGLE-REQUEST ENTRY POINT, and it stays that way: it builds part 0 only.
+ * A caller that wants a date-line crossing served correctly asks clouds_split()
+ * itself and, when it reports two parts, builds both with
+ * clouds_frame_url_part() (image_page_poll.c does). Everything else -- and
+ * every EUMETView location, which can never cross -- keeps calling this. */
+static inline bool clouds_frame_url(char *out, size_t sz, float lat, float lon,
+                                    uint8_t zoom, uint8_t ch, uint8_t basemap,
+                                    uint32_t stamp)
+{
+    if (out == NULL || sz == 0) return false;
+    out[0] = '\0';
+    const clouds_sat_t *sat = clouds_sat_for_lon(lon);
+    if (sat->provider == CLOUDS_PROV_EUMET) {
+        return clouds_eumet_frame_url(out, sz, sat, clouds_role(ch, lat, lon, stamp),
+                                      lat, lon, zoom, basemap, stamp);
+    }
+    clouds_split_t sp;
+    clouds_split(lat, lon, zoom, &sp);
+    return clouds_frame_url_part(out, sz, lat, lon, zoom, ch, basemap, stamp, &sp, 0);
 }
 
 /* WMTS DescribeDomains REST URL for @p layer over [now-3h, now+1h], both ends
@@ -338,7 +741,7 @@ static inline void clouds_trim(const char **a, const char **b)
  *   - a single entry without 'T' (bare date) is skipped;
  *   - a range whose END has no 'T' is skipped; a range whose START is a bare
  *     date starts at that midnight; any other unparsable start = open (0);
- *   - the period is CLOUDS_PERIOD_S unless the segment says PTnM (n minutes).
+ *   - the period is CLOUDS_GIBS_PERIOD_S unless the segment says PTnM (n minutes).
  * Returns the count (0 when the element is missing or nothing parses). Every
  * scan is bounded by @p len: the body needs no NUL terminator. */
 static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *out, int max_out)
@@ -373,13 +776,13 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
         if (sl1 == NULL) {                        /* single instant */
             uint32_t t;
             if (clouds_time_parse(sa, (size_t)(sb - sa), &t)) {
-                seg_start[nseg] = t; seg_end[nseg] = t; seg_per[nseg] = CLOUDS_PERIOD_S; nseg++;
+                seg_start[nseg] = t; seg_end[nseg] = t; seg_per[nseg] = CLOUDS_GIBS_PERIOD_S; nseg++;
             }
             continue;
         }
         const char *sl2 = memchr(sl1 + 1, '/', (size_t)(sb - sl1 - 1));
         const char *end_b = sl2 ? sl2 : sb;
-        uint32_t t_end, t_start = 0, per = CLOUDS_PERIOD_S;
+        uint32_t t_end, t_start = 0, per = CLOUDS_GIBS_PERIOD_S;
         if (!clouds_time_parse(sl1 + 1, (size_t)(end_b - sl1 - 1), &t_end)) continue;
         if (!clouds_time_parse(sa, (size_t)(sl1 - sa), &t_start) &&
             !clouds_date_parse(sa, (size_t)(sl1 - sa), &t_start)) t_start = 0;
@@ -412,13 +815,141 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
     return count;
 }
 
+/* ---- EUMETView time discovery ----
+ *
+ * EUMETView has no DescribeDomains. The cheap source of "what is the newest
+ * slot" is the WORKSPACE-scoped GetCapabilities (about 35-55 KB, against
+ * several megabytes for the unscoped one), whose per-layer
+ * <Dimension name="time"> carries a default="..." attribute holding the newest
+ * published stamp. History is then a plain step back on the LAYER's period: the
+ * service advertises nearestValue="1", so a requested time between slots snaps
+ * to a real one and a stepped-back time always returns a picture. */
+
+/* Response cap for the capabilities fetch. Measured 2026-09-03: mtg_fd 34742 B,
+ * msg_fes 50773 B, msg_iodc 54921 B. 98304 leaves the largest document 43 KB of
+ * headroom for a layer the workspace gains later; the buffer is PSRAM, so the
+ * slack costs nothing. (65536 would leave under 10 KB on msg_iodc, and a
+ * truncated body parses to nothing and silently drops the page onto the
+ * 30-minute fallback.) */
+#define CLOUDS_EUMET_CAPS_MAX 98304u
+
+#define CLOUDS_MSG_PERIOD_S   900u   /* every msg_* workspace publishes on 15 minutes */
+
+/* Publishing grid of the layer @p role resolves to on @p s, which is a property
+ * of the LAYER, not of the row.
+ *
+ * The MTG row is a 10-minute service, but MTG publishes no air-mass product, so
+ * that channel borrows msg_fes:rgb_airmass from the 15-minute MSG 0-degree
+ * service. Stepping its history back on the row's 600 s would land two of every
+ * three frames on the same real slot, and the loop would show duplicates.
+ * Keyed on the workspace prefix rather than a fourth table column: the msg_*
+ * services publish on 15 minutes, while BOTH layers this table takes from
+ * mtg_fd (rgb_geocolour and ir105_hrfi) are on 10. The mtg_fd workspace as a
+ * whole is NOT uniform -- the real 2026-09-03 capture has siblings on other
+ * grids, li_afa among them -- so this rule speaks for the layers in the table,
+ * not for the workspace. A GIBS row has no workspace and keeps its own period. */
+static inline uint32_t clouds_layer_period_s(const clouds_sat_t *s, clouds_role_t role)
+{
+    if (s == NULL) return CLOUDS_GIBS_PERIOD_S;
+    const char *ws = clouds_sat_workspace(s, role);
+    if (ws != NULL && strncmp(ws, "msg_", 4) == 0) return CLOUDS_MSG_PERIOD_S;
+    return s->period_s;
+}
+
+/* Workspace-scoped GetCapabilities URL:
+ *   https://view.eumetsat.int/geoserver/{workspace}/wms?service=WMS&version=1.3.0&request=GetCapabilities
+ * @p workspace comes from the baked satellite table, never from user input. */
+static inline bool clouds_eumet_caps_url(char *out, size_t sz, const char *workspace)
+{
+    if (out == NULL || sz == 0 || workspace == NULL) return false;
+    out[0] = '\0';
+    int n = snprintf(out, sz, CLOUDS_EUMET_BASE
+                     "%s/wms?service=WMS&version=1.3.0&request=GetCapabilities", workspace);
+    if (n < 0 || (size_t)n >= sz) {
+        out[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
+/* Newest published stamp for @p layer_name from a WORKSPACE-SCOPED
+ * GetCapabilities body. @p layer_name is the table name, prefix and all
+ * ("mtg_fd:rgb_geocolour"); clouds_layer_bare_name() drops the prefix, because
+ * the virtual service publishes <Name>rgb_geocolour</Name>. The search is then
+ * bounded to that layer by radar_wms_layer_bounds() (an EXACT <Name> match,
+ * which is the whole correctness of this function -- siblings in one workspace
+ * advertise different grids: measured 2026-09-03, ir105_hrfi defaults to 19:40,
+ * rgb_geocolour to 19:30 and li_afa to 19:45), and within it the first
+ * <Dimension ...> carrying name="time" is read. That dimension may be
+ * self-closing, and a non-time dimension may precede it.
+ *
+ * The attribute is a PLAIN stamp: 2026-09-03T19:30:00Z, verified 2026-09-03.
+ * Only the extent text after the tag carries the .000Z fraction, and that text
+ * is not what is read. The fraction splice below is tolerance for a server-side
+ * change, not the expected form; either way nothing but digits, '-', ':', 'T'
+ * and 'Z' from the server reaches clouds_time_parse().
+ *
+ * Every scan is bounded by @p len: the body needs no NUL terminator. Returns
+ * false when the layer, the dimension or a parsable default is missing --
+ * "current" and other symbolic defaults are rejected, not guessed at. */
+static inline bool clouds_eumet_default_time(const char *xml, size_t len,
+                                             const char *layer_name, uint32_t *out)
+{
+    if (out == NULL) return false;
+
+    /* Stripped HERE rather than at the call site: this function only ever reads
+     * a workspace-scoped document, so the conversion belongs where it cannot be
+     * forgotten. Callers pass the table name as-is. */
+    const char *p, *end;
+    if (!radar_wms_layer_bounds(xml, len, clouds_layer_bare_name(layer_name), &p, &end)) {
+        return false;
+    }
+
+    /* The time dimension's opening tag, self-closing or not. */
+    const char *attrs = NULL, *attrs_end = NULL;
+    while (p < end) {
+        const char *d = radar_wms_find(p, (size_t)(end - p), "<Dimension");
+        if (d == NULL) return false;
+        const char *gt = memchr(d, '>', (size_t)(end - d));
+        if (gt == NULL) return false;
+        if (radar_wms_find(d, (size_t)(gt - d), "name=\"time\"") != NULL) {
+            attrs = d;
+            attrs_end = gt;
+            break;
+        }
+        p = gt + 1;
+    }
+    if (attrs == NULL) return false;
+
+    const char *a = radar_wms_find(attrs, (size_t)(attrs_end - attrs), "default=\"");
+    if (a == NULL) return false;
+    a += 9;                                     /* strlen("default=\"") */
+    const char *q = memchr(a, '"', (size_t)(attrs_end - a));
+    if (q == NULL) return false;
+
+    /* Copy, dropping a fractional-second part if there is one. */
+    char buf[CLOUDS_TIME_MAX];
+    size_t n = (size_t)(q - a);
+    const char *dot = memchr(a, '.', n);
+    size_t zed = 0;                             /* the 'Z' a dropped fraction takes with it */
+    if (dot != NULL) {
+        n = (size_t)(dot - a);
+        zed = 1;
+    }
+    if (n + zed + 1u > sizeof(buf)) return false;
+    memcpy(buf, a, n);
+    if (zed) buf[n++] = 'Z';
+    buf[n] = '\0';
+    return clouds_time_parse(buf, n, out);
+}
+
 /* ---- blank / partial frame detection ---- */
 
 /* GIBS answers HTTP 200 for a slot whose tiles are missing: a BLANK frame is the
  * selected vector basemap overlay drawn over black (~98 % near black on the
  * sample grid, and black everywhere when the basemap is "none"). Sample every
  * CLOUDS_BLANK_STEP-th pixel of every CLOUDS_BLANK_STEP-th row (8100 samples of
- * a 720x720 frame) and call the frame incomplete when more than blank_pct of
+ * a 720x720 frame) and call the frame incomplete when more than CLOUDS_BLANK_PCT of
  * them are near black (all channels below 24). Raw decoded pixels, before any
  * bake or Red Night remap.
  *
@@ -433,9 +964,18 @@ static inline int clouds_parse_domains(const char *xml, size_t len, uint32_t *ou
  *   GeoColor  day 1.5 %, night 8 %      Clean IR  0 %      Air Mass  20 %
  *   (author's earlier pure-black survey saw Air Mass up to 54 %)
  *   blank, any channel: 96 - 98 %
- * 90 clears the worst real frame by 36 points and sits 6 under a blank. The
- * per-channel table column stays (it is the layer table anyway) so a channel
- * can still be tuned individually. */
+ * CLOUDS_BLANK_PCT 90 clears the worst real frame by 36 points and sits 6
+ * under a blank; one bar for every GIBS satellite and channel.
+ *
+ * GIBS ONLY. The bar was calibrated on GIBS pictures and EUMETSAT's infrared
+ * styles paint warm ground near black, so real EUMETView frames sit far over
+ * it: measured 2026-09-03, msg_iodc infrared over Dubai is 98 % near black by
+ * day and by night at zoom 9 and 89 % at zoom 7, and MTG infrared over the
+ * Sahara is 82 % at zoom 7, while the GIBS infrared band measured 0 % in the
+ * same probe. The gate also has nothing to catch there: EUMETView answers a
+ * missing slot with an XML ServiceException, which the image probe already
+ * rejects, never a 200 of black tiles. image_page_poll.c runs this on GIBS
+ * rows only; the holes gate still runs on both. */
 #define CLOUDS_BLANK_STEP 8      /* sample stride, pixels and rows */
 
 /* Shared near-black predicate: every channel below 24 (R5 < 3, G6 < 6, B5 < 3).
@@ -520,7 +1060,7 @@ static inline bool clouds_frame_holes(const uint16_t *f, const uint16_t *ref,
 }
 
 static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h,
-                                           int stride_px, uint8_t ch)
+                                           int stride_px)
 {
     if (rgb565 == NULL || w <= 0 || h <= 0) return false;
     if (stride_px < w) stride_px = w;
@@ -532,5 +1072,5 @@ static inline bool clouds_frame_incomplete(const uint16_t *rgb565, int w, int h,
             if (clouds_px_near_black(row[x])) black++;   /* see clouds_px_near_black */
         }
     }
-    return black * 100u > n * (uint32_t)clouds_channel(ch)->blank_pct;
+    return black * 100u > n * (uint32_t)CLOUDS_BLANK_PCT;
 }

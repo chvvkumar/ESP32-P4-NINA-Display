@@ -1,7 +1,7 @@
 
         <div class="card">
           <div class="card-title"><span class="card-title-label">Weather Radar <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-          <div class="help-popover"><div class="help-popover-title">Weather Radar page</div><p>Adds a full-screen page showing the latest National Weather Service radar picture. Choose a single radar site, a regional view, or the whole lower 48; the picture refreshes at the update interval you choose and plays back the most recent pictures as a short animation.</p><p>Coverage is the United States and its territories only.</p></div>
+          <div class="help-popover"><div class="help-popover-title">Weather Radar page</div><p>Adds a full-screen page showing the latest radar picture. The picture refreshes at the update interval you choose and plays back the most recent pictures as a short animation.</p><p>Radar area picks what the page shows. Worldwide shows rain anywhere on Earth, centred on the location set on the System tab. The USA entries use National Weather Service radar: a single radar site, a regional view, the whole lower 48, or Automatic, which picks the site nearest your location. Automatic switches to the worldwide rain map on its own when your location is far from any US weather radar.</p><p>Map style, Dark mode and Crop apply to the USA entries only.</p></div>
           <div class="toggle-row" style="border-bottom:1px solid rgba(255,255,255,0.06)">
             <span class="toggle-label">Enable Weather Radar page</span>
             <label class="toggle"><input type="checkbox" id="radar_enabled" onchange="updateImagePageEnabledUI('image-radar');applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
@@ -15,10 +15,15 @@
             <div class="field-hint">Area name and update time overlay on the display</div>
             <div class="field" style="margin-top:16px">
               <label class="field-label">Radar area</label>
-              <select class="input" id="radar_token" onchange="applyImagePage('image-radar');checkDirty()">
-                <option value="">Automatic (nearest radar to my location)</option>
-                <option value="CONUS">CONUS - National (lower 48)</option>
-                <optgroup label="Regional">
+              <select class="input" id="radar_token" onchange="radarMapStyleSync();applyImagePage('image-radar');checkDirty()">
+                <optgroup label="Worldwide">
+                  <option value="WORLD">Rain anywhere, centred on my location</option>
+                </optgroup>
+                <optgroup label="USA">
+                  <option value="">Automatic (nearest radar to my location)</option>
+                  <option value="CONUS">CONUS - National (lower 48)</option>
+                </optgroup>
+                <optgroup label="USA regions">
                   <option value="NORTHEAST">Northeast</option>
                   <option value="SOUTHEAST">Southeast</option>
                   <option value="UPPERMISSVLY">Upper Mississippi Valley</option>
@@ -284,11 +289,12 @@
                   <option value="KRIW">KRIW - Riverton/Lander, WY</option>
                 </optgroup>
               </select>
-              <div class="field-hint">Automatic uses the radar nearest the location set on the System tab; falls back to the national view when none is close.</div>
+              <div class="field-hint">Worldwide shows rain anywhere on Earth, centred on the location set on the System tab. The USA entries use National Weather Service radar; Automatic picks the radar nearest that location, and falls back to the worldwide rain map when the location is far from any US weather radar.</div>
             </div>
             <div class="card">
               <div class="card-title"><span class="card-title-label">Map appearance <button type="button" class="help-btn" aria-label="About this section" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></span></div>
-              <div class="help-popover"><div class="help-popover-title">Map appearance</div><p>Map style picks the picture behind the radar. The standard picture shows roads and city names. The two line-only styles draw just state lines, or state and county lines, with no roads or labels; they are useful when road markings are hard to tell from heavy rain. Dark mode and Crop apply only to the standard picture.</p><p>Dark mode darkens the map background and outlines so the page is not blinding in a dark room. Turn it off to see the picture exactly as the National Weather Service publishes it, on a white background. The rain and storm colours look the same either way. The Red Night theme always uses the dark map, whatever this is set to.</p><p>Crop zooms the map to fill the screen and hides the National Weather Service banner and colour scale. The sides are trimmed too, more so on wide views like the national map; turn it off to see the whole picture with bars above and below.</p></div>
+              <div class="help-popover"><div class="help-popover-title">Map appearance</div><p>Map style, Dark mode and Crop apply to the USA radar areas only; they are hidden when Radar area is set to Worldwide, which draws rain over coastlines and borders instead.</p><p>Map style picks the picture behind the radar. The standard picture shows roads and city names. The two line-only styles draw just state lines, or state and county lines, with no roads or labels; they are useful when road markings are hard to tell from heavy rain. Dark mode and Crop apply only to the standard picture.</p><p>Dark mode darkens the map background and outlines so the page is not blinding in a dark room. Turn it off to see the picture exactly as the National Weather Service publishes it, on a white background. The rain and storm colours look the same either way. The Red Night theme always uses the dark map, whatever this is set to.</p><p>Crop zooms the map to fill the screen and hides the National Weather Service banner and colour scale. The sides are trimmed too, more so on wide views like the national map; turn it off to see the whole picture with bars above and below.</p></div>
+            <div id="radarUsOnly">
             <div class="field" style="margin-top:16px">
               <label class="field-label">Map style</label>
               <select class="input" id="radar_map_style" onchange="radarMapStyleSync();applyImagePage('image-radar');checkDirty()">
@@ -297,6 +303,7 @@
                 <option value="2">State and county lines</option>
               </select>
               <div class="field-hint">Standard shows roads and city names; the two line styles draw only state or state and county lines.</div>
+              <div class="field-hint" id="radarCoverageNote" style="display:none">Outside US radar coverage the page uses the worldwide rain map automatically, whichever style is picked here.</div>
             </div>
             <div id="radarStdOnly">
             <div class="toggle-row" style="margin-top:16px">
@@ -309,6 +316,30 @@
               <label class="toggle"><input type="checkbox" id="radar_crop" onchange="applyImagePage('image-radar');checkDirty()"><span class="toggle-track"></span></label>
             </div>
             <div class="field-hint">Fill the screen and hide the banner and colour scale.</div>
+            </div>
+            </div>
+            <div id="radarWorldOnly" style="display:none">
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Area</label>
+              <select class="input" id="radar_zoom" onchange="applyImagePage('image-radar');checkDirty()">
+                <option value="4">Widest - about 2600 km across</option>
+                <option value="5">Wide - about 1300 km across</option>
+                <option value="6" selected>Close - about 650 km across</option>
+                <option value="7">Closest - about 330 km across</option>
+              </select>
+              <div class="field-hint">How much of the map around your location the picture covers.</div>
+            </div>
+            <div class="field" style="margin-top:16px">
+              <label class="field-label">Rain colours</label>
+              <select class="input" id="radar_palette" onchange="applyImagePage('image-radar');checkDirty()">
+                <option value="1">Original</option>
+                <option value="2">Universal Blue</option>
+                <option value="4">The Weather Channel</option>
+                <option value="6" selected>NEXRAD Level III</option>
+                <option value="8">Dark Sky</option>
+              </select>
+              <div class="field-hint">Which colour scheme the rain is drawn in.</div>
+            </div>
             </div>
             </div>
             <div class="card">

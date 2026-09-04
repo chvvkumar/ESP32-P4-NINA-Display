@@ -83,7 +83,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 80
+#define APP_CONFIG_VERSION 81
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -593,6 +593,17 @@ typedef struct {
                                        // 1 = only the rig whose page is on
                                        // screen (Summary counts as every rig;
                                        // any other page fires none).
+
+    // Added after v80 (worldwide radar) -- must stay at end to preserve NVS binary compatibility
+    uint8_t  radar_zoom;               // v81: Web-Mercator zoom of the RainViewer
+                                       // window, 4..7 (default 6, about 650 km
+                                       // across at mid latitudes). Used only by
+                                       // the worldwide radar source.
+    uint8_t  radar_palette;            // v81: RainViewer colour scheme id:
+                                       // 1 Original, 2 Universal Blue,
+                                       // 4 The Weather Channel,
+                                       // 6 NEXRAD Level III (default),
+                                       // 8 Dark Sky. Any other value resets to 6.
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -5995,6 +6006,14 @@ _Static_assert(offsetof(app_config_t, nina_notify_scope) ==
                    offsetof(app_config_t, moon_round_size_pct) +
                        sizeof(((app_config_t *)0)->moon_round_size_pct),
                "nina_notify_scope must directly follow moon_round_size_pct (v79 prefix rule)");
+_Static_assert(offsetof(app_config_t, radar_zoom) ==
+                   offsetof(app_config_t, nina_notify_scope) +
+                       sizeof(((app_config_t *)0)->nina_notify_scope),
+               "radar_zoom must directly follow nina_notify_scope (v80 prefix rule)");
+_Static_assert(offsetof(app_config_t, radar_palette) ==
+                   offsetof(app_config_t, radar_zoom) +
+                       sizeof(((app_config_t *)0)->radar_zoom),
+               "radar_palette must directly follow radar_zoom (v81 append rule)");
 
 
 
