@@ -1354,7 +1354,9 @@ static void page_update_locked(octoprint_data_t *data, octo_staged_t *st,
     page_conn_t conn = page_conn_eval(data->data_valid, data->connected,
                                       (int)data->fail_count);
     if (conn == PAGE_CONN_CONNECTING) {
-        empty_show("Connecting to OctoPrint...");
+        /* Runs every poll update (no transition gate), so the wait wording
+         * flips back to the normal title by itself once the link is up. */
+        empty_show(nina_empty_state_wait_title("Connecting to OctoPrint..."));
         nina_empty_state_set_busy(s_empty, true);
         return;
     }

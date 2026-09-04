@@ -4,6 +4,7 @@
 #include "ui/nina_dashboard_internal.h"   /* PAGE_IDX_IS_IMAGE */
 #include "ui/nina_nav_arbiter.h"          /* nav_arbiter_notify_topology_changed */
 #include "esp_heap_caps.h"
+#include "rainviewer.h"                   /* RAINVIEWER_ZOOM_MIN/MAX, RAINVIEWER_PALETTE_DEF, rainviewer_palette_ok() */
 #include <string.h>
 
 /**
@@ -63,9 +64,15 @@ esp_err_t image_display_config_get_handler(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "radar_crop",         cfg->radar_crop);
     /* true = dark basemap, false = the NWS picture as published. */
     cJSON_AddBoolToObject(root, "radar_dark_mode",      cfg->radar_dark_mode);
-    /* 0 = standard map (roads, city names), 1 = state lines only,
-     * 2 = state and county lines. Crop and dark mode apply to style 0 only. */
+    /* 0 = standard map (roads, city names), 1 = state lines only, 2 = state
+     * and county lines. US areas only; crop and dark mode apply to style 0
+     * only. The worldwide source is picked in radar_token ("WORLD"). */
     cJSON_AddNumberToObject(root, "radar_map_style",    cfg->radar_map_style);
+    /* Worldwide radar (radar_token "WORLD", and the automatic rule): how much
+     * of the world the picture covers, 4 (widest) .. 7 (closest). */
+    cJSON_AddNumberToObject(root, "radar_zoom",         cfg->radar_zoom);
+    /* RainViewer colour scheme id: 1, 2, 4, 6 or 8. */
+    cJSON_AddNumberToObject(root, "radar_palette",      cfg->radar_palette);
     cJSON_AddNumberToObject(root, "solar_update_interval_s", cfg->solar_update_interval_s);
     cJSON_AddNumberToObject(root, "moon_update_interval_s",  cfg->moon_update_interval_s);
     cJSON_AddNumberToObject(root, "radar_update_interval_s", cfg->radar_update_interval_s);
@@ -227,7 +234,7 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         if (v > 1) v = 1;
         cur->radar_crop = (uint8_t)v;
     }
-    /* Map style 0..2 (see the GET handler). Same two wire shapes as radar_crop
+    /* Map style 0..3 (see the GET handler). Same two wire shapes as radar_crop
      * for the same cached-page reason: an out-of-range number falls back to 1
      * (state lines only, the default), a bool maps true -> 1 (state lines) /
      * false -> 0 (an explicit false means the standard picture). Absent or any
@@ -258,6 +265,25 @@ esp_err_t image_display_config_post_handler(httpd_req_t *req)
         if (v < 1) v = 1;
         if (v > 10) v = 10;
         cur->radar_frames = (uint8_t)v;
+    }
+    /* Worldwide radar area: same 4..7 bound as validate_config() and the
+     * SETTINGS_TABLE row. Anything outside falls to the nearest bound; an
+     * absent or non-numeric key leaves the stored value alone. */
+    cJSON *rzoom = cJSON_GetObjectItem(root, "radar_zoom");
+    if (cJSON_IsNumber(rzoom)) {
+        int v = rzoom->valueint;
+        if (v < RAINVIEWER_ZOOM_MIN) v = RAINVIEWER_ZOOM_MIN;
+        if (v > RAINVIEWER_ZOOM_MAX) v = RAINVIEWER_ZOOM_MAX;
+        cur->radar_zoom = (uint8_t)v;
+    }
+    /* Rain colours: a fixed set of ids, not a range, so an unknown value falls
+     * back to the default rather than to a bound -- same rule validate_config()
+     * applies to whatever ends up in NVS. */
+    cJSON *rpal = cJSON_GetObjectItem(root, "radar_palette");
+    if (cJSON_IsNumber(rpal)) {
+        int v = rpal->valueint;
+        cur->radar_palette = (v >= 0 && v <= 255 && rainviewer_palette_ok((uint8_t)v))
+                                 ? (uint8_t)v : RAINVIEWER_PALETTE_DEF;
     }
     /* Clouds: same bounds as validate_config() and the SETTINGS_TABLE rows.
      * Interval 300..7200 s (GIBS publishes every 10 min), frames 1..10 (~1 MB

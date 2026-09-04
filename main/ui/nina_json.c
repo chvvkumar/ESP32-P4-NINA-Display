@@ -57,7 +57,9 @@ void json_page_update(const json_data_t *data) {
     if (st == PAGE_CONN_CONNECTING) {
         nina_tile_grid_set_busy(s_grid, true);
         nina_tile_grid_set_stale(s_grid, false);
-        nina_tile_grid_show_overlay(s_grid, "Connecting to Source...");
+        /* Re-applied every poll update, so it follows the link state. */
+        nina_tile_grid_show_overlay(s_grid,
+            nina_empty_state_wait_title("Connecting to Source..."));
         return;
     }
     if (st == PAGE_CONN_DOWN) {

@@ -1,7 +1,7 @@
 /**
  * @file image_page_poll.c
  * @brief Pollers for the six image pages, on the poll_task spine. One task
- *        per ENABLED source ("img_goes" .. "img_clouds", 12288 B PSRAM stack,
+ *        per ENABLED source ("img_goes" .. "img_clouds", 16384 B PSRAM stack,
  *        prio 3, Core 0), gated by image_page_t.poll_gate (active || warm).
  *        GOES/Solar/Custom/Radar/Clouds share net_poll_once(); the Moon renders locally in
  *        moon_poll_once() (ported from the former goes_poll_task moon branch)
@@ -14,9 +14,11 @@
 #include "poll_task.h"
 #include "radar_play.h"            /* radar_frame_is_stale (ring generation) */
 #include "radar_wms.h"             /* styles 1/2: GeoServer WMS URL builder + caps TIME parser */
+#include "rainviewer.h"            /* worldwide radar: frame list, window and tile composite */
 #include "clouds_wms.h"            /* Clouds: GIBS GetMap URL, DescribeDomains parser, UTC time helpers */
 #include "radar_sites.h"           /* radar_site_coords (WMS site bbox centre) */
 #include "http_fetch.h"            /* http_fetch_text (WMS GetCapabilities / WMTS DescribeDomains) */
+#include "net_diag.h"              /* net_sta_has_ip (placeholder wording before the link is up) */
 #include "tasks.h"                 /* s_wifi_event_group, WIFI_CONNECTED_BIT, ota_in_progress */
 #include "app_config.h"
 #include "display_defs.h"
@@ -428,7 +430,7 @@ typedef struct {
  *                 the re-judge drops a given frame at most once.
  * Touched only by that page's poll task (net_poll_once and anim_backfill run on
  * it sequentially). File-scope on purpose: the string table is 320 B per source
- * and does not belong on the 12288 B poller stack. */
+ * and does not belong on the 16384 B poller stack. */
 typedef struct {
     int64_t  last_push_ms;
     int      ntimes;
@@ -448,6 +450,19 @@ static inline uint32_t anim_stamp(image_page_t *p, int i)
 {
     anim_state_t *a = &s_anim[p->src];
     return (i >= 0 && i < a->ntimes) ? a->stamps[i] : 0;
+}
+
+/* Which product frame @p i is drawn from, as a ring role byte. Clouds resolves
+ * it from the channel and the sun at that frame's own stamp (a GeoColor-role
+ * loop through dusk mixes visible and infrared slots); every other source has
+ * exactly one product, so 0. */
+static inline uint8_t anim_role(image_page_t *p, const app_config_t *cfg, int i)
+{
+    if (p->src != IMG_SRC_CLOUDS) return 0;
+    uint32_t stamp = anim_stamp(p, i);
+    if (stamp == 0) return 0;
+    return (uint8_t)clouds_role(cfg->clouds_channel, cfg->weather_lat,
+                                cfg->weather_lon, stamp);
 }
 
 /* Build the WMS GetMap URL for `token` under styles 1/2. `token` has already
@@ -544,23 +559,22 @@ static void radar_wms_refresh_times(anim_state_t *a, const char *token)
     if (a->ntimes == 0) ESP_LOGW(TAG, "no advertised radar times for %s; newest only", token);
 }
 
-/* Refresh the Clouds times list from WMTS DescribeDomains (~320 B): the slots
+/* GIBS half: refresh the Clouds times list from WMTS DescribeDomains (~320 B): the slots
  * GIBS actually holds for the picked satellite over the last three hours,
  * newest first, at most clouds_frames. A missing or empty answer falls back to
  * floor(now,10min)-50min as the single newest slot (frames land 30-47 min
  * behind wall clock; -50 keeps the guess at or behind the real newest, so it
  * is healed rather than stranded ahead of every real stamp), so the page still
  * shows a picture during a GIBS wobble. */
-static void clouds_refresh_times(image_page_t *p, anim_state_t *a, const app_config_t *cfg)
+static void clouds_refresh_times_gibs(image_page_t *p, anim_state_t *a,
+                                      const app_config_t *cfg, uint32_t now)
 {
-    time_t now_t;
-    time(&now_t);
-    uint32_t now = (uint32_t)now_t;
     int cap = image_page_ring_capacity(p);
-    a->ntimes = 0;
 
-    char url[160];
-    if (clouds_domains_url(url, sizeof(url), clouds_layer(cfg->clouds_channel, cfg->weather_lon), now)) {
+    char url[CLOUDS_URL_MAX];
+    if (clouds_domains_url(url, sizeof(url),
+                           clouds_layer(cfg->clouds_channel, cfg->weather_lat, cfg->weather_lon, now),
+                           now)) {
         char *body = NULL;
         size_t len = 0;
         if (anim_fetch_small(url, 4096, &body, &len)) {
@@ -572,6 +586,74 @@ static void clouds_refresh_times(image_page_t *p, anim_state_t *a, const app_con
         ESP_LOGW(TAG, "clouds: no GIBS time list; assuming newest = now - 50 min");
         a->stamps[0] = clouds_fallback_newest(now);
         a->ntimes = 1;
+    }
+}
+
+/* EUMETView: the newest advertised slot is the default="..." of the layer's
+ * time dimension in the workspace-scoped GetCapabilities (35-55 KB); history is
+ * a plain step back on the LAYER's own period, which the service's
+ * nearestValue=1 snaps to a real slot. A failed fetch falls back to now - 30 min
+ * floored to that same period, mirroring the GIBS fallback.
+ *
+ * The period comes from clouds_layer_period_s(), NOT the row: the MTG row's own
+ * two layers are on 10 minutes, but its air-mass channel is borrowed from the
+ * 15-minute msg_fes workspace, and stepping that back on 600 s would repeat two
+ * of every three frames.
+ *
+ * `layer` is passed as the TABLE name, prefix and all. It is the right string
+ * for the GetMap layers= parameter, and clouds_eumet_default_time() drops the
+ * prefix itself for the workspace-scoped lookup, where names are bare.
+ *
+ * The ROLE IS RESOLVED AT `now`, not per frame: one capabilities document
+ * covers one layer, and around dusk the frames either side of the flip live on
+ * the same publishing grid, so the stamps are right for both. Only the layer
+ * whose newest slot is read can differ, by at most one period. */
+static void clouds_refresh_times_eumet(image_page_t *p, anim_state_t *a,
+                                       const app_config_t *cfg, uint32_t now)
+{
+    const clouds_sat_t *sat = clouds_sat_for_lon(cfg->weather_lon);
+    clouds_role_t role = clouds_role(cfg->clouds_channel, cfg->weather_lat,
+                                     cfg->weather_lon, now);
+    const char *layer = clouds_sat_layer(sat, role);
+    const char *ws    = clouds_sat_workspace(sat, role);
+    uint32_t period = clouds_layer_period_s(sat, role);
+    int cap = image_page_ring_capacity(p);
+    uint32_t newest = 0;
+
+    char url[CLOUDS_URL_MAX];
+    if (ws != NULL && clouds_eumet_caps_url(url, sizeof(url), ws)) {
+        char *body = NULL;
+        size_t len = 0;
+        if (anim_fetch_small(url, CLOUDS_EUMET_CAPS_MAX, &body, &len)) {
+            if (!clouds_eumet_default_time(body, len, layer, &newest)) {
+                newest = 0;
+            }
+            heap_caps_free(body);
+        }
+    }
+    if (newest == 0) {
+        ESP_LOGW(TAG, "clouds: no EUMETView time for %s; assuming now - 30 min", layer);
+        newest = clouds_eumet_fallback_newest(now, period);
+    }
+    if (cap > CLOUDS_TIMES_MAX) cap = CLOUDS_TIMES_MAX;
+    for (int i = 0; i < cap; i++) {
+        a->stamps[i] = clouds_time_step(newest, i, period);
+    }
+    a->ntimes = cap;
+}
+
+/* Refresh the Clouds times list from whichever provider owns the satellite
+ * nearest the weather longitude, then format them for the caption path. */
+static void clouds_refresh_times(image_page_t *p, anim_state_t *a, const app_config_t *cfg)
+{
+    time_t now_t;
+    time(&now_t);
+    uint32_t now = (uint32_t)now_t;
+    a->ntimes = 0;
+    if (clouds_sat_for_lon(cfg->weather_lon)->provider == CLOUDS_PROV_EUMET) {
+        clouds_refresh_times_eumet(p, a, cfg, now);
+    } else {
+        clouds_refresh_times_gibs(p, a, cfg, now);
     }
     for (int i = 0; i < a->ntimes; i++) {
         clouds_time_format(a->times[i], sizeof(a->times[i]), a->stamps[i]);
@@ -585,6 +667,14 @@ static void anim_refresh_times(image_page_t *p, const app_config_t *cfg, const c
     anim_state_t *a = &s_anim[p->src];
     if (p->src == IMG_SRC_CLOUDS) {
         clouds_refresh_times(p, a, cfg);
+    } else if (radar_use_rainviewer(cfg)) {
+        /* RainViewer publishes its own frame times in weather-maps.json, so the
+         * stamps come from there rather than from a WMS capabilities document.
+         * times[] stays empty: nothing builds a URL from it on this path. */
+        int cap = image_page_ring_capacity(p);
+        if (cap > RADAR_WMS_TIMES_MAX) cap = RADAR_WMS_TIMES_MAX;
+        memset(a->stamps, 0, sizeof(a->stamps));
+        a->ntimes = rainviewer_refresh(cfg, a->stamps, cap);
     } else if (cfg->radar_map_style != 0) {
         radar_wms_refresh_times(a, token);
     } else {
@@ -625,12 +715,15 @@ static bool anim_frame_url(image_page_t *p, const app_config_t *cfg, const char 
  * poll; older slots via retry_backfill). Not a failure: no caption, no toast,
  * no spine backoff.
  *
- * Applies to Clouds (GIBS) and to radar styles 1/2 (NCEP GeoServer), which can
+ * Applies to Clouds (GIBS and EUMETView) and to radar styles 1/2 (NCEP
+ * GeoServer), which can
  * serve a partly rendered mosaic for the same structural reason. Two gates:
- *   - BLANK (clouds_frame_incomplete, > blank_pct near black): Clouds only. A
- *     styles-1/2 radar frame is state lines on black BY DESIGN and sits at
- *     94-98 % near black with no precipitation on it, so this gate would reject
- *     every good radar frame. Radar is gated on holes only.
+ *   - BLANK (clouds_frame_incomplete, > CLOUDS_BLANK_PCT near black): Clouds on a
+ *     GIBS satellite only. A styles-1/2 radar frame is state lines on black BY
+ *     DESIGN and sits at 94-98 % near black with no precipitation on it, and a
+ *     real EUMETView infrared frame sits at 82-98 % because EUMETSAT paints warm
+ *     ground near black, so on either the gate would reject every good frame.
+ *     Radar and the two Meteosat rows are gated on holes only.
  *   - HOLES (clouds_frame_holes, per cell vs the neighbouring frame): both. Its
  *     per-cell lit floor means it can only speak about cells the neighbour
  *     actually lit, so on a line-only radar map it stays quiet unless real
@@ -650,8 +743,12 @@ static bool anim_holes_cb(const uint16_t *ref, int w, int h, void *arg)
 /* The sources whose frames the partial-frame gates judge. */
 static inline bool anim_partial_gated(const image_page_t *p, const app_config_t *cfg)
 {
+    /* A rain overlay is legitimately mostly empty and its coverage moves in and
+     * out of a cell every frame, so the per-cell holes rule would reject good
+     * worldwide frames constantly. It is off for that source by design. */
     return p->src == IMG_SRC_CLOUDS ||
-           (p->src == IMG_SRC_RADAR && cfg->radar_map_style != 0);
+           (p->src == IMG_SRC_RADAR && cfg->radar_map_style != 0 &&
+            !radar_use_rainviewer(cfg));
 }
 
 /* Consecutive HOLES rejections of one stamp after which it is accepted anyway.
@@ -711,13 +808,16 @@ static bool anim_drop_incomplete(image_page_t *p, const app_config_t *cfg,
                                  image_frame_t *f, uint8_t **src, int i)
 {
     if (!anim_partial_gated(p, cfg) || f->buf == NULL) return false;
-    bool clouds = (p->src == IMG_SRC_CLOUDS);
+    /* Blank gate: GIBS Clouds rows only. See CLOUDS_BLANK_PCT in clouds_wms.h --
+     * EUMETSAT infrared frames are legitimately 82-98 % near black, so the bar
+     * would reject every one of them and the ring would never fill. */
+    bool blank_gated = (p->src == IMG_SRC_CLOUDS) &&
+                       clouds_sat_for_lon(cfg->weather_lon)->provider == CLOUDS_PROV_GIBS;
     anim_state_t *a = &s_anim[p->src];
     const char *why = NULL;
-    if (clouds && clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w,
-                                          cfg->clouds_channel)) {
+    if (blank_gated && clouds_frame_incomplete((const uint16_t *)f->buf, f->w, f->h, f->w)) {
         why = "blank";
-    } else if (image_page_ring_with_neighbour(p, anim_stamp(p, i), anim_holes_cb, f)) {
+    } else if (image_page_ring_with_neighbour(p, anim_stamp(p, i), anim_role(p, cfg, i), anim_holes_cb, f)) {
         /* Missing tiles: a cell that is near black here and lit in the
          * neighbouring frame. Seen after a channel change, and on the newest
          * slot or two while the origin is still ingesting them. */
@@ -744,6 +844,47 @@ static bool anim_drop_incomplete(image_page_t *p, const app_config_t *cfg,
     return true;
 }
 
+/* Fetch history frame @p i as decoded pixels, whichever source serves this
+ * configuration. The worldwide source composes its own frame from tiles and has
+ * no single compressed document, so it hands back no retained source bytes:
+ * image_page_ring_add() falls back to hashing the pixels for dedupe, and a
+ * crop / dark-mode change is a no-op on this source anyway (ring_bake skips
+ * both), so nothing is lost by not retaining. Caller owns out->buf and *src on
+ * success. */
+static bool anim_fetch_frame(image_page_t *p, const app_config_t *cfg, const char *token,
+                             int i, image_frame_t *out, uint8_t **src, size_t *src_len)
+{
+    *src = NULL;
+    *src_len = 0;
+    if (p->src == IMG_SRC_RADAR && radar_use_rainviewer(cfg)) {
+        uint8_t *buf = NULL;
+        uint16_t w = 0, h = 0;
+        if (!rainviewer_build_frame(cfg, i, &buf, &w, &h)) {
+            /* NAME the reason here: the caller's generic radar caption is
+             * "Unknown radar area", which points a user with a dead network at
+             * the Area setting. Same "only when empty" rule the caller uses, so
+             * a more specific reason already written wins. An empty frame list
+             * is the network being down or the document being unusable; past
+             * that, the frame could not be composed. */
+            if (out->error_msg[0] == '\0') {
+                strlcpy(out->error_msg,
+                        s_anim[p->src].ntimes <= 0 ? "No rain map frames"
+                                                   : "Rain map fetch failed",
+                        sizeof(out->error_msg));
+            }
+            return false;
+        }
+        out->buf = buf;
+        out->w = w;
+        out->h = h;
+        out->stamp_ms = esp_timer_get_time() / 1000;
+        return true;
+    }
+    char url[RADAR_WMS_URL_MAX];
+    if (!anim_frame_url(p, cfg, token, i, url, sizeof(url))) return false;
+    return image_fetch_custom_retain(url, out, src, src_len) == ESP_OK;
+}
+
 /* Fetch history frame @p i under generation @p gen and hand it to the ring
  * (accepted or rejected, the ring owns both buffers). Serialised on the fetch
  * gate. false when the fetch failed (older frames are optional). A Clouds frame
@@ -753,24 +894,22 @@ static bool anim_drop_incomplete(image_page_t *p, const app_config_t *cfg,
 static bool anim_fetch_index(image_page_t *p, const app_config_t *cfg, const char *token,
                              int i, uint32_t gen)
 {
-    char url[RADAR_WMS_URL_MAX];
-    if (!anim_frame_url(p, cfg, token, i, url, sizeof(url))) return false;
     image_frame_t old = {0};
     uint8_t *src = NULL;
     size_t   src_len = 0;
     xSemaphoreTake(s_fetch_gate, portMAX_DELAY);
-    esp_err_t e = image_fetch_custom_retain(url, &old, &src, &src_len);
+    bool ok = anim_fetch_frame(p, cfg, token, i, &old, &src, &src_len);
     xSemaphoreGive(s_fetch_gate);
-    if (e != ESP_OK) {
+    if (!ok) {
         if (old.buf) heap_caps_free(old.buf);
-        /* src is NULL on every error return (see image_fetch_custom_retain). */
+        /* src is NULL on every failure path of both producers. */
         return false;
     }
     if (anim_drop_incomplete(p, cfg, &old, &src, i)) {
         s_anim[p->src].retry_backfill = true;
         return true;
     }
-    image_page_ring_add(p, &old, false, gen, src, src_len, anim_stamp(p, i));
+    image_page_ring_add(p, &old, false, gen, src, src_len, anim_stamp(p, i), anim_role(p, cfg, i));
     return true;
 }
 
@@ -854,8 +993,10 @@ static bool anim_decode_headroom(image_page_t *p, bool newest)
 {
     /* A panel-sized frame is the SAFE UPPER BOUND, not the typical slot: a
      * clouds frame is exactly 720x720x2, a radar slot is stored at its native
-     * size (~660 KB for a cropped RIDGE tile) and the panel-width scale happens
-     * per playback step in the page, not per fetched frame. Erring high here is
+     * size (~660 KB for a cropped RIDGE tile, but ~1.04 MB for a worldwide
+     * RainViewer composite, which is built at the panel size and so already
+     * sits at this bound) and the panel-width scale happens per playback step
+     * in the page, not per fetched frame. Erring high here is
      * deliberate — it makes the headroom check reject slightly early rather than
      * let a decode fail. */
     const size_t transient = (p->src == IMG_SRC_CLOUDS) ? ANIM_DECODE_TRANSIENT_HW_BYTES
@@ -910,8 +1051,13 @@ static void anim_backfill(image_page_t *p, const app_config_t *cfg, int first)
         if (!held && image_page_ring_count(p) >= cap) break;   /* ring full */
         /* Times list exhausted (short clouds list, KHDC on styles 1/2): the
          * history simply ends here. Checked BEFORE the delay, no warning.
-         * Radar style 0 (RIDGE _i.gif) has no list and is never exhausted. */
-        if (!(p->src == IMG_SRC_RADAR && cfg->radar_map_style == 0) &&
+         * Radar style 0 (RIDGE _i.gif) has no list and is never exhausted --
+         * but the worldwide source IS list-driven and the automatic distance
+         * rule can select it at style 0 too (rainviewer_selected()), so it is
+         * excluded from the exemption or the loop would burn a gap delay per
+         * missing frame and log a spurious stop. */
+        if (!(p->src == IMG_SRC_RADAR && cfg->radar_map_style == 0 &&
+              !radar_use_rainviewer(cfg)) &&
             i >= s_anim[p->src].ntimes) break;
         vTaskDelay(pdMS_TO_TICKS(RADAR_BACKFILL_GAP_MS));
         /* Superseded mid-backfill (region/frame-count/crop change, page leave).
@@ -1045,7 +1191,6 @@ static bool net_poll_once(void *arg)
              * with the frame fetch. Frame 0 is the newest. The radar token
              * passed image_page_radar_token() and radar_wms_frame_url()
              * re-checks its alphabet, so the _loop.gif ban holds on this path. */
-            char url[RADAR_WMS_URL_MAX];
             /* Clouds stamps are derived from wall clock; before SNTP has
              * answered the DescribeDomains window and the fallback would both
              * be 1970 and GIBS would serve a blank frame filed as unstamped.
@@ -1057,13 +1202,20 @@ static bool net_poll_once(void *arg)
                 break;
             }
             anim_refresh_times(p, cfg, token);
-            if (!anim_frame_url(p, cfg, token, 0, url, sizeof(url))) {
-                strlcpy(fresh.error_msg, p->src == IMG_SRC_RADAR ? "Unknown radar area"
-                                                                  : "No satellite frames",
-                        sizeof(fresh.error_msg));
+            if (!anim_fetch_frame(p, cfg, token, 0, &fresh, &ring_src, &ring_src_len)) {
+                /* Only NAME the failure when the producer did not: a URL that
+                 * could not be built, or a RainViewer frame that was not
+                 * composed, leave error_msg empty. image_fetch_custom_retain()
+                 * writes its own reason ("Fetch failed", "Decode failed", "Out
+                 * of memory") and that is the more useful caption, so it wins. */
+                if (fresh.error_msg[0] == '\0') {
+                    strlcpy(fresh.error_msg, p->src == IMG_SRC_RADAR ? "Unknown radar area"
+                                                                      : "No satellite frames",
+                            sizeof(fresh.error_msg));
+                }
                 err = ESP_ERR_INVALID_ARG;
             } else {
-                err = image_fetch_custom_retain(url, &fresh, &ring_src, &ring_src_len);
+                err = ESP_OK;
             }
             break;
         }
@@ -1099,7 +1251,7 @@ static bool net_poll_once(void *arg)
                     bsp_display_unlock();
                 }
             } else {
-                image_page_ring_add(p, &fresh, true, ring_gen, ring_src, ring_src_len, anim_stamp(p, 0));
+                image_page_ring_add(p, &fresh, true, ring_gen, ring_src, ring_src_len, anim_stamp(p, 0), anim_role(p, cfg, 0));
                 a->last_push_ms = esp_timer_get_time() / 1000;
             }
             /* Ring pages never go through image_page_commit_frame(), which is
@@ -1168,7 +1320,11 @@ static bool net_poll_once(void *arg)
         }
         return true;
     }
-    image_page_set_error(p, fresh.error_msg[0] ? fresh.error_msg : "Fetch failed");
+    /* No link yet means no fetch could have worked; naming the source would
+     * blame the wrong thing. Moon never reaches here (it renders locally on
+     * moon_poll_once), so this only ever covers network sources. */
+    image_page_set_error(p, !net_sta_has_ip() ? "Waiting for WiFi"
+                            : (fresh.error_msg[0] ? fresh.error_msg : "Fetch failed"));
     if (show_wait) {
         if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
             nina_wait_overlay_hide();
@@ -1193,7 +1349,11 @@ static bool net_poll_once(void *arg)
  * runs only on this task, and only from net_poll_once). */
 static void anim_on_park(void *arg)
 {
-    image_page_ring_reset_if_requested((image_page_t *)arg);
+    image_page_t *p = (image_page_t *)arg;
+    image_page_ring_reset_if_requested(p);
+    /* The cached coastline map is another panel-sized PSRAM buffer, held for as
+     * long as the ring is. Free it at the same seam. */
+    if (p->src == IMG_SRC_RADAR) rainviewer_release();
 }
 
 /* ---- Moon ---- */

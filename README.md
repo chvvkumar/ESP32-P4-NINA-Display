@@ -345,9 +345,13 @@ Setup: Pages > Custom Image.
 
 ### Weather Radar
 
-An animated NWS radar loop (up to 10 frames) for a chosen radar site, a region, the whole CONUS, or the nearest site to your location. The map style picks what the echoes are drawn over: the standard NWS picture with roads and city names, state lines only (the default), or state and county lines. The two line-only styles remove roads and labels, which helps when highway markings look like heavy rain; on those two styles a few sites publish no frame history and show a still picture instead of a loop.
+An animated radar loop (up to 10 frames). The Radar area setting picks what the page shows, and is split into Worldwide and USA.
 
-Setup: Pages > Radar. Automatic site selection uses the location on Device > System.
+Worldwide shows rain anywhere on Earth, drawn over coastlines and borders and centred on your location. Picking it reveals an Area setting (how much of the map is shown) and a Rain colours setting in place of the site-specific controls.
+
+The USA entries use NWS radar: a chosen radar site, a region, the whole CONUS, or Automatic, which picks the nearest site to your location. Automatic switches to the worldwide rain map on its own when your location is too far from any US radar site, with no setting to change. For the USA entries, the map style picks what the echoes are drawn over: the standard NWS picture with roads and city names, state lines only (the default), or state and county lines. The two line-only styles remove roads and labels, which helps when highway markings look like heavy rain; on those two styles a few sites publish no frame history and show a still picture instead of a loop. Map style, Dark mode and Crop are hidden while Worldwide is selected.
+
+Setup: Pages > Radar. Both Worldwide and automatic site selection use the location on Device > System.
 
 <p align="center">
   <img src="images/radar.jpg" alt="Weather Radar page" width="720">
@@ -357,7 +361,7 @@ Setup: Pages > Radar. Automatic site selection uses the location on Device > Sys
 
 ### Cloud Cover
 
-An animated satellite loop of the cloud cover around your location, from NOAA GOES imagery served by NASA. Day: true color. Night: infrared clouds over city lights. State and country borders and major roads are drawn over the picture. The satellite (GOES-East or GOES-West) is picked from your longitude. The source updates every 10 minutes and the newest frame is usually 30-45 minutes old.
+An animated satellite loop of the cloud cover around your location. The page works anywhere in the world. It picks the geostationary satellite sitting over the location you set: GOES East or GOES West for the Americas, Himawari for Asia, Australia and New Zealand, and Meteosat for Europe, Africa, the Middle East and the Indian Ocean. There is no satellite setting; move the location and the picture follows. Himawari and the Indian Ocean Meteosat have no picture that works day and night, so with GeoColor selected they show a daylight picture and infrared after dark, switching frame by frame through dusk. Himawari's daylight picture is black and white; the Indian Ocean one is natural colour. State and country borders and major roads are drawn over the picture. The source updates every 10 to 15 minutes and the newest frame is usually 30-45 minutes old.
 
 Setup: Pages > Cloud Cover (satellite channel, area from about 150 km to 2500 km across, up to 10 frames). The channel selects GeoColor natural color, clean infrared (cloud tops day and night) or air mass (color-coded temperature and moisture). The location comes from Device > System > Location.
 
@@ -579,6 +583,6 @@ idf.py -B build_round  -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaul
 - [@chicago925](https://github.com/chicago925) for the 3D printed stand ([#116](https://github.com/chvvkumar/ESP32-P4-NINA-Display/issues/116)).
 - Waveshare for the ESP32-P4-WIFI6-Touch-LCD-4B, 3.4C and 4C board support packages.
 - [LVGL](https://lvgl.io/) and [stb_image](https://github.com/nothings/stb).
-- NASA GIBS for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA GOES SUVI (rendered by Helioviewer) for the extreme-UV solar bands, NOAA and the NWS for radar and GOES imagery, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
+- NASA GIBS and EUMETSAT EUMETView for the Cloud Cover imagery, NASA SDO and SOHO for the solar imagery, NOAA GOES SUVI (rendered by Helioviewer) for the extreme-UV solar bands, NOAA and the NWS for radar and GOES imagery, RainViewer and NASA GIBS for the worldwide Weather Radar map, and Open-Meteo, OpenWeatherMap and Weather Underground for weather data.
 - Espressif esp-hosted and esp_wifi_remote for the ESP32-C6 WiFi link, [tgx](https://github.com/vindar/tgx) for the moon sphere renderer, and SVOX Pico TTS (esp-picotts) for the voice clips.
 - NASA's Scientific Visualization Studio for the [CGI Moon Kit](https://svs.gsfc.nasa.gov/4720) lunar surface maps used by the Moon page (visualizer Ernie Wright, USRA; scientist Noah Petro, NASA/GSFC), built from Lunar Reconnaissance Orbiter LROC WAC and LOLA data.

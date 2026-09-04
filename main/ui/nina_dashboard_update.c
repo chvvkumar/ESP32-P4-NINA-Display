@@ -10,6 +10,7 @@
 #include "nina_round_overlay.h"
 #endif
 #include "nina_empty_state.h"
+#include "net_diag.h"                /* net_sta_has_ip (connecting-title wording) */
 #include "nina_connection.h"
 #include "ui_dial.h"
 #include "ui_text_fit.h"
@@ -353,6 +354,7 @@ typedef struct {
     bool              enabled;
     int               gb;
     const theme_t    *theme;
+    bool              wifi;      /* station had an IP last repaint (title wording) */
     char              url[128];
 } disc_gate_t;
 
@@ -370,9 +372,15 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     const char *url = app_config_get_instance_url(instance_idx);
     bool enabled = app_config_is_instance_enabled(instance_idx);
 
+    /* Part of the gate, not just of the text: the wording below says "Waiting
+     * for WiFi" while the station has no address, and the connection tier does
+     * not change when the link finally comes up, so without this the stale
+     * title would survive. */
+    bool wifi_up = net_sta_has_ip();
+
     disc_gate_t *g = &s_disc_gate[instance_idx];
     if (g->valid && g->state == conn_state && g->enabled == enabled &&
-        g->gb == gb && g->theme == current_theme &&
+        g->gb == gb && g->theme == current_theme && g->wifi == wifi_up &&
         strncmp(g->url, url, sizeof(g->url) - 1) == 0) {
         return;   /* nothing this body depends on has changed */
     }
@@ -381,6 +389,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     g->enabled = enabled;
     g->gb      = gb;
     g->theme   = current_theme;
+    g->wifi    = wifi_up;
     strncpy(g->url, url, sizeof(g->url) - 1);
     g->url[sizeof(g->url) - 1] = '\0';
 
@@ -390,7 +399,7 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
     if (!enabled) {
         state_text = "Disabled";
     } else if (conn_state == NINA_CONN_UNKNOWN || conn_state == NINA_CONN_CONNECTING) {
-        state_text = "Connecting...";
+        state_text = nina_empty_state_wait_title("Connecting...");
     } else {
         state_text = "Not Connected";
     }
@@ -475,7 +484,8 @@ static void update_disconnected_state(dashboard_page_t *p, int instance_idx, int
         } else {
             snprintf(offline_title, sizeof(offline_title), "Node %d Offline", instance_idx + 1);
         }
-        nina_empty_state_set_title(p->empty_state_cont, offline_title);
+        nina_empty_state_set_title(p->empty_state_cont,
+                                   nina_empty_state_wait_title(offline_title));
         nina_empty_state_show(p->empty_state_cont);
     }
 }
@@ -1240,12 +1250,14 @@ static void update_alt_layout_page(dashboard_page_t *p, const nina_client_t *d,
 
     if (conn_state != NINA_CONN_CONNECTED) {
         disc_gate_t *g = &s_disc_gate[inst];
+        bool wifi_up = net_sta_has_ip();   /* see the gate note in update_disconnected_state */
         if (!g->valid || g->state != conn_state || g->theme != current_theme
-            || g->gb != gb) {
+            || g->gb != gb || g->wifi != wifi_up) {
             g->valid = true;
             g->state = conn_state;
             g->theme = current_theme;
             g->gb = gb;
+            g->wifi = wifi_up;
             /* Force a full sub-bar rebuild on reconnect. */
             p->subbar.cached_target = -1;
             p->subbar.cached_done = -1;
@@ -1268,7 +1280,8 @@ static void update_alt_layout_page(dashboard_page_t *p, const nina_client_t *d,
                 } else {
                     snprintf(offline_title, sizeof(offline_title), "Node %d Offline", inst + 1);
                 }
-                nina_empty_state_set_title(p->empty_state_cont, offline_title);
+                nina_empty_state_set_title(p->empty_state_cont,
+                                           nina_empty_state_wait_title(offline_title));
                 nina_empty_state_show(p->empty_state_cont);
             }
         }

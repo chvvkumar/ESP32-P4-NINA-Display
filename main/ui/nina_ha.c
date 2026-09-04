@@ -56,7 +56,9 @@ void ha_page_update(const ha_data_t *data) {
         /* Never polled yet (or still inside the first few misses): waiting, not
          * failed. */
         nina_tile_grid_set_stale(s_grid, false);
-        nina_tile_grid_show_overlay(s_grid, "Connecting to Home Assistant...");
+        /* Re-applied every poll update, so it follows the link state. */
+        nina_tile_grid_show_overlay(s_grid,
+            nina_empty_state_wait_title("Connecting to Home Assistant..."));
         nina_tile_grid_set_busy(s_grid, true);
         return;
     }

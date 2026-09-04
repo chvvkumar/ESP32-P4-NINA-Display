@@ -393,3 +393,16 @@ void net_diag_log_outage(const char *failed_host) {
 
     net_diag_clear_busy();
 }
+
+bool net_sta_has_ip(void) {
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!sta) {
+        return false;
+    }
+    esp_netif_ip_info_t ip_info;
+    memset(&ip_info, 0, sizeof(ip_info));
+    if (esp_netif_get_ip_info(sta, &ip_info) != ESP_OK) {
+        return false;
+    }
+    return ip_info.ip.addr != 0;
+}

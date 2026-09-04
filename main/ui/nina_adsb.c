@@ -2134,8 +2134,10 @@ static void recompute(void)
         : PAGE_CONN_CONNECTING;
 
     if (st == PAGE_CONN_CONNECTING || st == PAGE_CONN_DOWN) {
+        /* recompute() runs on every poll update, so the wait wording is
+         * re-judged each cycle and gives way on its own once the link is up. */
         nina_empty_state_set_title(s_empty, st == PAGE_CONN_CONNECTING
-                                   ? "Connecting to ADS-B receiver..."
+                                   ? nina_empty_state_wait_title("Connecting to ADS-B receiver...")
                                    : "Cannot reach ADS-B receiver");
         nina_empty_state_set_busy(s_empty, st == PAGE_CONN_CONNECTING);
         show_obj(s_backdrop, true);
@@ -2871,7 +2873,7 @@ static lv_obj_t *adsb_page_create(lv_obj_t *parent)
     lv_obj_clear_flag(s_backdrop, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
     show_obj(s_backdrop, false);
     s_empty = nina_empty_state_create(s_backdrop, ICON_CLOUD_OFF,
-                                      "Connecting to ADS-B receiver...",
+                                      nina_empty_state_wait_title("Connecting to ADS-B receiver..."),
                                       "Check the ADS-B receiver URL in settings.", 0);
 
     lv_obj_add_event_cb(s_root, press_cb,    LV_EVENT_PRESSED,  NULL);

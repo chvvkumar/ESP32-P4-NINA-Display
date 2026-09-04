@@ -25,13 +25,20 @@
  *   cloud_off  U+E2C1  (no-NINA / node-offline states)
  *   music_off  U+E440  (Spotify nothing-playing state)
  *   image      U+E251  (image-loading / image display context)
+ *   cloud      U+E2BD  (Weather Radar / Cloud Cover loading placeholder)
  *
  * RESEARCH.md assumed values were wrong for cloud_off (U+E2BE) and
  * music_off (U+E7F4) -- those map to cloud_circle and notifications
  * respectively.  The verified values above are the correct glyphs.
+ *
+ * cloud (U+E2BD) added 2026-09-03, verified against the same TTF via
+ * fontTools getBestCmap() the same day: U+E2BD -> "cloud" (plain, no
+ * strike-through). cloud_off stays reserved for offline states; the
+ * loading placeholder uses the plain cloud instead.
  * ──────────────────────────────────────────────────────────────────── */
 #define ICON_CLOUD_OFF  "\xee\x8b\x81"   /* U+E2C1 cloud_off  */
 #define ICON_MUSIC_OFF  "\xee\x91\x80"   /* U+E440 music_off  */
+#define ICON_CLOUD      "\xee\x8a\xbd"   /* U+E2BD cloud (plain, loading states) */
 
 /**
  * @brief Create an empty-state widget as a child of @p parent.
@@ -137,3 +144,45 @@ void nina_empty_state_set_busy(lv_obj_t *cont, bool busy);
  * @param title  New title text.
  */
 void nina_empty_state_set_title(lv_obj_t *cont, const char *title);
+
+/**
+ * @brief Show a done-of-total segmented progress bar under the title.
+ *
+ * Used by the Weather Radar and Cloud Cover loading placeholders to show how
+ * many loop frames have been downloaded out of the total the loop will hold,
+ * so a multi-minute wait reads as work rather than a hang.  Any other
+ * placeholder consumer may call it; those that never do are unaffected.
+ *
+ * @p total <= 0 hides the row and its caption (the default state at create
+ * time).  Otherwise the row shows one segment per unit of @p total with the
+ * first @p done of them lit (@p done is clamped into 0..total), and the
+ * caption beneath it reads "<done> of <total>".  A total above 16 is drawn as
+ * 16 segments with the lit count scaled down to match.  Idempotent: repeating
+ * the same pair does not invalidate anything, so it is safe to call every poll
+ * cycle.
+ *
+ * Caller holds the display lock.  No-op when cont is NULL.
+ *
+ * @param cont   Container returned by nina_empty_state_create.
+ * @param done   Items completed so far.
+ * @param total  Items expected in total; <= 0 hides the row.
+ */
+void nina_empty_state_set_progress(lv_obj_t *cont, int done, int total);
+
+/**
+ * @brief Swap a connecting/loading title for "Waiting for WiFi" while the
+ *        station link has no IP address.
+ *
+ * Returns the literal "Waiting for WiFi" when net_sta_has_ip() is false, and
+ * @p normal otherwise.  Callers pass their connecting/loading title through it
+ * on EVERY refresh, not once at create time, so the text follows the link
+ * state: a page opened before the radio has an address reads "Waiting for
+ * WiFi" and switches to its own wording the moment the link comes up.
+ *
+ * Takes no lock and makes no LVGL call; the returned pointer is a string
+ * literal or @p normal itself, so it borrows the caller's lifetime.
+ *
+ * @param normal  The title to use once the link is up (may be NULL).
+ * @return "Waiting for WiFi" while offline, else @p normal.
+ */
+const char *nina_empty_state_wait_title(const char *normal);

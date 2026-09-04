@@ -179,3 +179,6 @@ skill-observations/
 gsd-core/
 build_square/
 build_round/
+
+# host unit-test build dirs (test/host, any generator)
+build_host*/

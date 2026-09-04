@@ -250,8 +250,8 @@ target_compile_definitions(test_radar_wms PRIVATE
 # (main/clouds_wms.h): East/West satellite pick, square Web-Mercator box from
 # lat/lon + zoom, GIBS GetMap and WMTS DescribeDomains URL shape, the
 # DescribeDomains time-list parser (start/end/PTnM segments, singles, bare
-# dates) and the UTC days-from-civil calendar helpers. Header-only, no
-# ESP-IDF dependency, no fixtures.
+# dates), the EUMETView GetCapabilities default="..." parser (fixture) and the
+# UTC days-from-civil calendar helpers. Header-only, no ESP-IDF dependency.
 # ---------------------------------------------------------------------------
 add_nina_host_test(test_clouds_wms
     SOURCES
@@ -260,6 +260,9 @@ add_nina_host_test(test_clouds_wms
         # g_screen_size out of this file. The default there is 720, so every
         # existing 720-based assertion in this test still holds.
         ${NINA_REPO_ROOT}/main/screen_geom.c
+)
+target_compile_definitions(test_clouds_wms PRIVATE
+    NINA_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
 )
 
 # ---------------------------------------------------------------------------
@@ -337,5 +340,34 @@ add_nina_host_test(test_screen_geom
 add_nina_host_test(test_ui_round
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_ui_round.c
+        ${NINA_REPO_ROOT}/main/screen_geom.c
+)
+
+# ---------------------------------------------------------------------------
+# test_sun_pos -- single-precision solar elevation (main/sun_pos.h): the UTC
+# day-of-year split and the NOAA low-accuracy declination / equation-of-time
+# elevation used by the Clouds page to pick a visible or infrared layer per
+# frame. Header-only, only <math.h>, no fixtures.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_sun_pos
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_sun_pos.c
+)
+
+# ---------------------------------------------------------------------------
+# test_rainviewer -- the pure decisions for the worldwide radar source
+# (main/rainviewer.h): zoom/palette validation, the Web-Mercator window, the
+# tile range and antimeridian wrap, the tile and GIBS basemap URL shapes, the
+# weather-maps.json parse (vendored cJSON) and the provider rule, which needs
+# the nearest WSR-88D site from main/radar_sites.c. The header derives its
+# window size from screen_size(), so main/screen_geom.c is linked the same way
+# test_clouds_wms does it (default 720). The fetch, PNG decode and compositing
+# live in main/rainviewer.c, which pulls in http_fetch/stb and is verified on
+# device instead.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_rainviewer
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_rainviewer.c
+        ${NINA_REPO_ROOT}/main/radar_sites.c
         ${NINA_REPO_ROOT}/main/screen_geom.c
 )
