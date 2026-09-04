@@ -86,6 +86,105 @@ static bool url_bbox(const char *url, long *a, long *b, long *c, long *d) {
     return sscanf(p + 6, "%ld,%ld,%ld,%ld", a, b, c, d) == 4;
 }
 
+/* Parse one integer query parameter (e.g. "&WIDTH=") out of a URL; -1 if absent. */
+static long url_int(const char *url, const char *key) {
+    const char *p = strstr(url, key);
+    long v = -1;
+    if (p == NULL) return -1;
+    if (sscanf(p + strlen(key), "%ld", &v) != 1) return -1;
+    return v;
+}
+
+/* One arbitrary but real 10-minute GIBS slot, shared by the URL cases so the
+ * TIME= term is stable. */
+static const uint32_t stamp_ref = 1787025600u;
+
+/* The exact strings this header produced BEFORE the date-line split existed
+ * (captured from the ec7d2f7 build). A single-request location must keep
+ * producing them byte for byte. */
+#define URL_MISSOURI_Z6 \
+    "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0" \
+    "&REQUEST=GetMap&LAYERS=GOES-East_ABI_GeoColor,Reference_Features_15m&CRS=EPSG:3857" \
+    "&BBOX=-11144212,3783982,-9383102,5545091&WIDTH=720&HEIGHT=720&FORMAT=image/jpeg" \
+    "&TIME=2026-08-18T04:00:00Z"
+#define URL_WELLINGTON_Z7 \
+    "https://gibs.earthdata.nasa.gov/wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0" \
+    "&REQUEST=GetMap&LAYERS=Himawari_AHI_Band3_Red_Visible_1km,Reference_Features_15m" \
+    "&CRS=EPSG:3857&BBOX=19016142,-5495489,19896698,-4614934&WIDTH=720&HEIGHT=720" \
+    "&FORMAT=image/jpeg&TIME=2026-08-18T04:00:00Z"
+#define URL_LONDON_Z7 \
+    "https://view.eumetsat.int/geoserver/ows?service=WMS&version=1.3.0&request=GetMap" \
+    "&layers=mtg_fd:rgb_geocolour,backgrounds:ne_10m_coastline,backgrounds:ne_boundary_lines_land" \
+    "&crs=EPSG:3857&bbox=-454749,6269943,425806,7150498&width=720&height=720" \
+    "&format=image/jpeg&time=2026-08-18T04:00:00Z&bgcolor=0x000000"
+#define URL_DUBAI_Z7 \
+    "https://view.eumetsat.int/geoserver/ows?service=WMS&version=1.3.0&request=GetMap" \
+    "&layers=msg_iodc:rgb_natural,backgrounds:ne_10m_coastline,backgrounds:ne_boundary_lines_land" \
+    "&crs=EPSG:3857&bbox=5715690,2460054,6596245,3340608&width=720&height=720" \
+    "&format=image/jpeg&time=2026-08-18T04:00:00Z&bgcolor=0x000000"
+
+/* Which panel column the true location falls in, once the parts are pasted
+ * side by side. This is what clouds_centre_dx_px() used to measure an offset
+ * from; it must now always be the panel centre. -1 when the location is in
+ * neither part, which would be a bug in clouds_split(). */
+static float split_loc_col(const clouds_split_t *sp, float lon) {
+    float cx = radar_wms_merc_x(lon);
+    for (int i = 0; i < sp->parts; i++) {
+        float mpp = (sp->maxx[i] - sp->minx[i]) / (float)sp->px_w[i];
+        if (cx >= sp->minx[i] - 1.0f && cx <= sp->maxx[i] + 1.0f) {
+            return (float)sp->px_x[i] + (cx - sp->minx[i]) / mpp;
+        }
+    }
+    return -1.0f;
+}
+
+/* Everything that must hold for EVERY split, whatever the panel or zoom. */
+static void check_split_invariants(const char *what, const clouds_split_t *sp, int px) {
+    char lbl[128];
+    snprintf(lbl, sizeof(lbl), "%s: two parts", what);
+    check_int(lbl, sp->parts, 2);
+    snprintf(lbl, sizeof(lbl), "%s: part widths sum to the panel", what);
+    check_int(lbl, sp->px_w[0] + sp->px_w[1], px);
+    snprintf(lbl, sizeof(lbl), "%s: part 0 pastes at column 0", what);
+    check_int(lbl, sp->px_x[0], 0);
+    snprintf(lbl, sizeof(lbl), "%s: part 1 pastes right after part 0", what);
+    check_int(lbl, sp->px_x[1], sp->px_w[0]);
+    snprintf(lbl, sizeof(lbl), "%s: neither part is empty", what);
+    check_bool(lbl, sp->px_w[0] >= 1 && sp->px_w[1] >= 1, true);
+    snprintf(lbl, sizeof(lbl), "%s: part 0 ends on the antimeridian", what);
+    check_int(lbl, lroundf(sp->maxx[0]), 20037508L);
+    snprintf(lbl, sizeof(lbl), "%s: part 1 starts on the antimeridian", what);
+    check_int(lbl, lroundf(sp->minx[1]), -20037508L);
+    snprintf(lbl, sizeof(lbl), "%s: both parts share the y box", what);
+    check_bool(lbl, sp->maxy > sp->miny, true);
+}
+
+/* The GetMap this part actually sends: right WIDTH/HEIGHT, square-or-wider
+ * pixels after the widening, and the widening moved only the free x side. */
+static void check_split_part_url(const char *what, const clouds_split_t *sp, int i,
+                                 float lat, float lon, uint8_t zoom) {
+    char u[CLOUDS_URL_MAX], lbl[160];
+    snprintf(lbl, sizeof(lbl), "%s part %d: URL builds", what, i);
+    bool built = clouds_frame_url_part(u, sizeof(u), lat, lon, zoom, 0, 0, stamp_ref, sp, i);
+    check_bool(lbl, built, true);
+    if (!built) return;
+    long x0, y0, x1, y1;
+    snprintf(lbl, sizeof(lbl), "%s part %d: URL bbox parses", what, i);
+    bool parsed = url_bbox(u, &x0, &y0, &x1, &y1);
+    check_bool(lbl, parsed, true);
+    if (!parsed) return;
+    long w = url_int(u, "&WIDTH=");
+    snprintf(lbl, sizeof(lbl), "%s part %d: WIDTH is the part width", what, i);
+    check_int(lbl, w, sp->px_w[i]);
+    snprintf(lbl, sizeof(lbl), "%s part %d: HEIGHT is the panel", what, i);
+    check_int(lbl, url_int(u, "&HEIGHT="), CLOUDS_PX);
+    snprintf(lbl, sizeof(lbl), "%s part %d: square-or-wider pixels", what, i);
+    check_bool(lbl, (long long)(x1 - x0) * (long long)CLOUDS_PX >=
+                    (long long)(y1 - y0) * (long long)w, true);
+    snprintf(lbl, sizeof(lbl), "%s part %d: pinned side stays on the antimeridian", what, i);
+    check_int(lbl, (i == 0) ? x1 : x0, (i == 0) ? 20037508L : -20037508L);
+}
+
 /* Position of needle in hay, or -1. Used to assert query parameter order. */
 static long pos_of(const char *hay, const char *needle) {
     const char *p = strstr(hay, needle);
@@ -275,33 +374,122 @@ int main(void) {
                    radar_wms_merc_x(-90.69f), 2.0f);
     }
 
-    /* -- where the location sits once the clamp has moved the box ----------- */
+    /* -- the window is never shifted; a crossing is served by two GetMaps ----
+     * REPLACES the phase-1 "where the location sits once the clamp has moved
+     * the box" cases, all of which asserted clouds_centre_dx_px(): that helper
+     * told the marker how far the clamped box had carried the location off
+     * centre (about +241 px at Wellington zoom 5). The box is no longer moved
+     * at all -- a crossing is split at the antimeridian into two requests
+     * pasted side by side -- so the location is the centre pixel at every
+     * longitude and the helper is gone. The property those cases were really
+     * about is asserted directly here, as split_loc_col() == CLOUDS_PX/2. */
     {
-        /* The marker offset must come from the SAME arithmetic as the box, so
-         * derive the expected pixels straight from the shifted box: the true
-         * location minus the box centre, divided by metres per pixel. */
         const float wlat = -41.29f, wlon = 174.78f;
-        float minx, miny, maxx, maxy;
-        clouds_bbox(wlat, wlon, 5, &minx, &miny, &maxx, &maxy);
-        float mpp5 = (maxx - minx) / (float)CLOUDS_PX;
-        float want5 = (radar_wms_merc_x(wlon) - (minx + maxx) * 0.5f) / mpp5;
-        check_near("dx: Wellington z5 matches the shifted box",
-                   (float)clouds_centre_dx_px(wlat, wlon, 5), want5, 2.0f);
-        check_near("dx: Wellington z5 is about +240 px",
-                   (float)clouds_centre_dx_px(wlat, wlon, 5), 241.0f, 2.0f);
-        /* zoom 7 is a narrow enough box that the clamp never fires */
-        check_int("dx: Wellington z7 is centred", clouds_centre_dx_px(wlat, wlon, 7), 0);
-        check_int("dx: London z5 is centred", clouds_centre_dx_px(51.5f, -0.13f, 5), 0);
-        check_int("dx: -179.9E z5 mirrors 179.9E z5",
-                  clouds_centre_dx_px(0.0f, -179.9f, 5),
-                  -clouds_centre_dx_px(0.0f, 179.9f, 5));
-        check_bool("dx: 179.9E z5 is positive (location right of centre)",
-                   clouds_centre_dx_px(0.0f, 179.9f, 5) > 0, true);
-        check_bool("dx: -179.9E z5 is negative",
-                   clouds_centre_dx_px(0.0f, -179.9f, 5) < 0, true);
-        /* latitude never triggers the x clamp */
-        check_int("dx: latitude does not change it",
-                  clouds_centre_dx_px(60.0f, wlon, 5), clouds_centre_dx_px(-60.0f, wlon, 5));
+        clouds_split_t sp;
+
+        /* Wellington crosses +180 at zoom 5 and 6 (the two zooms that showed
+         * the black strip on glass). Pixel widths come from the investigation's
+         * arithmetic: overrun 241.2 px at z5, 122.4 px at z6, on a 720 panel. */
+        clouds_split(wlat, wlon, 5, &sp);
+        check_split_invariants("split Wellington z5", &sp, 720);
+        check_int("split Wellington z5: part 0 width", sp.px_w[0], 479);
+        check_int("split Wellington z5: part 1 width", sp.px_w[1], 241);
+        check_near("split Wellington z5: location at the panel centre",
+                   split_loc_col(&sp, wlon), 360.0f, 1.0f);
+        check_split_part_url("split Wellington z5", &sp, 0, wlat, wlon, 5);
+        check_split_part_url("split Wellington z5", &sp, 1, wlat, wlon, 5);
+
+        clouds_split(wlat, wlon, 6, &sp);
+        check_split_invariants("split Wellington z6", &sp, 720);
+        check_int("split Wellington z6: part 0 width", sp.px_w[0], 598);
+        check_int("split Wellington z6: part 1 width", sp.px_w[1], 122);
+        check_near("split Wellington z6: location at the panel centre",
+                   split_loc_col(&sp, wlon), 360.0f, 1.0f);
+        check_split_part_url("split Wellington z6", &sp, 0, wlat, wlon, 6);
+        check_split_part_url("split Wellington z6", &sp, 1, wlat, wlon, 6);
+
+        /* zoom 7 is a narrow enough box that it never reaches the edge: one
+         * request, and the URL is byte for byte the pre-change string. */
+        clouds_split(wlat, wlon, 7, &sp);
+        check_int("split: Wellington z7 does not cross", sp.parts, 1);
+        check_int("split: Wellington z7 part 0 is the whole panel", sp.px_w[0], 720);
+        check_bool("split: Wellington z7 URL builds",
+                   clouds_frame_url(url, sizeof(url), wlat, wlon, 7, 0, 0, stamp_ref), true);
+        check_str("split: Wellington z7 URL unchanged", url, URL_WELLINGTON_Z7);
+
+        /* The 800 px panel: the same crossing, wider parts. screen_geom_set()
+         * is what board_profile_init() calls on the round 3.4in board. */
+        screen_geom_set(800, 0, 0);
+        clouds_split(wlat, wlon, 5, &sp);
+        check_split_invariants("split Wellington z5 @800", &sp, 800);
+        check_int("split Wellington z5 @800: part 0 width", sp.px_w[0], 519);
+        check_int("split Wellington z5 @800: part 1 width", sp.px_w[1], 281);
+        check_near("split Wellington z5 @800: location at the panel centre",
+                   split_loc_col(&sp, wlon), 400.0f, 1.0f);
+        check_split_part_url("split Wellington z5 @800", &sp, 0, wlat, wlon, 5);
+        check_split_part_url("split Wellington z5 @800", &sp, 1, wlat, wlon, 5);
+        clouds_split(wlat, wlon, 6, &sp);
+        check_split_invariants("split Wellington z6 @800", &sp, 800);
+        check_near("split Wellington z6 @800: location at the panel centre",
+                   split_loc_col(&sp, wlon), 400.0f, 1.0f);
+        check_split_part_url("split Wellington z6 @800", &sp, 0, wlat, wlon, 6);
+        check_split_part_url("split Wellington z6 @800", &sp, 1, wlat, wlon, 6);
+        screen_geom_set(720, 0, 0);
+
+        /* Just WEST of 180 (western Aleutians): the crossing runs the other
+         * way, so the wrapped EAST end of the world is what lands on the LEFT
+         * of the panel. The Himawari/GOES-West boundary sits at -178.25, so
+         * -178.0 must still resolve to GOES-West; a case at -179 would
+         * silently be testing Himawari instead. */
+        const float alat = 51.9f, alon = -178.0f;
+        check_str("split: -178.0 is still GOES-West",
+                  clouds_sat_layer(clouds_sat_for_lon(alon), CLOUDS_ROLE_IR),
+                  "GOES-West_ABI_Band13_Clean_Infrared");
+        clouds_split(alat, alon, 5, &sp);
+        check_split_invariants("split Aleutians z5", &sp, 720);
+        check_int("split Aleutians z5: part 0 width (wrapped east end)", sp.px_w[0], 314);
+        check_near("split Aleutians z5: location at the panel centre",
+                   split_loc_col(&sp, alon), 360.0f, 1.0f);
+        check_split_part_url("split Aleutians z5", &sp, 0, alat, alon, 5);
+        check_split_part_url("split Aleutians z5", &sp, 1, alat, alon, 5);
+        /* zoom 7 is still wide enough to cross here: its half-width is 3.96
+         * degrees of longitude against the 2.0 degrees left to the edge.
+         * Zoom 9 (0.99 degrees) is the case where a narrower box stops
+         * crossing and the page goes back to one request. */
+        clouds_split(alat, alon, 7, &sp);
+        check_int("split: Aleutians z7 still crosses", sp.parts, 2);
+        check_near("split Aleutians z7: location at the panel centre",
+                   split_loc_col(&sp, alon), 360.0f, 1.0f);
+        clouds_split(alat, alon, 9, &sp);
+        check_int("split: Aleutians z9 does not cross", sp.parts, 1);
+        check_int("split: Aleutians z9 part 0 is the whole panel", sp.px_w[0], 720);
+
+        /* EUMETView rows can never reach a world edge (design section E), and
+         * their URL shape is untouched by this change. */
+        clouds_split(51.5f, -0.13f, 7, &sp);
+        check_int("split: London z7 does not cross", sp.parts, 1);
+        check_bool("split: London z7 URL builds",
+                   clouds_frame_url(url, sizeof(url), 51.5f, -0.13f, 7, 0, 0, stamp_ref), true);
+        check_str("split: London z7 URL unchanged", url, URL_LONDON_Z7);
+        clouds_split(25.2f, 55.3f, 7, &sp);
+        check_int("split: Dubai z7 does not cross", sp.parts, 1);
+        check_bool("split: Dubai z7 URL builds",
+                   clouds_frame_url(url, sizeof(url), 25.2f, 55.3f, 7, 0, 0, stamp_ref), true);
+        check_str("split: Dubai z7 URL unchanged", url, URL_DUBAI_Z7);
+
+        /* The single-request guarantee: an ordinary GIBS location's URL is
+         * byte for byte what it was before the split existed. */
+        clouds_split(38.6f, -92.2f, 6, &sp);
+        check_int("split: Missouri z6 does not cross", sp.parts, 1);
+        check_bool("split: Missouri z6 URL builds",
+                   clouds_frame_url(url, sizeof(url), 38.6f, -92.2f, 6, 0, 0, stamp_ref), true);
+        check_str("split: Missouri z6 URL byte for byte unchanged", url, URL_MISSOURI_Z6);
+        /* and clouds_frame_url() really is the part-0 builder underneath */
+        char part0[CLOUDS_URL_MAX];
+        check_bool("split: Missouri z6 part-0 builder agrees",
+                   clouds_frame_url_part(part0, sizeof(part0), 38.6f, -92.2f, 6, 0, 0,
+                                         stamp_ref, &sp, 0), true);
+        check_str("split: Missouri z6 part 0 == clouds_frame_url", part0, URL_MISSOURI_Z6);
     }
 
     /* -- square-or-wider pixels: GIBS renders a coarse frame whenever a
@@ -352,7 +540,15 @@ int main(void) {
                    clouds_frame_url(url, sizeof(url), wlat, wlon, 6, 0, 0, 1787025600u), true);
         long ux0, uy0, ux1, uy1;
         check_bool("square pixels: z6 GIBS URL bbox parses", url_bbox(url, &ux0, &uy0, &ux1, &uy1), true);
-        check_bool("square pixels: z6 GIBS URL x-span >= y-span", (ux1 - ux0) >= (uy1 - uy0), true);
+        /* WIDTH is read from the URL rather than assumed to be the panel:
+         * Wellington z6 crosses the date line, so clouds_frame_url() now
+         * builds part 0 of a split and its request is 598 px wide. The rule
+         * itself is per pixel, so it is x-span/WIDTH >= y-span/HEIGHT. */
+        {
+            long uw = url_int(url, "&WIDTH="), uh = url_int(url, "&HEIGHT=");
+            check_bool("square pixels: z6 GIBS URL pixels are square or wider",
+                       (long long)(ux1 - ux0) * uh >= (long long)(uy1 - uy0) * uw, true);
+        }
     }
 
     /* -- EUMETView basemap suffixes ---------------------------------------- */

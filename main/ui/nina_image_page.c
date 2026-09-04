@@ -378,11 +378,12 @@ void image_page_caption_style(lv_obj_t *lbl)
  * and vertically centred (see center_image_xy / swap_borrowed_buf), so the
  * frame centre is ALWAYS the screen centre. Neither page crops
  * (image_page_config_crop) and neither has a flip/rotate, so no transform can
- * move the picture. The location is the screen centre plus
- * marker_set_offset(): zero everywhere except near the date line on Clouds,
- * where clouds_bbox() shifts the box back inside the world and the location
- * moves off centre with it. The radar window is never shifted, so the radar
- * marker stays centred and never calls the offset helper.
+ * move the picture. The location is therefore ALWAYS the screen centre, on
+ * both pages, at every longitude: a Cloud Cover window that would cross the
+ * date line is served by TWO GetMaps stitched at the antimeridian
+ * (clouds_split() in clouds_wms.h) rather than by shifting the box, so there
+ * is no offset to compensate for and no offset helper. lv_obj_center() in
+ * marker_create() is the whole placement.
  *
  * One instance per source (each page is created once and never destroyed —
  * optional_page_set_enabled hides it instead), hence a file-static array rather
@@ -456,26 +457,6 @@ static void marker_create(image_src_t src, lv_obj_t *parent)
 
     s_marker[src] = m;
     marker_apply_theme(src);
-}
-
-/* Put the marker @p dx pixels right of the frame centre (negative = left).
- * Everything but the date-line clamp gives 0: near 180 degrees the fetched box
- * is SHIFTED back inside the world (clouds_bbox), so the true location is no
- * longer the centre pixel and a centred marker would sit in open sea (about
- * 240 px out for Wellington at zoom 5). clouds_centre_dx_px() derives it from
- * the same clamp the box uses. A plain int so a caller with no clamp (the radar
- * page) passes 0. Display lock held by the caller. */
-static void marker_set_offset(image_src_t src, int dx)
-{
-    lv_obj_t *m = s_marker[src];
-    if (!m) return;
-    lv_obj_align(m, LV_ALIGN_CENTER, dx, 0);
-}
-
-/* The offset the current config asks for on the Clouds page. */
-static int marker_config_dx(const app_config_t *cfg)
-{
-    return clouds_centre_dx_px(cfg->weather_lat, cfg->weather_lon, cfg->clouds_zoom);
 }
 
 /* Show/hide the marker. No-op on every instance that never built one (the
@@ -770,7 +751,6 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
     if (p->src == IMG_SRC_CLOUDS || p->src == IMG_SRC_RADAR) {
         marker_create(p->src, page_container);
         if (p->src == IMG_SRC_CLOUDS) {
-            marker_set_offset(p->src, marker_config_dx(app_config_get()));
             marker_set_visible(p->src, app_config_get()->clouds_show_location);
         } else {
             marker_set_visible(p->src, marker_wanted(p->src, app_config_get()));
@@ -2028,6 +2008,17 @@ typedef struct {
      * that changes ring pixels from one that does not. Written and read only under
      * the display lock. */
     bool            ring_red;
+    /* True once a slot has been filled with NO retained compressed source: the
+     * worldwide radar composite (tiles + basemap) and a date-line-split Cloud
+     * Cover frame (two GetMaps stitched on the device) both have no single
+     * document to keep. Such a slot cannot be re-derived locally, so
+     * image_page_ring_request_retransform() turns a request into a refetch
+     * instead of a pass that would skip every slot. Ring level, not per slot:
+     * every input that decides split-ness (weather location, clouds_zoom) and
+     * which radar source is in force already invalidates the whole ring, so a
+     * ring is never half retaining and half not. Written under the display
+     * lock with the slot it describes; cleared by image_page_ring_reset(). */
+    bool            no_src;
     /* Playback scratch — see "ring playback scratch" below. Three page-owned
      * 720x720 RGB565 PSRAM buffers, allocated on the first show of a visit and
      * freed with the ring. NULL = not allocated (or the alloc failed, which
@@ -2618,7 +2609,6 @@ static void ring_loading_sync(image_page_t *p)
         nina_empty_state_set_progress(p->loading, 0, 0);
         nina_empty_state_hide(p->loading);
         if (p->src == IMG_SRC_CLOUDS) {
-            marker_set_offset(p->src, marker_config_dx(app_config_get()));
             marker_set_visible(p->src, app_config_get()->clouds_show_location);
         } else if (p->src == IMG_SRC_RADAR) {
             marker_set_visible(p->src, marker_wanted(p->src, app_config_get()));
@@ -2756,6 +2746,7 @@ void image_page_ring_reset(image_page_t *p)
     atomic_store(&r->count, 0);
     r->play_idx = 0;
     r->shown    = NULL;
+    r->no_src   = false;            /* no slots left, so nothing lacks a source */
     /* Nothing left to re-transform; a request raised against the ring we just
      * freed would otherwise run one no-op pass later. Same for a deferred
      * teardown: the ring is gone, so honouring it later could only free a ring
@@ -2937,6 +2928,7 @@ static void ring_fill_slot(image_ring_t *r, int i, image_frame_t *fresh, uint32_
     r->slots[i].hash     = hash;
     r->slots[i].src      = src;      /* ownership moves into the slot */
     r->slots[i].src_len  = src_len;
+    if (src == NULL) r->no_src = true;   /* nothing to re-derive this ring from */
     r->slots[i].bake_gen = bake_gen;
     r->slots[i].stamp    = stamp;
     r->slots[i].role     = role;
@@ -3123,19 +3115,26 @@ void image_page_ring_request_retransform(image_page_t *p)
     image_ring_t *r = ring_of(p);
     if (!r) return;
 
-    /* THE WORLDWIDE RADAR SOURCE CANNOT BE RE-DERIVED. Its frames are composed
-     * on the device from a basemap plus rain tiles, so no slot retains
-     * compressed source bytes: the pass below would skip every one of them and
-     * leave the whole ring a generation behind, which parks playback on the
-     * frame that happens to be showing until the ring rolls over (2.5 h at the
-     * defaults) — and under Red Night that held frame keeps its pre-flip
-     * colours, on the one theme that must not put light on the field.
+    /* A RING WITH NOTHING RETAINED CANNOT BE RE-DERIVED. Two sources compose
+     * their frames on the device and so keep no compressed document per slot:
+     * the worldwide radar (basemap plus rain tiles) and a date-line-split Cloud
+     * Cover frame (two GetMaps stitched at the antimeridian). The pass below
+     * would skip every such slot and leave the whole ring a generation behind,
+     * which parks playback on the frame that happens to be showing until the
+     * ring rolls over (2.5 h at the defaults) — and under Red Night that held
+     * frame keeps its pre-flip colours, on the one theme that must not put
+     * light on the field.
      *
-     * So a re-transform request on that source is a REFETCH: drop the ring and
+     * So a re-transform request on such a ring is a REFETCH: drop the ring and
      * fetch again, which bakes the new theme in at insert. Ahead of the
      * generation bump on purpose — image_page_ring_invalidate() bumps the ring
-     * generation itself, and no slot survives to be judged stale. */
-    if (p->src == IMG_SRC_RADAR && radar_use_rainviewer(app_config_get())) {
+     * generation itself, and no slot survives to be judged stale.
+     *
+     * Reading the FLAG rather than naming a source is what makes this cover the
+     * split (whose ring is decided by the weather location, not by a setting
+     * this function can see) and any future device-composed source for free. An
+     * empty ring reads false and takes the ordinary pass, which is a no-op. */
+    if (r->no_src) {
         image_page_ring_invalidate(p);
         image_page_request_manual_fetch(p);
         return;
@@ -3537,16 +3536,15 @@ void image_page_config_apply_live(const app_config_t *prev, const app_config_t *
             if (en_cur && !en_prev) image_page_ensure_task_running(p);
             if (!en_cur && en_prev) image_page_disable(p);   /* clear warm, free the frame */
         }
-        /* Cloud Cover location marker: pure visibility and placement, no fetch.
-         * Deliberately NOT part of source_params_changed() — the frames are
-         * identical either way, so toggling it must never invalidate the ring.
-         * The placement also follows a location or zoom move that changes the
-         * date-line clamp; that move invalidates the ring on its own path. */
-        if (s == IMG_SRC_CLOUDS &&
-            (prev->clouds_show_location != cur->clouds_show_location ||
-             marker_config_dx(prev) != marker_config_dx(cur))) {
+        /* Cloud Cover location marker: pure visibility, no fetch and no
+         * placement. Deliberately NOT part of source_params_changed() — the
+         * frames are identical either way, so toggling it must never
+         * invalidate the ring. There is nothing else to follow: the marker is
+         * always at the panel centre, because the window is always centred on
+         * the location (a date-line crossing is split into two requests, never
+         * shifted). */
+        if (s == IMG_SRC_CLOUDS && prev->clouds_show_location != cur->clouds_show_location) {
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                marker_set_offset(IMG_SRC_CLOUDS, marker_config_dx(cur));
                 marker_set_visible(IMG_SRC_CLOUDS, cur->clouds_show_location);
                 bsp_display_unlock();
             }

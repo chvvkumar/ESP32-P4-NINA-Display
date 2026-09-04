@@ -327,9 +327,11 @@ static inline float clouds_half_m(uint8_t zoom)
 #define CLOUDS_MERC_MAX 20037508.0f
 
 /* How far east the box has to move, in metres, to keep it inside the world:
- * positive near 180W, negative near 180E, 0 everywhere else. The ONE piece of
- * clamp arithmetic; clouds_bbox() and clouds_centre_dx_px() both read it, so
- * the picture and the location marker can never disagree. */
+ * positive near 180W, negative near 180E, 0 everywhere else. Read only by
+ * clouds_bbox(), and after the date-line split (clouds_split() below) only
+ * ever a SUB-PIXEL amount: a crossing worth a whole pixel is served by two
+ * requests instead of by moving the box, so the location is the centre pixel
+ * at every longitude and the marker needs no offset. */
 static inline float clouds_clamp_shift_m(float lon, uint8_t zoom)
 {
     float cx = radar_wms_merc_x(lon);
@@ -337,20 +339,6 @@ static inline float clouds_clamp_shift_m(float lon, uint8_t zoom)
     if (cx - half < -CLOUDS_MERC_MAX) return -CLOUDS_MERC_MAX - (cx - half);
     if (cx + half >  CLOUDS_MERC_MAX) return  CLOUDS_MERC_MAX - (cx + half);
     return 0.0f;
-}
-
-/* Where the true location sits relative to the CENTRE of the frame, in pixels,
- * positive to the right. 0 unless the date-line clamp moved the box: the box
- * shifts but the location does not, so a marker drawn at the frame centre would
- * point at the wrong place (at zoom 5 a Wellington box shifts about 240 px).
- * @p lat is unused: only x is ever clamped. */
-static inline int clouds_centre_dx_px(float lat, float lon, uint8_t zoom)
-{
-    (void)lat;
-    float shift = clouds_clamp_shift_m(lon, zoom);
-    if (shift == 0.0f) return 0;
-    float m_per_px = 2.0f * clouds_half_m(zoom) / (float)CLOUDS_PX;
-    return (int)lroundf(-shift / m_per_px);
 }
 
 /* Square EPSG:3857 box centred on lat/lon, clamped into the world in x.
@@ -399,6 +387,81 @@ static inline void clouds_bbox_rounded(float lat, float lon, uint8_t zoom,
     const bool west_pinned = fminx <= -CLOUDS_MERC_MAX;
     const bool east_pinned = fmaxx >=  CLOUDS_MERC_MAX;
     radar_wms_square_pixels(minx, miny, maxx, maxy, CLOUDS_PX, CLOUDS_PX, west_pinned, east_pinned);
+}
+
+/* Where the CLOUDS_PX window sits on the world, in one or two pieces.
+ *
+ * parts == 1 is every ordinary location: box[0] is exactly what clouds_bbox()
+ * gives (its clamp shift included, which is then 0 or under half a pixel),
+ * px_x[0] == 0 and px_w[0] == CLOUDS_PX, so the single-request URL is byte for
+ * byte the string this header produced before the split existed.
+ *
+ * parts == 2 means the CENTRED window crosses +-180. Part 0 is the WEST half
+ * of the panel and ends exactly on the world edge; part 1 is the EAST half and
+ * starts exactly on the other world edge. The seam is the antimeridian, both
+ * halves are real satellite data, and the location is the centre pixel -- which
+ * is why the box is no longer shifted and the marker no longer offset. */
+typedef struct {
+    int   parts;              /* 1 or 2 */
+    float minx[2], maxx[2];   /* per-part x box, EPSG:3857 metres */
+    float miny, maxy;         /* shared y box, from clouds_bbox() */
+    int   px_x[2], px_w[2];   /* paste column and width in panel pixels */
+} clouds_split_t;
+
+/* Resolve the window for @p lat / @p lon at @p zoom. Never fails; @p s is
+ * always fully written.
+ *
+ * Only a GIBS row can ever be split: an EUMETView satellite is never the
+ * nearest one within clouds_half_m() of a world edge (its rows sit at 0 and
+ * 45.5 east, more than 85 degrees from either edge, against a widest box of
+ * ~1.76M m at zoom 5), and its GetMap shape is a different builder. Testing the
+ * provider HERE rather than at each caller is what guarantees the EUMETView
+ * path can never be handed a part.
+ *
+ * The degenerate case is a crossing worth less than a whole pixel: parts stays
+ * 1 and the box is clouds_bbox()'s, whose clamp shift is that same sub-pixel
+ * amount. So no split is ever one pixel wide, and clouds_bbox() keeps serving
+ * both the no-crossing and the sub-pixel-crossing paths unchanged. */
+static inline void clouds_split(float lat, float lon, uint8_t zoom, clouds_split_t *s)
+{
+    if (s == NULL) return;
+    const int   px   = CLOUDS_PX;
+    const float half = clouds_half_m(zoom);
+    const float mpp  = 2.0f * half / (float)px;      /* metres per pixel, both parts */
+    const float cx   = radar_wms_merc_x(lon);        /* NO clamp shift: centred */
+    int w0 = -1;
+    if (clouds_sat_for_lon(lon)->provider == CLOUDS_PROV_GIBS && mpp > 0.0f) {
+        if (cx + half > CLOUDS_MERC_MAX) {
+            /* East crossing: the panel's right end wraps to -180. */
+            w0 = px - (int)lroundf((cx + half - CLOUDS_MERC_MAX) / mpp);
+        } else if (cx - half < -CLOUDS_MERC_MAX) {
+            /* West crossing: the panel's left end wraps to +180. */
+            w0 = (int)lroundf((-CLOUDS_MERC_MAX - (cx - half)) / mpp);
+        }
+    }
+    if (w0 < 1 || w0 > px - 1) {
+        s->parts = 1;
+        clouds_bbox(lat, lon, zoom, &s->minx[0], &s->miny, &s->maxx[0], &s->maxy);
+        s->px_x[0] = 0;
+        s->px_w[0] = px;
+        s->minx[1] = 0.0f;
+        s->maxx[1] = 0.0f;
+        s->px_x[1] = 0;
+        s->px_w[1] = 0;
+        return;
+    }
+    const float cy = radar_wms_merc_y(lat);
+    s->parts   = 2;
+    s->miny    = cy - half;
+    s->maxy    = cy + half;
+    s->maxx[0] = CLOUDS_MERC_MAX;
+    s->minx[0] = CLOUDS_MERC_MAX - (float)w0 * mpp;
+    s->px_x[0] = 0;
+    s->px_w[0] = w0;
+    s->minx[1] = -CLOUDS_MERC_MAX;
+    s->maxx[1] = -CLOUDS_MERC_MAX + (float)(px - w0) * mpp;
+    s->px_x[1] = w0;
+    s->px_w[1] = px - w0;
 }
 
 /* ---- UTC calendar arithmetic (proleptic Gregorian, no localtime) ---- */
@@ -563,11 +626,68 @@ static inline bool clouds_eumet_frame_url(char *out, size_t sz, const clouds_sat
     return true;
 }
 
+/* GIBS GetMap for part @p i of @p sp. The GIBS URL shape only: an EUMETView
+ * satellite is never split (clouds_split() refuses it) and has its own builder,
+ * so this returns false rather than sending a GIBS request for one.
+ *
+ * WIDTH is the part width, HEIGHT is always CLOUDS_PX. The rounded box is
+ * widened for the GIBS square-or-wider-pixel rule through the same shared
+ * helper clouds_bbox_rounded() uses, with the part's PINNED side declared: a
+ * part of a split is edge-pinned on exactly one x side (part 0 on its east
+ * side, part 1 on its west), so the widening has to move the OTHER side or the
+ * seam would no longer land on the antimeridian.
+ *
+ * With sp->parts == 1 this is the single-request path: the box, the pin tests,
+ * WIDTH and HEIGHT are all identical to what clouds_bbox_rounded() produces, so
+ * the string is byte for byte the one this header sent before the split
+ * existed. Host-asserted (test_clouds_wms.c, "byte for byte unchanged"). */
+static inline bool clouds_frame_url_part(char *out, size_t sz, float lat, float lon,
+                                         uint8_t zoom, uint8_t ch, uint8_t basemap,
+                                         uint32_t stamp, const clouds_split_t *sp, int i)
+{
+    if (out == NULL || sz == 0 || sp == NULL) return false;
+    out[0] = '\0';
+    if (i < 0 || i >= sp->parts) return false;
+    (void)zoom;                 /* the box already carries it; kept so both URL
+                                 * builders read with the same parameters */
+    const clouds_sat_t *sat = clouds_sat_for_lon(lon);
+    if (sat->provider != CLOUDS_PROV_GIBS) return false;
+    char tstr[CLOUDS_TIME_MAX];
+    if (!clouds_time_format(tstr, sizeof(tstr), stamp)) return false;
+    long minx = (long)lroundf(sp->minx[i]);
+    long miny = (long)lroundf(sp->miny);
+    long maxx = (long)lroundf(sp->maxx[i]);
+    long maxy = (long)lroundf(sp->maxy);
+    const bool west_pinned = (sp->parts == 2) ? (i == 1) : (sp->minx[0] <= -CLOUDS_MERC_MAX);
+    const bool east_pinned = (sp->parts == 2) ? (i == 0) : (sp->maxx[0] >=  CLOUDS_MERC_MAX);
+    radar_wms_square_pixels(&minx, &miny, &maxx, &maxy, sp->px_w[i], CLOUDS_PX,
+                            west_pinned, east_pinned);
+    int n = snprintf(out, sz,
+                     CLOUDS_GIBS_BASE "wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0"
+                     "&REQUEST=GetMap&LAYERS=%s%s&CRS=EPSG:3857"
+                     "&BBOX=%ld,%ld,%ld,%ld&WIDTH=%d&HEIGHT=%d&FORMAT=image/jpeg&TIME=%s",
+                     clouds_sat_layer(sat, clouds_role(ch, lat, lon, stamp)),
+                     clouds_basemap_suffix(basemap),
+                     minx, miny, maxx, maxy,
+                     sp->px_w[i], CLOUDS_PX, tstr);
+    if (n < 0 || (size_t)n >= sz) {
+        out[0] = '\0';
+        return false;
+    }
+    return true;
+}
+
 /* GetMap URL for one frame, on whichever provider owns the satellite nearest
  * @p lon. @p stamp is the frame time in UTC seconds; it is formatted here
  * (never copied from a server string), so no query-splitting character can
  * reach the URL. Layer order: raster first, vector overlay after. Returns false
- * and writes "" when the result would not fit. */
+ * and writes "" when the result would not fit.
+ *
+ * THE SINGLE-REQUEST ENTRY POINT, and it stays that way: it builds part 0 only.
+ * A caller that wants a date-line crossing served correctly asks clouds_split()
+ * itself and, when it reports two parts, builds both with
+ * clouds_frame_url_part() (image_page_poll.c does). Everything else -- and
+ * every EUMETView location, which can never cross -- keeps calling this. */
 static inline bool clouds_frame_url(char *out, size_t sz, float lat, float lon,
                                     uint8_t zoom, uint8_t ch, uint8_t basemap,
                                     uint32_t stamp)
@@ -575,26 +695,13 @@ static inline bool clouds_frame_url(char *out, size_t sz, float lat, float lon,
     if (out == NULL || sz == 0) return false;
     out[0] = '\0';
     const clouds_sat_t *sat = clouds_sat_for_lon(lon);
-    clouds_role_t role = clouds_role(ch, lat, lon, stamp);
     if (sat->provider == CLOUDS_PROV_EUMET) {
-        return clouds_eumet_frame_url(out, sz, sat, role, lat, lon, zoom, basemap, stamp);
+        return clouds_eumet_frame_url(out, sz, sat, clouds_role(ch, lat, lon, stamp),
+                                      lat, lon, zoom, basemap, stamp);
     }
-    char tstr[CLOUDS_TIME_MAX];
-    if (!clouds_time_format(tstr, sizeof(tstr), stamp)) return false;
-    long minx, miny, maxx, maxy;
-    clouds_bbox_rounded(lat, lon, zoom, &minx, &miny, &maxx, &maxy);
-    int n = snprintf(out, sz,
-                     CLOUDS_GIBS_BASE "wms/epsg3857/best/wms.cgi?SERVICE=WMS&VERSION=1.3.0"
-                     "&REQUEST=GetMap&LAYERS=%s%s&CRS=EPSG:3857"
-                     "&BBOX=%ld,%ld,%ld,%ld&WIDTH=%d&HEIGHT=%d&FORMAT=image/jpeg&TIME=%s",
-                     clouds_sat_layer(sat, role), clouds_basemap_suffix(basemap),
-                     minx, miny, maxx, maxy,
-                     CLOUDS_PX, CLOUDS_PX, tstr);
-    if (n < 0 || (size_t)n >= sz) {
-        out[0] = '\0';
-        return false;
-    }
-    return true;
+    clouds_split_t sp;
+    clouds_split(lat, lon, zoom, &sp);
+    return clouds_frame_url_part(out, sz, lat, lon, zoom, ch, basemap, stamp, &sp, 0);
 }
 
 /* WMTS DescribeDomains REST URL for @p layer over [now-3h, now+1h], both ends

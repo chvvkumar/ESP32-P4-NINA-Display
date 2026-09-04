@@ -844,6 +844,65 @@ static bool anim_drop_incomplete(image_page_t *p, const app_config_t *cfg,
     return true;
 }
 
+/* Fetch a Cloud Cover frame whose CENTRED window crosses +-180, as TWO GetMaps
+ * pasted side by side into one panel-sized RGB565 buffer.
+ *
+ * The parts are fetched and decoded STRICTLY IN SEQUENCE and each transient is
+ * freed before the next one is asked for, so only one decode transient is ever
+ * alive alongside the canvas (see ANIM_DECODE_TRANSIENT_SPLIT_BYTES below).
+ *
+ * A part whose returned size is not the one that was asked for would misalign
+ * the seam, so it counts as a failure, the same rule the worldwide radar
+ * basemap applies. AND SO DOES A FAILURE OF EITHER PART: half a satellite
+ * picture over black is exactly the missing-tile artifact the holes gate exists
+ * to catch, the gate would reject it one step later anyway (after a ring slot,
+ * a bake and an insert had been spent on it), and dropping the whole frame is
+ * the existing contract -- anim_fetch_frame() returning false. The newest stamp
+ * is re-fetched on the next poll; history frames are optional by design.
+ *
+ * No compressed source is retained (there is no single document to retain).
+ * image_page_ring_add() hashes the pixels for dedupe instead, and the ring's
+ * no_src flag turns a later re-transform request into a refetch. */
+static bool clouds_fetch_split(image_page_t *p, const app_config_t *cfg,
+                               int i, const clouds_split_t *sp, image_frame_t *out)
+{
+    const int px = screen_size();
+    uint8_t *canvas = heap_caps_aligned_calloc(128, 1, (size_t)px * (size_t)px * 2,
+                                               MALLOC_CAP_SPIRAM);
+    if (canvas == NULL) {
+        ESP_LOGW(TAG, "%s: no PSRAM for the split canvas", p->name);
+        return false;
+    }
+    for (int k = 0; k < sp->parts; k++) {
+        char url[CLOUDS_URL_MAX];
+        if (!clouds_frame_url_part(url, sizeof(url), cfg->weather_lat, cfg->weather_lon,
+                                   cfg->clouds_zoom, cfg->clouds_channel, cfg->clouds_basemap,
+                                   s_anim[p->src].stamps[i], sp, k)) {
+            heap_caps_free(canvas);
+            return false;
+        }
+        image_frame_t part = {0};
+        esp_err_t err = image_fetch_custom(url, NULL, &part);
+        if (err != ESP_OK || part.buf == NULL ||
+            part.w != (uint16_t)sp->px_w[k] || part.h != (uint16_t)px) {
+            if (part.buf) heap_caps_free(part.buf);
+            heap_caps_free(canvas);
+            return false;
+        }
+        const size_t row = (size_t)sp->px_w[k] * 2;
+        for (int y = 0; y < px; y++) {
+            memcpy(canvas + ((size_t)y * (size_t)px + (size_t)sp->px_x[k]) * 2,
+                   part.buf + (size_t)y * row, row);
+        }
+        heap_caps_free(part.buf);            /* before the NEXT part is fetched */
+    }
+    out->buf      = canvas;
+    out->w        = (uint16_t)px;
+    out->h        = (uint16_t)px;
+    out->stamp_ms = esp_timer_get_time() / 1000;
+    return true;
+}
+
 /* Fetch history frame @p i as decoded pixels, whichever source serves this
  * configuration. The worldwide source composes its own frame from tiles and has
  * no single compressed document, so it hands back no retained source bytes:
@@ -879,6 +938,19 @@ static bool anim_fetch_frame(image_page_t *p, const app_config_t *cfg, const cha
         out->h = h;
         out->stamp_ms = esp_timer_get_time() / 1000;
         return true;
+    }
+    if (p->src == IMG_SRC_CLOUDS) {
+        /* A CENTRED Cloud Cover window that crosses +-180 cannot be served by
+         * one GetMap: the request would ask for pixels off the end of the
+         * world. Two requests, stitched at the antimeridian. Every other
+         * location reports one part and falls through to the single-request
+         * path below, byte for byte unchanged. */
+        clouds_split_t sp;
+        clouds_split(cfg->weather_lat, cfg->weather_lon, cfg->clouds_zoom, &sp);
+        if (sp.parts == 2) {
+            if (i >= s_anim[p->src].ntimes) return false;   /* same bound anim_frame_url applies */
+            return clouds_fetch_split(p, cfg, i, &sp, out);
+        }
     }
     char url[RADAR_WMS_URL_MAX];
     if (!anim_frame_url(p, cfg, token, i, url, sizeof(url))) return false;
@@ -975,6 +1047,16 @@ static void anim_rejudge_head(image_page_t *p, const app_config_t *cfg, uint32_t
  * every optional fetch was refused, the newest slot was a GIBS blank, and the
  * page froze on one frame. */
 #define ANIM_DECODE_TRANSIENT_HW_BYTES ((size_t)1024 * 1024)
+/* A DATE-LINE SPLIT frame is different again: the panel-sized canvas is already
+ * allocated and held while one part decodes, so the transient over the frame is
+ * a near-panel-wide RGB888 buffer (up to 1.5x a frame, since a part can be
+ * CLOUDS_PX-1 wide) plus that part's compressed download, not half a frame. The
+ * two parts never coexist -- clouds_fetch_split() frees each before fetching
+ * the next -- so this is one part, not two. Do NOT raise
+ * ANIM_DECODE_TRANSIENT_HW_BYTES to cover it: that figure was lowered
+ * deliberately (see above) and raising it would re-break every non-split
+ * location. */
+#define ANIM_DECODE_TRANSIENT_SPLIT_BYTES ((size_t)1900 * 1024)
 
 /* PSRAM headroom for one more animated frame, and the ONE place the ring is
  * allowed to shrink. Without it the ring grows until the largest free block no
@@ -999,8 +1081,17 @@ static bool anim_decode_headroom(image_page_t *p, bool newest)
      * in the page, not per fetched frame. Erring high here is
      * deliberate — it makes the headroom check reject slightly early rather than
      * let a decode fail. */
-    const size_t transient = (p->src == IMG_SRC_CLOUDS) ? ANIM_DECODE_TRANSIENT_HW_BYTES
-                                                        : ANIM_DECODE_TRANSIENT_BYTES;
+    size_t transient = ANIM_DECODE_TRANSIENT_BYTES;
+    if (p->src == IMG_SRC_CLOUDS) {
+        /* Same pure call the fetch makes (no allocation, no network), so the
+         * reserve and the fetch can never disagree about which shape this
+         * location is. */
+        const app_config_t *cfg = app_config_get();
+        clouds_split_t sp;
+        clouds_split(cfg->weather_lat, cfg->weather_lon, cfg->clouds_zoom, &sp);
+        transient = (sp.parts == 2) ? ANIM_DECODE_TRANSIENT_SPLIT_BYTES
+                                    : ANIM_DECODE_TRANSIENT_HW_BYTES;
+    }
     const size_t need = (size_t)screen_size() * screen_size() * 2 + transient;
     if (!newest) {
         if (heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM) >= need) return true;
