@@ -744,24 +744,60 @@ static void minute_words(int m, char *buf, size_t n) {
 }
 
 /**
- * Shrink the Evensong hour word to the column. TWELVE is 724 px and
- * ELEVEN 649 px at bodoni_black_150 against 620 px of column on square
- * (510 on the 720 round); scale the label uniformly instead of carrying
- * a second 150 KB face. Layout keeps the native box, so the only
- * visible cost is a slightly taller seam under the shrunk word.
+ * Scale a one-line label down to @p avail px when its text overruns.
+ * The layout box keeps its native size; only the drawing shrinks, from
+ * whatever transform pivot the label was given at build time. Clears the
+ * scale (LV_SCALE_NONE) when the text fits, so a shorter string restores
+ * the full face.
  */
-static void ev_fit_hour_word(void) {
-    if (!ev_w1 || !clock_root) return;
-    int32_t ls = lv_obj_get_style_text_letter_space(ev_w1, LV_PART_MAIN);
+static void fit_label_scale(lv_obj_t *lbl, int32_t avail)
+{
+    if (!lbl || avail <= 0) return;
+    const lv_font_t *f = lv_obj_get_style_text_font(lbl, LV_PART_MAIN);
+    int32_t ls = lv_obj_get_style_text_letter_space(lbl, LV_PART_MAIN);
     lv_point_t sz;
-    lv_text_get_size(&sz, lv_label_get_text(ev_w1), &lv_font_bodoni_black_150,
-                     ls, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    int32_t avail = screen_size()
-                  - lv_obj_get_style_pad_left(clock_root, LV_PART_MAIN)
-                  - lv_obj_get_style_pad_right(clock_root, LV_PART_MAIN);
+    lv_text_get_size(&sz, lv_label_get_text(lbl), f, ls, 0, LV_COORD_MAX,
+                     LV_TEXT_FLAG_NONE);
     int32_t scale = LV_SCALE_NONE;
-    if (avail > 0 && sz.x > avail) scale = avail * LV_SCALE_NONE / sz.x;
-    lv_obj_set_style_transform_scale(ev_w1, scale, 0);
+    if (sz.x > avail) scale = avail * LV_SCALE_NONE / sz.x;
+    lv_obj_set_style_transform_scale(lbl, scale, 0);
+}
+
+/** Content width of clock_root: the column every flex layout lays out in. */
+static int32_t root_avail(void)
+{
+    if (!clock_root) return 0;
+    return screen_size() - lv_obj_get_style_pad_left(clock_root, LV_PART_MAIN)
+                         - lv_obj_get_style_pad_right(clock_root, LV_PART_MAIN);
+}
+
+/**
+ * Broadside dateline: drop the four labels' letter space from 8 until the
+ * strings plus three 12 px gaps fit the column. Scaling would not help
+ * here, SPACE_BETWEEN has already overlapped the boxes by then.
+ */
+static void fit_broadside_dateline(void)
+{
+    if (!lbl_day || !lbl_date || !lbl_mday || !lbl_year) return;
+    lv_obj_t *lbls[4] = { lbl_day, lbl_date, lbl_mday, lbl_year };
+    const lv_font_t *f = lv_obj_get_style_text_font(lbl_day, LV_PART_MAIN);
+    int32_t avail = root_avail() - 3 * 12;
+    static const int32_t steps[] = { 8, 5, 3, 1 };
+    int32_t ls = steps[0];
+    for (size_t s = 0; s < sizeof(steps) / sizeof(steps[0]); s++) {
+        int32_t total = 0;
+        for (int i = 0; i < 4; i++) {
+            lv_point_t sz;
+            lv_text_get_size(&sz, lv_label_get_text(lbls[i]), f, steps[s], 0,
+                             LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+            total += sz.x;
+        }
+        ls = steps[s];
+        if (total <= avail) break;
+    }
+    for (int i = 0; i < 4; i++) {
+        lv_obj_set_style_text_letter_space(lbls[i], ls, 0);
+    }
 }
 
 /** Part-of-day words for the Evensong third line. */
@@ -935,6 +971,10 @@ static void build_layout_classic(void) {
 
     lbl_cond = make_label(weather_stack, &lv_font_overpass_27, CLK_CONDITION, 1, "--");
     lv_obj_set_style_pad_top(lbl_cond, 4, 0);
+    /* Long OWM descriptions (up to 545 px) plus the date stack can overrun
+     * the header row; fit_label_scale() shrinks from the right edge. */
+    lv_obj_set_style_transform_pivot_x(lbl_cond, LV_PCT(100), 0);
+    lv_obj_set_style_transform_pivot_y(lbl_cond, 0, 0);
     lbl_hilo = make_label(weather_stack, &lv_font_overpass_27, CLK_DIM, 1, "--");
 
     /* ── Rule 1 ── */
@@ -1270,6 +1310,10 @@ static void build_layout_broadside(void) {
 
     /* ── Condition line (sanitized to the thin_84 glyph range) ── */
     lbl_cond = make_label(clock_root, &lv_font_saira_thin_84, BS_BONE, 2, "");
+    /* "HEAVY INTENSITY RAIN" is 716 px against a 652 px column; no wrap
+     * here, so fit_label_scale() shrinks it from the top-left instead. */
+    lv_obj_set_style_transform_pivot_x(lbl_cond, 0, 0);
+    lv_obj_set_style_transform_pivot_y(lbl_cond, 0, 0);
 
     /* ── Now row: temp + HIGH/LOW block ── */
     lv_obj_t *now_row = make_container(clock_root);
@@ -1412,12 +1456,17 @@ static void build_layout_evensong(void) {
     lv_obj_set_style_pad_row(words, -24, 0);
 
     ev_w1 = make_label(words, &lv_font_bodoni_black_150, EV_PARCH, 1, "");
-    /* Scaled down from the top-left by ev_fit_hour_word() when the word
-     * overruns the column (TWELVE is 724 px at this face). */
+    /* Scaled down from the top-left by fit_label_scale() when the word
+     * overruns the column: TWELVE is 724 px and ELEVEN 649 px at this
+     * face against 620 px of column on square (510 on the 720 round). */
     lv_obj_set_style_transform_pivot_x(ev_w1, 0, 0);
     lv_obj_set_style_transform_pivot_y(ev_w1, 0, 0);
     ev_w2 = make_label(words, &lv_font_bodoni_ital_90, EV_PARCH, 1, "");
     lv_obj_set_style_pad_bottom(ev_w2, 24, 0);
+    /* "twenty-seven" is 558 px at bodoni_ital_90, wider than the 510 px
+     * column on the round 720 panel; fit_label_scale() shrinks it too. */
+    lv_obj_set_style_transform_pivot_x(ev_w2, 0, 0);
+    lv_obj_set_style_transform_pivot_y(ev_w2, 0, 0);
     ev_w3 = make_label(words, &lv_font_bodoni_ital_44, EV_BRASS, 1, "");
     lv_obj_set_style_pad_top(ev_w3, 6, 0);
 
@@ -1490,7 +1539,9 @@ static void build_layout_evensong(void) {
  */
 lv_obj_t *make_blu_callout(int x, int y, const lv_font_t *font) {
     lv_obj_t *row = make_container(clock_root);
-    lv_obj_set_size(row, 218, LV_SIZE_CONTENT);
+    /* "H 100 L 100" / "WIND NW 100" are 183 px; the 6 px dot, 26 px leader
+     * and two 8 px gaps leave 192 px of a 240 px row for the label. */
+    lv_obj_set_size(row, 240, LV_SIZE_CONTENT);
     lv_obj_set_pos(row, x, y);
     lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START,
@@ -1777,7 +1828,8 @@ static void build_layout_transit(void) {
 
     met_sun_lbl = make_label(forecast_row, &lv_font_overpass_27, MET_DIM, 1,
                              "SUNRISE");
-    lv_obj_set_width(met_sun_lbl, 120);
+    /* "SUNRISE" at overpass_27 letter space 1 is 122 px; 120 wrapped mid-word. */
+    lv_obj_set_width(met_sun_lbl, 132);
     lv_obj_set_style_text_align(met_sun_lbl, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_add_flag(met_sun_lbl, LV_OBJ_FLAG_HIDDEN);
     reg_dim_lbl(met_sun_lbl);
@@ -1866,8 +1918,9 @@ static void build_layout_network(void) {
         met_cdots[k] = make_station_dot(forecast_row, c_cx[k], 372, 10, 4,
                                         MET_BLUE);
         lv_obj_t *cell = make_container(forecast_row);
-        lv_obj_set_size(cell, 90, LV_SIZE_CONTENT);
-        lv_obj_set_pos(cell, c_cx[k] - 45, 393);
+        /* "NW 100" is 100 px at overpass_27; 90 wrapped it. */
+        lv_obj_set_size(cell, 104, LV_SIZE_CONTENT);
+        lv_obj_set_pos(cell, c_cx[k] - 52, 393);
         lv_obj_set_flex_flow(cell, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(cell, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
@@ -1904,8 +1957,9 @@ static void build_layout_network(void) {
         forecast_temp_lbls[i] = make_label(forecast_row,
                                            &lv_font_hanken_bold_44,
                                            MET_INK, 0, "--");
-        lv_obj_set_pos(forecast_temp_lbls[i], 534, sy - 15);
-        lv_obj_set_width(forecast_temp_lbls[i], 86);
+        /* "100 degrees" is 92 px at hanken_bold_44; keep the right edge at 620. */
+        lv_obj_set_pos(forecast_temp_lbls[i], 526, sy - 15);
+        lv_obj_set_width(forecast_temp_lbls[i], 94);
         lv_obj_set_style_text_align(forecast_temp_lbls[i],
                                     LV_TEXT_ALIGN_RIGHT, 0);
     }
@@ -2167,7 +2221,7 @@ static void restyle_forecast(const weather_data_t *wd, bool red_night) {
                 int row = m5_row_of(sr);
                 int mx = (m5_sx[sr - 1] + m5_sx[sr]) / 2;
                 lv_obj_set_pos(met_sun_dia, mx - 8, m5_line_y[row]);
-                lv_obj_set_pos(met_sun_lbl, mx - 60, m5_tag_y[row]);
+                lv_obj_set_pos(met_sun_lbl, mx - 66, m5_tag_y[row]);  /* half of 132 px width */
                 lv_obj_remove_flag(met_sun_dia, LV_OBJ_FLAG_HIDDEN);
                 lv_obj_remove_flag(met_sun_lbl, LV_OBJ_FLAG_HIDDEN);
             } else {
@@ -2430,11 +2484,12 @@ void clock_page_update(void) {
      * digital format) */
     if (s_layout == 3 && ev_w1) {
         lv_label_set_text(ev_w1, ev_hour_words[tm_now.tm_hour % 12]);
-        ev_fit_hour_word();
+        fit_label_scale(ev_w1, root_avail());
         if (ev_w2) {
             char wbuf[24];
             minute_words(tm_now.tm_min, wbuf, sizeof(wbuf));
             lv_label_set_text(ev_w2, wbuf);
+            fit_label_scale(ev_w2, root_avail());
         }
         if (ev_w3) {
             lv_label_set_text(ev_w3, part_of_day_words(tm_now.tm_hour));
@@ -2514,6 +2569,8 @@ void clock_page_update(void) {
         snprintf(year_buf, sizeof(year_buf), "%d", tm_now.tm_year + 1900);
         lv_label_set_text(lbl_year, year_buf);
     }
+
+    if (s_layout == 2) fit_broadside_dateline();
 
     /* Console unit-bearing captions */
     if (console_caps[0]) {
@@ -2627,6 +2684,15 @@ void clock_page_update(void) {
                 fit_cond_one_line(lbl_cond, &lv_font_overpass_27,
                                   SCREEN_ROUND ? &lv_font_overpass_27
                                                : &lv_font_overpass_16);
+            }
+            if (s_layout == 2) {
+                fit_label_scale(lbl_cond, root_avail());
+            }
+            if (s_layout == 0 && lbl_day) {
+                /* Room right of the date stack (lbl_day's parent), less a 16 px gap */
+                lv_obj_update_layout(lbl_day);
+                fit_label_scale(lbl_cond, root_avail()
+                                - lv_obj_get_width(lv_obj_get_parent(lbl_day)) - 16);
             }
         }
     }
