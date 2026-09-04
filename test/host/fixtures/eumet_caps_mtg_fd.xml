@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- TRIMMED from the live EUMETView workspace-scoped GetCapabilities
+     https://view.eumetsat.int/geoserver/mtg_fd/wms?service=WMS&amp;version=1.3.0&amp;request=GetCapabilities
+     captured 2026-09-03 (34742 B). The three <Layer> elements below are
+     VERBATIM from that document, headers and unused layers removed. Note
+     what is real here and must stay real: names are BARE, with no workspace
+     prefix on them anywhere in the document, the default= attribute has no
+     millisecond fraction while the extent text after the tag does, sibling
+     layers default to different grids (19:40 / 19:30 / 19:45, the last one off
+     the ten-minute grid the other two publish on), and the
+     <Style> inside ir105_hrfi carries a <Name> that must not be mistaken
+     for a layer name. -->
+<WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms">
+  <Capability>
+    <Layer>
+      <Title>mtg_fd</Title>
+      <Layer queryable="1" opaque="0">
+        <Name>ir105_hrfi</Name>
+        <Title>FCI HRFI IR10.5 μm Image - MTG-I - 0 degree</Title>
+        <Abstract>Rectified (level 1c) Meteosat FCI full disk image data in high spatial resolution (1km). Level 1c image data corresponds to the geolocated and radiometrically pre-processed image data, ready for further processing, e.g. the extraction of meteorological products. Any spacecraft-specific effects have been removed, and in particular, linearisation and equalisation of the image radiometry have been performed for all FCI channels. The onboard blackbody data has been processed. Both radiometric and geometric quality control information is included.</Abstract>
+        <KeywordList>
+          <Keyword>mtg_fd_ir105_hrfi</Keyword>
+          <Keyword>WCS</Keyword>
+          <Keyword>ImageMosaic</Keyword>
+        </KeywordList>
+        <CRS>EPSG:4326</CRS>
+        <CRS>CRS:84</CRS>
+        <EX_GeographicBoundingBox>
+          <westBoundLongitude>-70.0</westBoundLongitude>
+          <eastBoundLongitude>70.0</eastBoundLongitude>
+          <southBoundLatitude>-70.0</southBoundLatitude>
+          <northBoundLatitude>70.0</northBoundLatitude>
+        </EX_GeographicBoundingBox>
+        <BoundingBox CRS="CRS:84" minx="-70.0" miny="-70.0" maxx="70.0" maxy="70.0"/>
+        <BoundingBox CRS="EPSG:4326" minx="-70.0" miny="-70.0" maxx="70.0" maxy="70.0"/>
+        <Dimension name="time" default="2026-09-03T19:40:00Z" units="ISO8601" nearestValue="1">2024-09-23T00:00:00.000Z/2026-09-03T19:40:00.000Z/PT10M</Dimension>
+        <Style>
+          <Name>mtg_fd_ir105_hrfi_grayscale</Name>
+          <Title>SLD MTG HRFI IR 10.5 Style - Grayscale</Title>
+          <LegendURL width="640" height="80">
+            <Format>image/png</Format>
+            <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://view.eumetsat.int/geoserver/mtg_fd/ows?service=WMS&amp;version=1.3.0&amp;request=GetLegendGraphic&amp;format=image%2Fpng&amp;width=640&amp;height=80&amp;layer=ir105_hrfi"/>
+          </LegendURL>
+        </Style>
+        <Style>
+          <Name>mtg_fd_ir105_hrfi_style_02</Name>
+          <Title>SLD MTG HRFI IR 10.5 Style - 02</Title>
+          <LegendURL width="640" height="80">
+            <Format>image/png</Format>
+            <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://view.eumetsat.int/geoserver/mtg_fd/ows?service=WMS&amp;version=1.3.0&amp;request=GetLegendGraphic&amp;format=image%2Fpng&amp;width=640&amp;height=80&amp;layer=ir105_hrfi&amp;style=mtg_fd_ir105_hrfi_style_02"/>
+          </LegendURL>
+        </Style>
+        <Style>
+          <Name>mtg_fd_ir105_hrfi_style_01</Name>
+          <Title>SLD MTG HRFI IR 10.5 Style - 01</Title>
+          <LegendURL width="640" height="80">
+            <Format>image/png</Format>
+            <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://view.eumetsat.int/geoserver/mtg_fd/ows?service=WMS&amp;version=1.3.0&amp;request=GetLegendGraphic&amp;format=image%2Fpng&amp;width=640&amp;height=80&amp;layer=ir105_hrfi&amp;style=mtg_fd_ir105_hrfi_style_01"/>
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1" opaque="0">
+        <Name>rgb_geocolour</Name>
+        <Title>Geo Colour RGB - MTG-I - 0 degree</Title>
+        <Abstract>Geo Colour RGB - MTG - 0 degree</Abstract>
+        <KeywordList>
+          <Keyword>mtg_fd_rgb_geocolour</Keyword>
+          <Keyword>WCS</Keyword>
+          <Keyword>ImageMosaic</Keyword>
+        </KeywordList>
+        <CRS>EPSG:4326</CRS>
+        <CRS>CRS:84</CRS>
+        <EX_GeographicBoundingBox>
+          <westBoundLongitude>-81.2777938842773</westBoundLongitude>
+          <eastBoundLongitude>81.2807235717773</eastBoundLongitude>
+          <southBoundLatitude>-77.3506393432617</southBoundLatitude>
+          <northBoundLatitude>77.3563919067383</northBoundLatitude>
+        </EX_GeographicBoundingBox>
+        <BoundingBox CRS="CRS:84" minx="-81.2777938842773" miny="-77.3506393432617" maxx="81.2807235717773" maxy="77.3563919067383"/>
+        <BoundingBox CRS="EPSG:4326" minx="-77.3506393432617" miny="-81.2777938842773" maxx="77.3563919067383" maxy="81.2807235717773"/>
+        <Dimension name="time" default="2026-09-03T19:30:00Z" units="ISO8601" nearestValue="1">2024-09-23T00:00:00.000Z/2026-09-03T19:30:00.000Z/PT10M</Dimension>
+        <Style>
+          <Name>raster</Name>
+          <Title>A simple default style</Title>
+          <Abstract>A sample style for rasters</Abstract>
+          <LegendURL width="20" height="20">
+            <Format>image/png</Format>
+            <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://view.eumetsat.int/geoserver/mtg_fd/ows?service=WMS&amp;version=1.3.0&amp;request=GetLegendGraphic&amp;format=image%2Fpng&amp;width=20&amp;height=20&amp;layer=rgb_geocolour"/>
+          </LegendURL>
+        </Style>
+      </Layer>
+      <Layer queryable="1" opaque="0">
+        <Name>li_afa</Name>
+        <Title>LI Accumulated Flash Area - MTG-I - 0 degree</Title>
+        <Abstract>LI Level 2 Accumulated Flash Area (AFA) provides the user with data about flash mapping by using the area covered by the optical emission of each flash in LI Level 2 Lightning Flashes (LFL). It is important to keep in mind that each flash is treated as a flat (uniform) optical emission in this data. Accumulated Flash Area allows one to monitor the regions within a cloud top from which lightning-related optical emissions over 30 sec are emerging and accumulating and to know the number of flashes that were observed within the FCI grid pixels composing those regions. For example, from the Accumulated Flash Area, one can derive the flash rate for each pixel of the FCI 2km grid. This is a considerable improvement compared to the simple description of the flash using the variable flash_footprint available in Lightning Flashes.</Abstract>
+        <KeywordList>
+          <Keyword>mtg_fd_li_afa</Keyword>
+          <Keyword>WCS</Keyword>
+          <Keyword>ImageMosaic</Keyword>
+        </KeywordList>
+        <CRS>EPSG:4326</CRS>
+        <CRS>CRS:84</CRS>
+        <EX_GeographicBoundingBox>
+          <westBoundLongitude>-70.0</westBoundLongitude>
+          <eastBoundLongitude>70.0</eastBoundLongitude>
+          <southBoundLatitude>-70.0</southBoundLatitude>
+          <northBoundLatitude>70.0</northBoundLatitude>
+        </EX_GeographicBoundingBox>
+        <BoundingBox CRS="CRS:84" minx="-70.0" miny="-70.0" maxx="70.0" maxy="70.0"/>
+        <BoundingBox CRS="EPSG:4326" minx="-70.0" miny="-70.0" maxx="70.0" maxy="70.0"/>
+        <Dimension name="time" default="2026-09-03T19:45:00Z" units="ISO8601" nearestValue="1">2025-05-30T15:00:00.000Z/2026-09-03T19:45:00.000Z/PT5M</Dimension>
+        <Style>
+          <Name>mtg_li_afa</Name>
+          <Title>Raster style with custom legend for MTG LI AFA.</Title>
+          <LegendURL width="640" height="80">
+            <Format>image/png</Format>
+            <OnlineResource xmlns:xlink="http://www.w3.org/1999/xlink" xlink:type="simple" xlink:href="https://view.eumetsat.int/geoserver/mtg_fd/ows?service=WMS&amp;version=1.3.0&amp;request=GetLegendGraphic&amp;format=image%2Fpng&amp;width=640&amp;height=80&amp;layer=li_afa"/>
+          </LegendURL>
+        </Style>
+      </Layer>
+    </Layer>
+  </Capability>
+</WMS_Capabilities>

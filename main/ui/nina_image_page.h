@@ -150,7 +150,12 @@ bool     image_page_config_enabled(const app_config_t *c, image_src_t src);
 bool     image_page_config_overlay(const app_config_t *c, image_src_t src);
 bool     image_page_config_crop(const app_config_t *c, image_src_t src);
 uint32_t image_page_interval_ms(image_page_t *p);            /* live config, clamped; Moon: 3000 while the clock is invalid */
-void     image_page_label(image_page_t *p, char *out, size_t sz);   /* region name / "Moon" / band label / "Custom" / "Radar <token>" / "Cloud Cover <channel>" */
+/* Caption for the source: region name / "Moon" / band label / "Custom" /
+ * "Radar <token>" / "<satellite> <product>" for Cloud Cover. */
+void     image_page_label(image_page_t *p, char *out, size_t sz);
+/* Same, for the frame at UTC second @p stamp (0 = current). Cloud Cover names
+ * the product THAT frame used, which changes across dusk within one loop. */
+void     image_page_label_at(image_page_t *p, uint32_t stamp, char *out, size_t sz);
 /* Radar site token for THIS fetch, resolved fresh every time and never
  * persisted (a poll task must not write config): an explicit radar_token wins,
  * else the WSR-88D site nearest the configured weather location, else the
@@ -207,9 +212,14 @@ void image_page_set_error(image_page_t *p, const char *msg);   /* stores error_m
  *
  * Calls nav_arbiter_notify_content_ready() when a frame lands on the visible
  * page, so the slideshow dwell starts once the picture is up (same contract as
- * image_page_commit_frame). */
+ * image_page_commit_frame).
+ *
+ * @p role is which product the frame was drawn from (clouds_role_t on the
+ * Clouds page, 0 on every other source). The two neighbour-comparison quality
+ * gates only pair slots carrying the SAME role, so a loop that mixes a visible
+ * and an infrared frame through dusk is never judged across the change. */
 void image_page_ring_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen,
-                         uint8_t *src, size_t src_len, uint32_t stamp);
+                         uint8_t *src, size_t src_len, uint32_t stamp, uint8_t role);
 /* Re-derive every resident frame from its retained compressed bytes under the
  * CURRENT bake (radar crop / dark mode) and theme (Red Night). No network.
  * Request from any task (sets a flag + wakes the poller); the work runs on the
@@ -231,15 +241,17 @@ bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp);   /* lock-free;
 /* Run @p fn on the pixels of the resident frame nearest in time to @p stamp
  * (a different stamp preferred over the same one; current bake only) with the
  * display lock held for the duration, so the slot cannot be freed under it.
+ * Only a slot of the SAME @p role qualifies (see image_page_ring_add).
  * Returns fn's result, or false when the ring has no usable neighbour. */
-bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
+bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp, uint8_t role,
                                     bool (*fn)(const uint16_t *ref, int w, int h, void *arg),
                                     void *arg);
 /* Re-judge the HEAD slot (index 0, the newest) with @p fn — the one frame the
  * insert gate cannot judge, because every page entry frees the ring and the head
  * lands in it with no neighbour. @p fn is handed the NEIGHBOUR's pixels and, as
  * its `arg`, an image_frame_t view of the head slot, so the caller reuses its
- * insert-time adapter unchanged; the display lock is held for the duration.
+ * insert-time adapter unchanged; the display lock is held for the duration. The
+ * neighbour is picked with the head's OWN role, so no cross-product compare.
  * Returns the head's stamp when fn says the head is bad (feed it to
  * image_page_ring_drop_stamp()), 0 otherwise. */
 uint32_t image_page_ring_judge_head(image_page_t *p,

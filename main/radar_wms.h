@@ -136,6 +136,36 @@ static inline void radar_wms_pixel_size(float xspan_m, float yspan_m, int *w, in
     if (h) *h = hh;
 }
 
+/* GIBS renders a GetMap at a very coarse level whenever the requested box's
+ * VERTICAL metres-per-pixel is coarser than the horizontal by more than about
+ * 0.001 m/px (whole-metre BBOX rounding can land on the wrong side of that by
+ * itself). Widens the box, in whole metres, until
+ * (maxx-minx)*@p h >= (maxy-miny)*@p w: on the x side that is not pinned to a
+ * world/window edge when only one side is pinned, on maxx when neither side
+ * is pinned, and by trimming maxy when both x sides are pinned (a box that
+ * already spans the full window/world in x, so there is no x room left).
+ * Capped at 8 steps, one whole-metre rounding error is at most a couple of
+ * steps. Shared by rainviewer_basemap_url() (radar's worldwide basemap) and
+ * clouds_bbox_rounded() (clouds_wms.h) so the two call sites the trap was
+ * found on cannot drift apart; see rainviewer.h for the measured GIBS sweep
+ * that established the 0.001 m/px threshold. */
+static inline void radar_wms_square_pixels(long *minx, long *miny, long *maxx, long *maxy,
+                                           int w, int h, bool west_pinned, bool east_pinned)
+{
+    if (minx == NULL || miny == NULL || maxx == NULL || maxy == NULL) return;
+    for (int i = 0; i < 8; i++) {
+        if ((int64_t)(*maxx - *minx) * (int64_t)h >=
+            (int64_t)(*maxy - *miny) * (int64_t)w) break;
+        if (west_pinned && east_pinned) {
+            (*maxy)--;
+        } else if (east_pinned) {
+            (*minx)--;
+        } else {
+            (*maxx)++;
+        }
+    }
+}
+
 /* Lowercase a validated token into @p out (sz >= 16). false when the token fails
  * radar_token_valid(): that is the same alphabet ban the RIDGE builder applies, and
  * it also rules out any URL surgery through the site layer name. */
@@ -301,9 +331,45 @@ static inline const char *radar_wms_find(const char *hay, size_t len, const char
     return NULL;
 }
 
+/* Byte range of the <Layer> whose <Name> is EXACTLY @p layer_name in a WMS
+ * GetCapabilities body: *begin just past "</Name>", *end at whichever of the
+ * next "<Layer" or "</Layer>" comes first (or the body end).
+ *
+ * The exact-name match and that bound are the whole correctness of every
+ * per-layer read built on this: one workspace document holds siblings whose
+ * dimensions differ (measured 2026-09-03 in mtg_fd, some layers on a 10-minute
+ * grid and others on a 15-minute one), so a scan that took the first matching
+ * element in the document would answer with a neighbour's data. Bounded by
+ * @p xml_len throughout: the body needs no NUL terminator. */
+static inline bool radar_wms_layer_bounds(const char *xml, size_t xml_len,
+                                          const char *layer_name,
+                                          const char **begin, const char **end)
+{
+    if (xml == NULL || layer_name == NULL || begin == NULL || end == NULL) return false;
+
+    char needle[64];
+    int nn = snprintf(needle, sizeof(needle), "<Name>%s</Name>", layer_name);
+    if (nn < 0 || (size_t)nn >= sizeof(needle)) return false;
+
+    const char *p = radar_wms_find(xml, xml_len, needle);
+    if (p == NULL) return false;
+    p += (size_t)nn;
+
+    const char *e = xml + xml_len;
+    size_t rem = (size_t)(e - p);
+    const char *lc = radar_wms_find(p, rem, "</Layer>");
+    const char *lo = radar_wms_find(p, rem, "<Layer");
+    if (lc != NULL && lc < e) e = lc;
+    if (lo != NULL && lo < e) e = lo;
+
+    *begin = p;
+    *end = e;
+    return true;
+}
+
 /* Parse the enumerated TIME list of `layer_name` from a GetCapabilities body.
- * Locates "<Name>" + layer_name + "</Name>", then, within that layer (up to the next
- * "<Layer" or "</Layer>"), the next "<Dimension" whose attributes contain name="time",
+ * Bounds the layer with radar_wms_layer_bounds(), then finds, within it, the next
+ * "<Dimension" whose attributes contain name="time",
  * then the text between its '>' and "</Dimension>": a comma-separated ASCENDING list of
  * ISO stamps (real shape 2026-08-17: <Dimension name="time" default="..." units="ISO8601"
  * nearestValue="1">stamp,stamp,...</Dimension>, entries like 2026-08-17T20:50:22.000Z).
@@ -315,23 +381,10 @@ static inline const char *radar_wms_find(const char *hay, size_t len, const char
 static inline int radar_wms_parse_times(const char *xml, size_t xml_len, const char *layer_name,
                                         char (*out)[RADAR_WMS_TIME_MAX], int max_out)
 {
-    if (xml == NULL || layer_name == NULL || out == NULL || max_out <= 0) return 0;
+    if (out == NULL || max_out <= 0) return 0;
 
-    char needle[64];
-    int nn = snprintf(needle, sizeof(needle), "<Name>%s</Name>", layer_name);
-    if (nn < 0 || (size_t)nn >= sizeof(needle)) return 0;
-
-    const char *p = radar_wms_find(xml, xml_len, needle);
-    if (p == NULL) return 0;
-    p += (size_t)nn;
-
-    /* Bound the search to this layer so a sibling's dimension is never read. */
-    const char *end = xml + xml_len;
-    size_t rem = (size_t)(end - p);
-    const char *lc = radar_wms_find(p, rem, "</Layer>");
-    const char *lo = radar_wms_find(p, rem, "<Layer");
-    if (lc != NULL && lc < end) end = lc;
-    if (lo != NULL && lo < end) end = lo;
+    const char *p, *end;
+    if (!radar_wms_layer_bounds(xml, xml_len, layer_name, &p, &end)) return 0;
 
     const char *content = NULL;
     size_t clen = 0;

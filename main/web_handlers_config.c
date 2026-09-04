@@ -623,6 +623,8 @@ static const backup_field_t s_backup_fields[] = {
     {"radar_frames",               "Radar Animation Length","Radar", false, false},
     {"radar_dark_mode",            "Radar Map Appearance", "Radar", false, false},
     {"radar_map_style",            "Radar Map Style",      "Radar", false, false},
+    {"radar_zoom",                 "Radar Area (worldwide)","Radar", false, false},
+    {"radar_palette",              "Radar Rain Colours",   "Radar", false, false},
     /* Clouds page (v66). All five are SETTINGS_TABLE rows; same reasoning as
      * the radar block above. */
     {"clouds_enabled",             "Cloud Cover Page Enabled",  "Cloud Cover", false, false},

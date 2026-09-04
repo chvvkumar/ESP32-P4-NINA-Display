@@ -17,7 +17,13 @@
  * Rate limiting is the caller's job (call once per outage episode); the module
  * additionally suppresses any call made within 10 s of the previous one as a
  * guard against future misuse.
+ *
+ * The module also answers the one cheap question the UI asks about the link
+ * itself: net_sta_has_ip(), used by the loading and connecting placeholders to
+ * say "Waiting for WiFi" instead of naming a source they cannot reach yet.
  */
+
+#include <stdbool.h>
 
 /**
  * @brief Probe the local network and log a one-line outage verdict.
@@ -37,3 +43,17 @@
  *                    Used only in the log line; may be NULL.
  */
 void net_diag_log_outage(const char *failed_host);
+
+/**
+ * @brief Does the station interface currently hold an IPv4 address?
+ *
+ * Reads the WIFI_STA_DEF netif's IP info and reports whether the address is
+ * non-zero. No event handler, no cached state: the call is an
+ * esp_netif_get_ip_info() struct copy, so it is cheap enough to run on every
+ * placeholder refresh. A missing handle (radio not up yet) reads as false.
+ *
+ * Safe to call from any task, display lock held or not; makes no LVGL call.
+ *
+ * @return true when the station link has an IPv4 address, false otherwise.
+ */
+bool net_sta_has_ip(void);

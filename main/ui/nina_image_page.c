@@ -15,6 +15,7 @@
 #include "nina_image_page_internal.h"  /* caption style + the two overlay builders */
 #include "nina_wait_overlay.h"
 #include "nina_empty_state.h"
+#include "net_diag.h"
 #include "nina_nav_arbiter.h"          /* nav_arbiter_notify_content_ready */
 #include "nina_dashboard.h"            /* nina_dashboard_set_image_page_enabled (config apply, B5) */
 #include "nina_dashboard_internal.h"   /* screen_size(), OUTER_PADDING, current_theme, PAGE_IDX_IMG_* */
@@ -25,7 +26,8 @@
 #include "moon_interaction.h"
 #include "radar_sites.h"               /* radar_site_nearest (token resolution) */
 #include "radar_play.h"                /* ring size, dedupe hash, playback cursor */
-#include "clouds_wms.h"                /* clouds_channel_label (page caption) */
+#include "clouds_wms.h"                /* clouds_caption (page caption) */
+#include "rainviewer.h"                /* radar_use_rainviewer (which source serves the radar page) */
 #if CONFIG_NINA_FAMILY_ROUND
 #include "ui_arclabel.h"               /* ui_arclabel_set_text (round rim caption band refit) */
 #endif
@@ -369,22 +371,39 @@ void image_page_caption_style(lv_obj_t *lbl)
     lv_obj_set_style_pad_bottom(lbl, 3,                0);
 }
 
-/* ─────────────────── Cloud Cover location marker ───────────────────
- * The Clouds frames are fetched with a bbox centred exactly on
- * weather_lat/weather_lon (clouds_bbox() in clouds_wms.h), and every image on
- * this page is scaled to the panel WIDTH and vertically centred
- * (see center_image_xy / swap_borrowed_buf), so the frame centre is ALWAYS the
- * screen centre and lv_obj_center() on the page container is the location.
- * Clouds never crops (image_page_config_crop) and has no flip/rotate, so no
- * transform can move it off centre.
+/* ─────────────────── location marker (Clouds, worldwide Radar) ───────────────────
+ * The Clouds frames AND the worldwide radar window are both centred exactly on
+ * weather_lat/weather_lon (clouds_bbox() in clouds_wms.h, rainviewer_window()
+ * in rainviewer.h), and every image on these pages is scaled to the panel WIDTH
+ * and vertically centred (see center_image_xy / swap_borrowed_buf), so the
+ * frame centre is ALWAYS the screen centre. Neither page crops
+ * (image_page_config_crop) and neither has a flip/rotate, so no transform can
+ * move the picture. The location is therefore ALWAYS the screen centre, on
+ * both pages, at every longitude: a Cloud Cover window that would cross the
+ * date line is served by TWO GetMaps stitched at the antimeridian
+ * (clouds_split() in clouds_wms.h) rather than by shifting the box, so there
+ * is no offset to compensate for and no offset helper. lv_obj_center() in
+ * marker_create() is the whole placement.
  *
- * One instance only (the Clouds page is created once and never destroyed —
- * optional_page_set_enabled hides it instead), hence a single file static
- * rather than a field on every image_page_t. Created as the LAST child of the
- * page container so it draws above both crossfade images AND the overlay bar,
- * and it is never a target of the crossfade opacity anim, which runs on the two
- * lv_image objects only. Not CLICKABLE, so taps pass through to the page. */
-static lv_obj_t *s_clouds_marker;   /* NULL until the Clouds page is created */
+ * One instance per source (each page is created once and never destroyed —
+ * optional_page_set_enabled hides it instead), hence a file-static array rather
+ * than a field on every image_page_t. Created as the LAST child of the page
+ * container so it draws above both crossfade images AND the overlay bar, and it
+ * is never a target of the crossfade opacity anim, which runs on the two
+ * lv_image objects only. Not CLICKABLE, so taps pass through to the page.
+ * NULL for every source that never builds one, and every use is guarded. */
+static lv_obj_t *s_marker[IMG_SRC_COUNT];   /* NULL until that page is created */
+
+/* True when THIS source draws a location marker at all. */
+static inline bool marker_wanted(image_src_t src, const app_config_t *c)
+{
+    if (src == IMG_SRC_CLOUDS) return true;
+    /* The worldwide radar window is centred on the same location, and the
+     * picture has no other landmark at that scale, so the marker is always on
+     * for it. The US radar sources are centred on a radar site, not on the
+     * user, so they get none. */
+    return src == IMG_SRC_RADAR && radar_use_rainviewer(c);
+}
 
 /* Colour the ring and the centre dot from the active theme. Red Night must emit
  * only red or black (same rule as image_page_caption_style), so both parts take the
@@ -392,21 +411,22 @@ static lv_obj_t *s_clouds_marker;   /* NULL until the Clouds page is created */
  * with a white dot, which keeps the marker legible whatever the accent's
  * luminance. The 2 px black outline on both parts carries it over white cloud
  * tops as well as dark terrain. Display lock held by the caller. */
-static void marker_apply_theme(void)
+static void marker_apply_theme(image_src_t src)
 {
-    if (!s_clouds_marker) return;
+    lv_obj_t *m = s_marker[src];
+    if (!m) return;
     const theme_t *th = current_theme;
     bool red = theme_is_red_night(th);
     lv_color_t ring = red ? lv_color_hex(th->text_color) : lv_color_hex(th->progress_color);
     lv_color_t dot  = red ? lv_color_hex(th->text_color) : lv_color_white();
-    lv_obj_set_style_border_color(s_clouds_marker, ring, 0);
-    lv_obj_t *centre = lv_obj_get_child(s_clouds_marker, 0);
+    lv_obj_set_style_border_color(m, ring, 0);
+    lv_obj_t *centre = lv_obj_get_child(m, 0);
     if (centre) lv_obj_set_style_bg_color(centre, dot, 0);
 }
 
 /* Build the marker (36 px ring + 8 px dot; 18/4 was a speck on the 720 px panel) centred on @p parent, hidden.
  * Display lock held by the caller (image_page_create runs under it). */
-static void marker_create(lv_obj_t *parent)
+static void marker_create(image_src_t src, lv_obj_t *parent)
 {
     lv_obj_t *m = lv_obj_create(parent);
     lv_obj_remove_style_all(m);
@@ -435,17 +455,18 @@ static void marker_create(lv_obj_t *parent)
                            LV_OBJ_FLAG_SCROLL_CHAIN_HOR | LV_OBJ_FLAG_SCROLL_CHAIN_VER);
     lv_obj_center(dot);
 
-    s_clouds_marker = m;
-    marker_apply_theme();
+    s_marker[src] = m;
+    marker_apply_theme(src);
 }
 
-/* Show/hide the marker. No-op on every instance but Clouds (the pointer is NULL
- * until the Clouds page is built). Display lock held by the caller. */
-static void marker_set_visible(bool visible)
+/* Show/hide the marker. No-op on every instance that never built one (the
+ * pointer stays NULL there). Display lock held by the caller. */
+static void marker_set_visible(image_src_t src, bool visible)
 {
-    if (!s_clouds_marker) return;
-    if (visible) lv_obj_clear_flag(s_clouds_marker, LV_OBJ_FLAG_HIDDEN);
-    else         lv_obj_add_flag(s_clouds_marker, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_t *m = s_marker[src];
+    if (!m) return;
+    if (visible) lv_obj_clear_flag(m, LV_OBJ_FLAG_HIDDEN);
+    else         lv_obj_add_flag(m, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void hide_moon_corner_labels(image_page_t *p);
@@ -715,20 +736,25 @@ lv_obj_t *image_page_create(image_page_t *p, lv_obj_t *parent)
      * download lands, and one or two frames loop badly). Hidden until
      * ring_loading_sync() decides otherwise. */
     if (image_src_is_animated(p->src)) {
-        p->loading = nina_empty_state_create(page_container, ICON_CLOUD_OFF,
+        p->loading = nina_empty_state_create(page_container, ICON_CLOUD,
                                              p->src == IMG_SRC_CLOUDS ? "Loading Cloud Cover"
                                                                       : "Loading Weather Radar",
                                              NULL, 0);
         if (p->loading) nina_empty_state_hide(p->loading);
     }
 
-    /* Cloud Cover location marker: created LAST so it stacks above both
-     * crossfade images and the overlay bar. Clouds instance only; the other
-     * five sources never build it and so can never show it. Independent of the
-     * caption overlay toggle — it has its own config flag. */
-    if (p->src == IMG_SRC_CLOUDS) {
-        marker_create(page_container);
-        marker_set_visible(app_config_get()->clouds_show_location);
+    /* Location marker: created LAST so it stacks above both crossfade images
+     * and the overlay bar. Cloud Cover always has one (shown per its own config
+     * flag, independent of the caption overlay toggle); the radar page has one
+     * only while the worldwide source is in force. The other four sources never
+     * build it and so can never show it. */
+    if (p->src == IMG_SRC_CLOUDS || p->src == IMG_SRC_RADAR) {
+        marker_create(p->src, page_container);
+        if (p->src == IMG_SRC_CLOUDS) {
+            marker_set_visible(p->src, app_config_get()->clouds_show_location);
+        } else {
+            marker_set_visible(p->src, marker_wanted(p->src, app_config_get()));
+        }
     }
 
     /* One path for the stored flag: overlay_bar, the four Moon labels and the
@@ -1436,9 +1462,11 @@ void image_page_apply_theme(image_page_t *p)
     if (p->lbl_moon_set)  image_page_caption_style(p->lbl_moon_set);
     moon_arc_apply_theme(p);
 
-    /* Cloud Cover location marker follows the theme accent / Red Night rule.
-     * No-op on the other five instances (s_clouds_marker is NULL there). */
-    if (p->src == IMG_SRC_CLOUDS) marker_apply_theme();
+    /* The location marker follows the theme accent / Red Night rule. Only the
+     * Clouds and Radar pages build one; s_marker[] is NULL for the other four.
+     * On Radar the object always exists, only its visibility follows the
+     * source, so restyling it here is right whether it is shown or not. */
+    if (p->src == IMG_SRC_CLOUDS || p->src == IMG_SRC_RADAR) marker_apply_theme(p->src);
     if (p->loading) nina_empty_state_apply_theme(p->loading, current_theme, app_config_get()->color_brightness);
 
     /* Ring pixels (Radar, Clouds) are recoloured once, at insert, so restyling
@@ -1529,12 +1557,16 @@ void image_page_init(bool spawn_pollers)
     }
 }
 
-/* 12288 bytes: TLS handshake + software JPEG decode (GOES/Solar/Custom) or the
- * tgx moon render + PPA scratch (Moon). Matches the former goes task. */
+/* 16384 bytes: TLS handshake + software JPEG decode (GOES/Solar/Custom) or the
+ * tgx moon render + PPA scratch (Moon). Was 12288 (the former goes task); the
+ * worldwide radar source adds an http_fetch_binary frame and a
+ * rainviewer_build_frame frame on top of the ~8.2 KB stb PNG decode chain, and
+ * it is the first radar path that decodes PNG. The stacks are PSRAM, so the six
+ * pollers cost 24 KB more PSRAM and no internal heap. */
 void image_page_ensure_task_running(image_page_t *p)
 {
     if (!p || !image_page_config_enabled(app_config_get(), p->src)) return;
-    psram_task_ensure(&p->task, &p->spawn_mux, image_page_poll_task, p->name, 12288, p, 3, 0);
+    psram_task_ensure(&p->task, &p->spawn_mux, image_page_poll_task, p->name, 16384, p, 3, 0);
 }
 
 void image_page_wake(image_page_t *p)
@@ -1707,7 +1739,8 @@ bool image_page_config_crop(const app_config_t *c, image_src_t src)
          * The mode itself is read straight from config at insert, where the
          * radar_map_style gate lives; mirrored here so the predicate never
          * claims a crop that the bake would not apply. */
-        case IMG_SRC_RADAR:  return c->radar_map_style == 0 && c->radar_crop != 0;
+        case IMG_SRC_RADAR:  return !radar_use_rainviewer(c) &&
+                                    c->radar_map_style == 0 && c->radar_crop != 0;
         default:             return false;   /* Moon and Clouds never crop */
     }
 }
@@ -1804,7 +1837,12 @@ void image_page_radar_token(const app_config_t *c, char *out, size_t sz)
     }
 }
 
-void image_page_label(image_page_t *p, char *out, size_t sz)
+/* Caption for the picture that belongs to frame time @p stamp (UTC seconds);
+ * 0 means "whatever is current", which is what every caller outside the ring
+ * playback wants. Only the Clouds page reads the stamp: its caption names the
+ * satellite and the product THAT frame was drawn from, which can change from
+ * one loop slot to the next around dusk. */
+void image_page_label_at(image_page_t *p, uint32_t stamp, char *out, size_t sz)
 {
     const app_config_t *c = app_config_get();
     if (!out || sz == 0) return;
@@ -1815,6 +1853,12 @@ void image_page_label(image_page_t *p, char *out, size_t sz)
         case IMG_SRC_SOLAR:  strlcpy(out, solar_band_label(c->solar_band), sz); break;
         case IMG_SRC_CUSTOM: break;   /* no source name: the stamp alone is the caption */
         case IMG_SRC_RADAR: {
+            /* The worldwide source is not a WSR-88D site, so naming one would be
+             * a lie: the picture is centred on the user's own location. */
+            if (radar_use_rainviewer(c)) {
+                strlcpy(out, "Radar", sz);
+                break;
+            }
             char token[16];
             image_page_radar_token(c, token, sizeof(token));
             /* strlcpy/strlcat rather than snprintf: both truncate safely into
@@ -1823,13 +1867,24 @@ void image_page_label(image_page_t *p, char *out, size_t sz)
             strlcat(out, token, sz);
             break;
         }
-        case IMG_SRC_CLOUDS:
-            /* Name the channel the way the Radar page names its site. */
-            strlcpy(out, "Cloud Cover ", sz);
-            strlcat(out, clouds_channel_label(c->clouds_channel), sz);
+        case IMG_SRC_CLOUDS: {
+            uint32_t t = stamp;
+            if (t == 0) {
+                time_t now;
+                time(&now);
+                t = (uint32_t)now;
+            }
+            /* "Himawari Clean IR", "Meteosat GeoColour", "GOES GeoColor". */
+            clouds_caption(out, sz, c->clouds_channel, c->weather_lat, c->weather_lon, t);
             break;
+        }
         default: break;
     }
+}
+
+void image_page_label(image_page_t *p, char *out, size_t sz)
+{
+    image_page_label_at(p, 0u, out, sz);
 }
 
 bool image_page_get_error(image_page_t *p, char *out, size_t sz)
@@ -1898,6 +1953,12 @@ typedef struct {
     size_t   src_len;
     uint32_t bake_gen;     /* ring->bake_gen these PIXELS were produced under */
     uint32_t stamp;        /* frame time, UTC seconds; 0 = unknown */
+    /* Which product this frame was drawn from (clouds_role_t on the Clouds
+     * page, 0 everywhere else). The two neighbour-comparison quality gates
+     * only pair slots of the SAME role: a visible frame and an infrared one
+     * differ everywhere, so comparing them would read as one huge hole and
+     * the loop through dusk would reject every frame it fetched. */
+    uint8_t  role;
 } ring_slot_t;
 
 typedef struct {
@@ -1947,6 +2008,17 @@ typedef struct {
      * that changes ring pixels from one that does not. Written and read only under
      * the display lock. */
     bool            ring_red;
+    /* True once a slot has been filled with NO retained compressed source: the
+     * worldwide radar composite (tiles + basemap) and a date-line-split Cloud
+     * Cover frame (two GetMaps stitched on the device) both have no single
+     * document to keep. Such a slot cannot be re-derived locally, so
+     * image_page_ring_request_retransform() turns a request into a refetch
+     * instead of a pass that would skip every slot. Ring level, not per slot:
+     * every input that decides split-ness (weather location, clouds_zoom) and
+     * which radar source is in force already invalidates the whole ring, so a
+     * ring is never half retaining and half not. Written under the display
+     * lock with the slot it describes; cleared by image_page_ring_reset(). */
+    bool            no_src;
     /* Playback scratch — see "ring playback scratch" below. Three page-owned
      * 720x720 RGB565 PSRAM buffers, allocated on the first show of a visit and
      * freed with the ring. NULL = not allocated (or the alloc failed, which
@@ -2031,9 +2103,11 @@ bool image_page_ring_has_stamp(image_page_t *p, uint32_t stamp)
 /* Resident slot nearest in time to @p stamp and fit to judge a frame against:
  * usable pixels, a stamp of its own, and the CURRENT bake. @p skip is a slot
  * index to exclude (-1 = none), which is how the head re-judge keeps the head
- * from being compared with itself. -1 when the ring has no such slot.
- * Display lock held. */
-static int ring_neighbour_idx(image_ring_t *r, uint32_t stamp, int skip)
+ * from being compared with itself. @p role is the product the frame under test
+ * was drawn from; only slots of the SAME role qualify, because a visible frame
+ * and an infrared one differ everywhere and would read as one huge hole.
+ * -1 when the ring has no such slot. Display lock held. */
+static int ring_neighbour_idx(image_ring_t *r, uint32_t stamp, int skip, uint8_t role)
 {
     int n = atomic_load(&r->count);
     if (n > RADAR_RING_MAX) n = RADAR_RING_MAX;
@@ -2044,6 +2118,7 @@ static int ring_neighbour_idx(image_ring_t *r, uint32_t stamp, int skip)
     for (int i = 0; i < n; i++) {
         ring_slot_t *s = &r->slots[i];
         if (i == skip || !s->buf || s->stamp == 0 || s->bake_gen != cur) continue;
+        if (s->role != role) continue;          /* never compare across products */
         uint32_t d = (s->stamp > stamp) ? s->stamp - stamp : stamp - s->stamp;
         bool same = (d == 0);
         /* A different stamp always beats the same stamp (a re-fetch must not be
@@ -2055,14 +2130,14 @@ static int ring_neighbour_idx(image_ring_t *r, uint32_t stamp, int skip)
     return best;
 }
 
-bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp,
+bool image_page_ring_with_neighbour(image_page_t *p, uint32_t stamp, uint8_t role,
                                     bool (*fn)(const uint16_t *ref, int w, int h, void *arg),
                                     void *arg)
 {
     image_ring_t *r = ring_of(p);
     if (!r || !fn || stamp == 0) return false;
     if (!bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) return false;
-    int best = ring_neighbour_idx(r, stamp, -1);
+    int best = ring_neighbour_idx(r, stamp, -1, role);
     bool ret = false;
     if (best >= 0) {
         ring_slot_t *s = &r->slots[best];
@@ -2097,7 +2172,7 @@ uint32_t image_page_ring_judge_head(image_page_t *p,
     ring_slot_t *hd = &r->slots[0];
     if (atomic_load(&r->count) >= 2 && hd->buf && hd->stamp != 0 &&
         hd->bake_gen == atomic_load(&r->bake_gen)) {
-        int ref = ring_neighbour_idx(r, hd->stamp, 0);
+        int ref = ring_neighbour_idx(r, hd->stamp, 0, hd->role);
         if (ref >= 0) {
             image_frame_t view = { .buf = hd->buf, .w = hd->w, .h = hd->h };
             ring_slot_t *s = &r->slots[ref];
@@ -2418,7 +2493,7 @@ static void ring_show_idx(image_page_t *p, int idx, bool fade)
     r->play_idx = idx;
 
     char label[48];
-    image_page_label(p, label, sizeof(label));
+    image_page_label_at(p, s->stamp, label, sizeof(label));
     set_caption_if_changed(p, IMG_CAP_REGION, label);
 
     /* A stamped frame shows its own time (local clock), the newest one too:
@@ -2506,21 +2581,38 @@ static void ring_loading_sync(image_page_t *p)
     int gate  = ring_show_gate(p);
     bool loading = atomic_load(&p->active) && r->shown == NULL && count < gate;
     if (loading) {
-        /* Progress in the title so the wait reads as work, not a hang: each
-         * frame is a ~3 s download + decode. Shown as a countdown of frames
-         * still to come (3, 2, 1) on its own line, so it reads as a counter
-         * rather than a stray number next to the words. */
-        char title[48];
-        snprintf(title, sizeof(title), "Loading %s\n%d",
-                 p->src == IMG_SRC_CLOUDS ? "Cloud Cover" : "Weather Radar", gate - count);
+        /* Progress under the title so the wait reads as work, not a hang:
+         * each frame is a ~3 s download + decode. The total is the start gate,
+         * the frames the loop needs before it may play. The predicate above is
+         * count < gate, so the last state painted is gate - 1 lit (2 of 3): the
+         * placeholder goes the moment the last frame lands, before a full row
+         * could be drawn.
+         *
+         * Before the link has an address there is nothing to download and the
+         * counter would sit at "0 of 3" looking stalled, so the title says what
+         * is actually being waited on and the row goes away until it means
+         * something. Re-judged on every call, so the normal wording comes back
+         * by itself once the station gets an IP. */
+        const char *title = nina_empty_state_wait_title(
+            p->src == IMG_SRC_CLOUDS ? "Loading Cloud Cover" : "Loading Weather Radar");
         nina_empty_state_set_title(p->loading, title);
+        if (net_sta_has_ip()) {
+            nina_empty_state_set_progress(p->loading, count, gate);
+        } else {
+            nina_empty_state_set_progress(p->loading, 0, 0);
+        }
         nina_empty_state_show(p->loading);
         nina_empty_state_set_busy(p->loading, true);
-        if (p->src == IMG_SRC_CLOUDS) marker_set_visible(false);
+        if (p->src == IMG_SRC_CLOUDS || p->src == IMG_SRC_RADAR) marker_set_visible(p->src, false);
     } else {
         nina_empty_state_set_busy(p->loading, false);
+        nina_empty_state_set_progress(p->loading, 0, 0);
         nina_empty_state_hide(p->loading);
-        if (p->src == IMG_SRC_CLOUDS) marker_set_visible(app_config_get()->clouds_show_location);
+        if (p->src == IMG_SRC_CLOUDS) {
+            marker_set_visible(p->src, app_config_get()->clouds_show_location);
+        } else if (p->src == IMG_SRC_RADAR) {
+            marker_set_visible(p->src, marker_wanted(p->src, app_config_get()));
+        }
     }
 }
 
@@ -2654,6 +2746,7 @@ void image_page_ring_reset(image_page_t *p)
     atomic_store(&r->count, 0);
     r->play_idx = 0;
     r->shown    = NULL;
+    r->no_src   = false;            /* no slots left, so nothing lacks a source */
     /* Nothing left to re-transform; a request raised against the ring we just
      * freed would otherwise run one no-op pass later. Same for a deferred
      * teardown: the ring is gone, so honouring it later could only free a ring
@@ -2801,8 +2894,13 @@ static bool radar_crop_frame(image_frame_t *f, uint8_t mode)
 static void ring_bake(image_page_t *p, image_frame_t *f, const app_config_t *cfg, bool red)
 {
     if (p->src == IMG_SRC_RADAR) {
-        bool    dark = cfg->radar_map_style == 0 && (cfg->radar_dark_mode || red);
-        uint8_t mode = cfg->radar_map_style ? 0 : cfg->radar_crop;
+        /* The worldwide source composes its own black-background map, so there
+         * is no NOAA banner to trim and inverting it would turn that black
+         * sheet white, exactly the reasoning that already excludes map styles
+         * 1 and 2. The theme-gated Red Night remap below still runs. */
+        bool    rv   = radar_use_rainviewer(cfg);
+        bool    dark = !rv && cfg->radar_map_style == 0 && (cfg->radar_dark_mode || red);
+        uint8_t mode = (rv || cfg->radar_map_style) ? 0 : cfg->radar_crop;
         radar_crop_frame(f, mode);            /* best-effort; keeps the frame either way */
         if (dark) image_night_invert_rgb565((uint16_t *)f->buf, (size_t)f->w * f->h);
     }
@@ -2821,7 +2919,8 @@ static void ring_drop(image_frame_t *f, uint8_t *src)
 /* Move a fresh frame's allocations into slot @p i (which must be empty or already
  * freed). Display lock held. */
 static void ring_fill_slot(image_ring_t *r, int i, image_frame_t *fresh, uint32_t hash,
-                           uint8_t *src, size_t src_len, uint32_t bake_gen, uint32_t stamp)
+                           uint8_t *src, size_t src_len, uint32_t bake_gen, uint32_t stamp,
+                           uint8_t role)
 {
     r->slots[i].buf      = fresh->buf;
     r->slots[i].w        = fresh->w;
@@ -2829,13 +2928,15 @@ static void ring_fill_slot(image_ring_t *r, int i, image_frame_t *fresh, uint32_
     r->slots[i].hash     = hash;
     r->slots[i].src      = src;      /* ownership moves into the slot */
     r->slots[i].src_len  = src_len;
+    if (src == NULL) r->no_src = true;   /* nothing to re-derive this ring from */
     r->slots[i].bake_gen = bake_gen;
     r->slots[i].stamp    = stamp;
+    r->slots[i].role     = role;
     fresh->buf = NULL;
 }
 
 void image_page_ring_add(image_page_t *p, image_frame_t *fresh, bool at_head, uint32_t gen,
-                         uint8_t *src, size_t src_len, uint32_t stamp)
+                         uint8_t *src, size_t src_len, uint32_t stamp, uint8_t role)
 {
     image_ring_t *r = ring_of(p);
     if (!r || !fresh || !fresh->buf) {
@@ -2914,7 +3015,7 @@ void image_page_ring_add(image_page_t *p, image_frame_t *fresh, bool at_head, ui
             }
             bool was_shown = (r->slots[same].buf && (const uint8_t *)r->slots[same].buf == r->shown);
             ring_free_slot(p, r, same);           /* detaches LVGL if it was on screen */
-            ring_fill_slot(r, same, fresh, hash, src, src_len, bake_gen, stamp);
+            ring_fill_slot(r, same, fresh, hash, src, src_len, bake_gen, stamp, role);
             if (atomic_load(&p->active)) {
                 /* Re-show only if the healed slot was on screen (its buffer is
                  * gone) or nothing is up yet; otherwise playback carries on. */
@@ -2977,7 +3078,7 @@ void image_page_ring_add(image_page_t *p, image_frame_t *fresh, bool at_head, ui
     /* Everything from pos on shifted down one slot, so did the frame on screen. */
     if (r->play_idx >= pos && r->play_idx + 1 < cap) r->play_idx++;
     count++;
-    ring_fill_slot(r, pos, fresh, hash, src, src_len, bake_gen, stamp);
+    ring_fill_slot(r, pos, fresh, hash, src, src_len, bake_gen, stamp, role);
     atomic_store(&r->count, count);
 
     if (atomic_load(&p->active)) {
@@ -3013,6 +3114,31 @@ void image_page_ring_request_retransform(image_page_t *p)
 {
     image_ring_t *r = ring_of(p);
     if (!r) return;
+
+    /* A RING WITH NOTHING RETAINED CANNOT BE RE-DERIVED. Two sources compose
+     * their frames on the device and so keep no compressed document per slot:
+     * the worldwide radar (basemap plus rain tiles) and a date-line-split Cloud
+     * Cover frame (two GetMaps stitched at the antimeridian). The pass below
+     * would skip every such slot and leave the whole ring a generation behind,
+     * which parks playback on the frame that happens to be showing until the
+     * ring rolls over (2.5 h at the defaults) — and under Red Night that held
+     * frame keeps its pre-flip colours, on the one theme that must not put
+     * light on the field.
+     *
+     * So a re-transform request on such a ring is a REFETCH: drop the ring and
+     * fetch again, which bakes the new theme in at insert. Ahead of the
+     * generation bump on purpose — image_page_ring_invalidate() bumps the ring
+     * generation itself, and no slot survives to be judged stale.
+     *
+     * Reading the FLAG rather than naming a source is what makes this cover the
+     * split (whose ring is decided by the weather location, not by a setting
+     * this function can see) and any future device-composed source for free. An
+     * empty ring reads false and takes the ordinary pass, which is a no-op. */
+    if (r->no_src) {
+        image_page_ring_invalidate(p);
+        image_page_request_manual_fetch(p);
+        return;
+    }
 
     /* THE SINGLE FUNNEL for every pixel-affecting ring setting: the radar crop
      * and dark-mode toggles (radar_local_params_changed, image_page_config_apply_live)
@@ -3264,6 +3390,11 @@ void image_page_set_error(image_page_t *p, const char *msg)
     if (image_page_shows_error(p->src) &&
         atomic_load(&p->active) && bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
         image_page_render_frame(p);
+        /* An animated page that came up before the link did is still showing
+         * the "Waiting for WiFi" placeholder; a failed poll is the only event
+         * it gets until a frame lands, so re-judge the title here or it stays
+         * stale for the whole first loop. */
+        if (image_src_is_animated(p->src)) ring_loading_sync(p);
         bsp_display_unlock();
     }
 }
@@ -3292,11 +3423,19 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
              * "keep it simple" beats a second shrink-only path). */
             if (strcmp(cur->radar_token, prev->radar_token) != 0) return true;
             if (cur->radar_frames != prev->radar_frames) return true;
-            /* radar_map_style picks a different NWS service: different images. */
+            /* radar_map_style picks a different service: different images. */
             if (cur->radar_map_style != prev->radar_map_style) return true;
-            return cur->radar_token[0] == '\0' &&
-                   (cur->weather_lat != prev->weather_lat ||
-                    cur->weather_lon != prev->weather_lon);
+            /* Worldwide source: the area and the rain colours are baked into the
+             * tiles the server sends, so both are a refetch, not a re-derive. */
+            if (cur->radar_zoom != prev->radar_zoom) return true;
+            if (cur->radar_palette != prev->radar_palette) return true;
+            /* The location moves the picture whenever it is what centres it:
+             * for the US sources that is only when the area is Automatic, for
+             * the worldwide source it always is. */
+            return (cur->weather_lat != prev->weather_lat ||
+                    cur->weather_lon != prev->weather_lon) &&
+                   (cur->radar_token[0] == '\0' ||
+                    radar_use_rainviewer(cur) || radar_use_rainviewer(prev));
         case IMG_SRC_CLOUDS:
             /* Channel (a different GIBS layer), basemap (different vector
              * overlay layers, baked into the JPEG the server returns), area
@@ -3318,9 +3457,17 @@ static bool source_params_changed(image_src_t s, const app_config_t *prev, const
  * compressed bytes, so re-deriving costs a decode, not a download.
  * Deliberately NOT gated on radar_map_style: on styles 1/2 both settings are
  * ignored at bake time, so a toggle there costs one harmless local re-derive
- * that lands on identical pixels. Cheaper than a second predicate. */
+ * that lands on identical pixels. Cheaper than a second predicate.
+ *
+ * The WORLDWIDE source is the one exception, and it is gated out: its frames
+ * are composed on the device and retain no compressed bytes, so there is
+ * nothing to re-derive from — image_page_ring_request_retransform() would turn
+ * the request into a full refetch, and neither setting changes a worldwide
+ * pixel anyway (ring_bake and image_page_config_crop both skip them there). A
+ * toggle arriving from an API client is a no-op, which is what it means. */
 static bool radar_local_params_changed(const app_config_t *prev, const app_config_t *cur)
 {
+    if (radar_use_rainviewer(cur)) return false;
     return cur->radar_crop != prev->radar_crop ||
            cur->radar_dark_mode != prev->radar_dark_mode;
 }
@@ -3389,12 +3536,27 @@ void image_page_config_apply_live(const app_config_t *prev, const app_config_t *
             if (en_cur && !en_prev) image_page_ensure_task_running(p);
             if (!en_cur && en_prev) image_page_disable(p);   /* clear warm, free the frame */
         }
-        /* Cloud Cover location marker: pure visibility, no fetch. Deliberately
-         * NOT part of source_params_changed() — the frames are identical either
-         * way, so toggling it must never invalidate the ring. */
+        /* Cloud Cover location marker: pure visibility, no fetch and no
+         * placement. Deliberately NOT part of source_params_changed() — the
+         * frames are identical either way, so toggling it must never
+         * invalidate the ring. There is nothing else to follow: the marker is
+         * always at the panel centre, because the window is always centred on
+         * the location (a date-line crossing is split into two requests, never
+         * shifted). */
         if (s == IMG_SRC_CLOUDS && prev->clouds_show_location != cur->clouds_show_location) {
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
-                marker_set_visible(cur->clouds_show_location);
+                marker_set_visible(IMG_SRC_CLOUDS, cur->clouds_show_location);
+                bsp_display_unlock();
+            }
+        }
+        /* The radar marker follows which source serves the page, which a map
+         * style, area or location change can flip. Pure visibility, no fetch,
+         * and no offset: the worldwide window is never shifted at the date
+         * line, so its location is always the centre pixel. */
+        if (s == IMG_SRC_RADAR &&
+            marker_wanted(IMG_SRC_RADAR, prev) != marker_wanted(IMG_SRC_RADAR, cur)) {
+            if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                marker_set_visible(IMG_SRC_RADAR, marker_wanted(IMG_SRC_RADAR, cur));
                 bsp_display_unlock();
             }
         }
