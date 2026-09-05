@@ -205,7 +205,7 @@ const char *goes_region_name(const char *code)
  * on a crop / dark-mode / Red Night change instead of re-downloading ~370 KB. */
 static esp_err_t fetch_image_into(const char *url, const char *label, image_frame_t *out,
                                   uint8_t **out_src, size_t *out_src_len,
-                                  const char *auth_header)
+                                  const char *auth_header, http_fetch_conn_t *conn)
 {
     if (!url || !out) return ESP_ERR_INVALID_ARG;
     if (out_src) { *out_src = NULL; *out_src_len = 0; }
@@ -234,6 +234,10 @@ static esp_err_t fetch_image_into(const char *url, const char *label, image_fram
         .shrink_to_fit = true,
         .user_agent = "NINA-Display/1.0 (ESP32-P4 dashboard)",
         .extra_header = (auth_header && auth_header[0] != '\0') ? auth_header : NULL,
+        /* NULL for every one-shot caller. A loop page passes its own slot so a
+         * run of frames from one host skips the per-request TCP+TLS setup; the
+         * slot's owner destroys it when the page parks. */
+        .conn = conn,
         .label = "image",
     };
 
@@ -311,7 +315,7 @@ esp_err_t image_fetch_goes(const char *region, image_frame_t *out)
     snprintf(url, sizeof(url),
              "https://cdn.star.nesdis.noaa.gov/GOES19/ABI/SECTOR/%s/GEOCOLOR/%s.jpg",
              region, size);
-    return fetch_image_into(url, goes_region_name(region), out, NULL, NULL, NULL);
+    return fetch_image_into(url, goes_region_name(region), out, NULL, NULL, NULL, NULL);
 }
 
 esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out)
@@ -325,22 +329,24 @@ esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out)
     }
     char url[256];
     solar_band_url(band, url, sizeof(url));
-    return fetch_image_into(url, solar_band_label(band), out, NULL, NULL, NULL);
+    return fetch_image_into(url, solar_band_label(band), out, NULL, NULL, NULL, NULL);
 }
 
-esp_err_t image_fetch_custom(const char *url, const char *auth_header, image_frame_t *out)
+esp_err_t image_fetch_custom(const char *url, const char *auth_header, image_frame_t *out,
+                             http_fetch_conn_t *conn)
 {
     if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
     /* No source word for the Custom page: the caption is the stamp alone. */
-    return fetch_image_into(url, "", out, NULL, NULL, auth_header);
+    return fetch_image_into(url, "", out, NULL, NULL, auth_header, conn);
 }
 
 esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
-                                    uint8_t **out_src, size_t *out_src_len)
+                                    uint8_t **out_src, size_t *out_src_len,
+                                    http_fetch_conn_t *conn)
 {
     if (!out_src || !out_src_len) return ESP_ERR_INVALID_ARG;
     *out_src = NULL;
     *out_src_len = 0;
     if (!url || !url[0] || !out) return ESP_ERR_INVALID_ARG;
-    return fetch_image_into(url, "", out, out_src, out_src_len, NULL);
+    return fetch_image_into(url, "", out, out_src, out_src_len, NULL, conn);
 }
