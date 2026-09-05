@@ -140,7 +140,7 @@ bool adsb_basemap_poll(float rx_lat, float rx_lon, float range_nm)
 
     image_frame_t fresh;
     memset(&fresh, 0, sizeof(fresh));
-    if (image_fetch_custom(url, "", &fresh) != ESP_OK || fresh.buf == NULL) {
+    if (image_fetch_custom(url, "", &fresh, NULL) != ESP_OK || fresh.buf == NULL) {
         ESP_LOGW(TAG, "basemap fetch failed, backing off 60s");
         s_backoff_until_us = now_us + ADSB_BASEMAP_BACKOFF_US;
         return false;
