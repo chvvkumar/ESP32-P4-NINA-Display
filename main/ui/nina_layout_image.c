@@ -501,9 +501,14 @@ bool nina_layout_uses_capture(uint8_t layout) {
      * On a ROUND panel the Dashboard (0) draws a picture too, so it joins the
      * list there and only there: the square bento grid has no picture and must
      * never be handed one, or the poll loop would fetch a capture it cannot
-     * show and the page would try to release a buffer it never took. */
+     * show and the page would try to release a buffer it never took.
+     *
+     * Night rail (5) and Two rings (7) follow the same split: their round
+     * bodies are picture boards under the shared overlay, so they join the
+     * round-only list too; their square bodies draw no picture at all, so
+     * they stay out of the shared return below. Id 6 is also retired. */
 #if CONFIG_NINA_FAMILY_ROUND
-    if (layout == 0) return true;
+    if (layout == 0 || layout == 5 || layout == 7) return true;
 #endif
     return (layout == 1 || layout == 2 || layout == 4);
 }
@@ -518,9 +523,10 @@ nina_capture_fit_t nina_layout_capture_fit(uint8_t layout) {
      * wastes the two lens shaped caps and reads as a mistake. The uncropped
      * frame is one long press away, on the full-screen preview, which fetches
      * its own copy. Round layout 0 is a picture layout as well, so it takes the
-     * same fit; on square, layout 0 has no picture at all. */
+     * same fit; on square, layout 0 has no picture at all. Night rail (5) and
+     * Two rings (7) fill the disc on round the same way (id 6 is retired). */
 #if CONFIG_NINA_FAMILY_ROUND
-    if (layout == 0) return NINA_CAPTURE_FIT_COVER;
+    if (layout == 0 || layout == 5 || layout == 7) return NINA_CAPTURE_FIT_COVER;
 #endif
     return (layout == 2 || layout == 4) ? NINA_CAPTURE_FIT_COVER
                                         : NINA_CAPTURE_FIT_CONTAIN;

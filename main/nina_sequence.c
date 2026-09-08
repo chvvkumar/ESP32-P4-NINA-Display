@@ -232,6 +232,8 @@ static void find_running_step_name(cJSON *parent, char *out, size_t out_size) {
 typedef struct {
     int target;   // Iterations x product of enclosing loop Iterations
     int done;     // Completed exposures in that flattened count
+    cJSON *parent; // Container that DIRECTLY holds the RUNNING Smart Exposure
+                   // (the one whose plan the sub bar draws). NULL until found.
 } nested_exposure_t;
 
 // Fold this container's "Loop For Iterations" condition(s) into *acc.
@@ -279,6 +281,7 @@ static cJSON* find_running_smart_exposure(cJSON *container, nested_exposure_t *a
             if (item_status && item_status->valuestring &&
                 strcmp(item_status->valuestring, "RUNNING") == 0) {
                 found = item;
+                acc->parent = container;
                 JSON_GET_INT(found, "Iterations", acc->target);
                 JSON_GET_INT(found, "CompletedIterations", acc->done);
                 if (acc->target < 1) acc->target = 1;
@@ -292,6 +295,90 @@ static cJSON* find_running_smart_exposure(cJSON *container, nested_exposure_t *a
 
     if (found) apply_loop_conditions(container, acc);
     return found;
+}
+
+// Read the container plan off @p parent, the container that directly holds the
+// RUNNING Smart Exposure @p running. One item per Smart Exposure in Items
+// order (tracked up to NINA_PLAN_MAX_ITEMS); the container's "Loop For
+// Iterations" condition gives rounds and rounds already done; total_images
+// counts EVERY Smart Exposure the container holds, tracked or not, so the
+// single-image hide rule stays right past the cap. A DISABLED item, or one
+// with Iterations <= 0, becomes a one-image placeholder that never fills.
+static void build_plan(cJSON *parent, cJSON *running, nina_plan_t *out) {
+    memset(out, 0, sizeof(*out));
+    out->rounds = 1;
+    out->running_idx = -1;
+    if (!parent) return;
+
+    cJSON *items = cJSON_GetObjectItem(parent, "Items");
+    if (!items || !cJSON_IsArray(items)) return;
+
+    int count = 0;   // Smart Exposures seen, including any past the cap
+    int images = 0;  // Images per round across all of them
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, items) {
+        cJSON *item_name = cJSON_GetObjectItem(item, "Name");
+        if (!cJSON_IsString(item_name) ||
+            strcmp(item_name->valuestring, "Smart Exposure") != 0) continue;
+
+        int iters = 0, completed = 0;
+        JSON_GET_INT(item, "Iterations", iters);
+        JSON_GET_INT(item, "CompletedIterations", completed);
+
+        cJSON *item_status = cJSON_GetObjectItem(item, "Status");
+        bool enabled = (iters > 0) &&
+                       !(cJSON_IsString(item_status) &&
+                         strcmp(item_status->valuestring, "DISABLED") == 0);
+        if (!enabled) {
+            iters = 1;      // one placeholder image wide
+            completed = 0;  // and it never fills
+        }
+        if (completed < 0) completed = 0;
+        if (completed > iters) completed = iters;
+
+        if (count < NINA_PLAN_MAX_ITEMS) {
+            nina_plan_item_t *slot = &out->items[count];
+            JSON_GET_STR(item, "Filter", slot->filter);
+            slot->iterations = iters;
+            slot->completed  = completed;
+            slot->enabled    = enabled;
+            slot->running    = (item == running);
+            if (slot->running) out->running_idx = count;
+        }
+        images += iters;
+        count++;
+    }
+
+    out->n_items = (count > NINA_PLAN_MAX_ITEMS) ? NINA_PLAN_MAX_ITEMS : count;
+
+    cJSON *conditions = cJSON_GetObjectItem(parent, "Conditions");
+    if (conditions && cJSON_IsArray(conditions)) {
+        cJSON *cond = NULL;
+        cJSON_ArrayForEach(cond, conditions) {
+            cJSON *cond_name = cJSON_GetObjectItem(cond, "Name");
+            if (!cJSON_IsString(cond_name) ||
+                strncmp(cond_name->valuestring, "Loop For Iterations", 19) != 0) continue;
+            int rounds = 0, done = 0;
+            JSON_GET_INT(cond, "Iterations", rounds);
+            JSON_GET_INT(cond, "CompletedIterations", done);
+            if (rounds <= 1) continue;   // not a real loop: one round
+            if (done < 0) done = 0;
+            if (done > rounds - 1) done = rounds - 1;
+            out->rounds = rounds;
+            out->round_done = done;
+            break;
+        }
+    }
+
+    out->total_images = out->rounds * images;
+
+    cJSON *parent_name = cJSON_GetObjectItem(parent, "Name");
+    if (cJSON_IsString(parent_name)) {
+        strncpy(out->container, parent_name->valuestring, sizeof(out->container) - 1);
+        out->container[sizeof(out->container) - 1] = '\0';
+        char *suffix = strstr(out->container, "_Container");
+        if (suffix) *suffix = '\0';
+    }
 }
 
 void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
@@ -320,6 +407,13 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                 cJSON *target_container = find_active_target_container(item);
                 if (!target_container) target_container = cJSON_GetArrayItem(items, 0);
 
+                // Is the chosen container actually RUNNING? (find_active_target_container can
+                // return a FINISHED container as fallback; only a RUNNING one is a real active
+                // target.) Also gates whether an idle gap keeps the container plan alive.
+                cJSON *tc_status = cJSON_GetObjectItem(target_container, "Status");
+                bool tc_running = (tc_status && tc_status->valuestring &&
+                                   strcmp(tc_status->valuestring, "RUNNING") == 0);
+
                 // Resolve target name from the active target container.
                 cJSON *target_name_json = cJSON_GetObjectItem(target_container, "Name");
                 if (target_name_json && target_name_json->valuestring) {
@@ -328,12 +422,6 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
 
                     char *suffix = strstr(temp_name, "_Container");
                     if (suffix) *suffix = '\0';
-
-                    // Is the chosen container actually RUNNING? (find_active_target_container can
-                    // return a FINISHED container as fallback; only a RUNNING one is a real active target.)
-                    cJSON *tc_status = cJSON_GetObjectItem(target_container, "Status");
-                    bool tc_running = (tc_status && tc_status->valuestring &&
-                                       strcmp(tc_status->valuestring, "RUNNING") == 0);
 
                     if (temp_name[0] != '\0' && tc_running &&
                         strcmp(temp_name, data->prev_target_container) != 0) {
@@ -390,7 +478,7 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
 
                 // Recursively search for RUNNING Smart Exposure
                 // (target/done folded with enclosing "Loop For Iterations" conditions)
-                nested_exposure_t nested = { .target = 0, .done = 0 };
+                nested_exposure_t nested = { .target = 0, .done = 0, .parent = NULL };
                 cJSON *running_exp = find_running_smart_exposure(target_container, &nested);
 
                 if (running_exp) {
@@ -398,6 +486,7 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                     if (nested.done > nested.target) nested.done = nested.target;
                     data->exposure_count = nested.done;
                     data->exposure_iterations = nested.target;
+                    build_plan(nested.parent, running_exp, &data->plan);
                     JSON_GET_INT(running_exp, "ExposureCount", data->exposure_total_count);
 
                     cJSON *exp_time = cJSON_GetObjectItem(running_exp, "ExposureTime");
@@ -423,6 +512,22 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                         }
                     }
                 } else {
+                    /* Nothing exposing right now. While the SAME container is
+                     * still RUNNING (container_name was just resolved above
+                     * as the deepest RUNNING container, which is the parent of
+                     * the exposures) this is just a gap (autofocus, dither,
+                     * wait), so keep the plan on screen and only drop the
+                     * running mark. Once that container stops, or the target
+                     * moves on to another one, the plan goes away with it. */
+                    if (tc_running && data->plan.container[0] != '\0' &&
+                        strcmp(data->container_name, data->plan.container) == 0) {
+                        data->plan.running_idx = -1;
+                        for (int i = 0; i < data->plan.n_items; i++) {
+                            data->plan.items[i].running = false;
+                        }
+                    } else {
+                        memset(&data->plan, 0, sizeof(data->plan));
+                    }
                     ESP_LOGD(TAG, "No RUNNING Smart Exposure found (sequence may be idle)");
                 }
             }

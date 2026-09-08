@@ -47,6 +47,13 @@ typedef struct {
     volatile bool     shutdown;         /* true = task should exit */
     bool              filters_synced;   /* Per-instance filter sync flag */
     int64_t           last_heartbeat_ms; /* For background polling interval */
+    /* Set by another task (the demo-mode OFF path) to ask THIS task to reset
+     * its poll state at its next loop head. poll_state owns a keep-alive
+     * HTTP connection that a poll in flight may still be using, so only the
+     * poll task itself may run nina_poll_state_init() on it: a cross-task
+     * reset freed the connection under a running poll (dash4 panic
+     * 2026-09-08, esp_http_client_set_url on a freed client). */
+    _Atomic bool      reset_pending;
 } instance_poll_ctx_t;
 
 /** Page-change callback registered with the dashboard swipe gesture. */

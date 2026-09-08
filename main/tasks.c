@@ -482,6 +482,16 @@ void instance_poll_task(void *arg) {
             ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(5000));
             continue;                           /* touch nothing: no polls, no conn reports */
         }
+        /* A reset asked for by another task (demo OFF) runs HERE, on the
+         * task that uses poll_state, never on the asking task: no poll of
+         * ours is in flight at the loop head, so the keep-alive connection
+         * inside poll_state can be destroyed safely. */
+        if (ctx->reset_pending) {
+            ctx->reset_pending = false;
+            nina_poll_state_init(ctx->poll_state);
+            ctx->filters_synced = false;
+            ctx->last_heartbeat_ms = 0;
+        }
 
         const char *url = app_config_get_instance_url(idx);
 
@@ -1899,10 +1909,14 @@ main_loop:
                     for (int i = 0; i < 30 && demo_data_is_running(); i++) {
                         vTaskDelay(pdMS_TO_TICKS(100));
                     }
-                    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {   /* fresh poll state for the real world */
-                        nina_poll_state_init(&poll_states[i]);
-                        poll_contexts[i].filters_synced = false;
-                        poll_contexts[i].last_heartbeat_ms = 0;
+                    /* Fresh poll state for the real world. Do NOT call
+                     * nina_poll_state_init() from here: it destroys the
+                     * instance's keep-alive HTTP connection, and a poll that
+                     * was already in flight when demo went ON (an offline rig
+                     * can take tens of seconds of timeouts) still holds it.
+                     * The poll task resets itself at its next loop head. */
+                    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+                        poll_contexts[i].reset_pending = true;
                     }
                     ensure_network_stack();               /* no-op on a normal boot; first spawn after a demo boot */
                 }

@@ -115,8 +115,10 @@ typedef struct dashboard_page_s {
 
     /* Page layout for this instance, from app_config_t::nina_layout[i]:
      * 0 = arc dashboard (every field below the `alt` block applies),
-     * 1 = Image-forward, 2 = Halo, 4 = Orbit (nina_layout_alt.h; 2 and 4 are
-     * round family only; 3 is retired and validate_config resets it to 0).
+     * 1 = Image-forward, 2 = Halo, 4 = Orbit, 5 = Night rail,
+     * 7 = Two rings (nina_layout_alt.h; 2 and 4 are round family only, 5
+     * and 7 draw on both; 3 and 6 are retired and validate_config resets
+     * them to 0).
      * On any non-zero layout the arc-path widgets are never created and the
      * arc-path updaters never run — only `subbar`, `alt` and the shared
      * pieces (stale label/overlay, empty_state_cont, exposure clock) exist. */
