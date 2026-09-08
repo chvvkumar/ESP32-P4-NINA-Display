@@ -284,9 +284,7 @@ static void rms_click_cb(lv_event_t *e);
 static void hfr_click_cb(lv_event_t *e);
 static void exposure_arc_click_cb(lv_event_t *e);
 static void flip_click_cb(lv_event_t *e);
-#if !CONFIG_NINA_FAMILY_ROUND
-static void stars_click_cb(lv_event_t *e);   /* square bento grid only */
-#endif
+static void stars_click_cb(lv_event_t *e);   /* square bento grid + NINA_TAP_STARS seam */
 static void sequence_click_cb(lv_event_t *e);
 static void filter_click_cb(lv_event_t *e);
 static void autofocus_long_press_cb(lv_event_t *e);
@@ -699,9 +697,9 @@ void nina_dashboard_apply_theme(int theme_index) {
     lv_obj_invalidate(scr_dashboard);
 }
 
-#if !CONFIG_NINA_FAMILY_ROUND
-/* Go back to summary page when bottom row is clicked. The round board draws no
- * power row, so this has no caller there. */
+/* Go back to summary page when bottom row is clicked. Bound directly on the
+ * square power row and, via nina_dashboard_bind_tap(NINA_TAP_POWER), on any
+ * other layout's own power/status row on either family. */
 static void bottom_row_click_cb(lv_event_t *e) {
     LV_UNUSED(e);
     /* Task 4.1 / 6.1: route this USER tap through the arbiter like the other
@@ -711,7 +709,6 @@ static void bottom_row_click_cb(lv_event_t *e) {
     nina_dashboard_show_page_animated(PAGE_IDX_SUMMARY, 0, 0);
     nav_arbiter_submit_user(PAGE_IDX_SUMMARY, esp_timer_get_time() / 1000);
 }
-#endif
 
 /* Shared page furniture every layout gets: the amber "Last update" stale label,
  * the >2 min dim overlay and the branded disconnected empty state. Built after
@@ -1400,14 +1397,13 @@ static void flip_click_cb(lv_event_t *e) {
     nina_info_overlay_show(INFO_OVERLAY_MOUNT, active_page);
 }
 
-#if !CONFIG_NINA_FAMILY_ROUND
-/* Stars box: click to open image statistics info overlay. The round board
- * drops STARS, so this has no caller there. */
+/* Stars box: click to open image statistics info overlay. Bound directly on
+ * the square STARS tile and, via nina_dashboard_bind_tap(NINA_TAP_STARS), on
+ * any other layout's own stars tile on either family. */
 static void stars_click_cb(lv_event_t *e) {
     LV_UNUSED(e);
     nina_info_overlay_show(INFO_OVERLAY_IMAGESTATS, active_page);
 }
-#endif
 
 /* Sequence box: click to open sequence details info overlay */
 static void sequence_click_cb(lv_event_t *e) {
@@ -1544,6 +1540,8 @@ void nina_dashboard_bind_tap(lv_obj_t *obj, nina_tap_target_t which) {
         case NINA_TAP_SESSION:  cb = session_stats_click_cb; break;
         case NINA_TAP_FILTER:   cb = filter_click_cb;        break;
         case NINA_TAP_EXPOSURE: cb = exposure_arc_click_cb; break;
+        case NINA_TAP_STARS:    cb = stars_click_cb;         break;
+        case NINA_TAP_POWER:    cb = bottom_row_click_cb;    break;
         default:                return;
     }
     lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);

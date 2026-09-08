@@ -264,6 +264,7 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     lv_obj_set_flex_grow(p->alt.lbl_target, 1);
     lv_label_set_long_mode(p->alt.lbl_target, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_align(p->alt.lbl_target, LV_TEXT_ALIGN_LEFT, 0);
+    nina_dashboard_bind_tap(p->alt.lbl_target, NINA_TAP_CAPTURE);
 
     /* Right column: sequence step on top, safety shield below, right-aligned.
      * Fixed width (never flex-grow) so the step has a bounded box LONG_DOT can

@@ -341,6 +341,7 @@ static void rgr_power_build(dashboard_page_t *p, lv_obj_t *parent)
 
     p->alt.grp_bottom = rgr_box(parent, w, RGR_PWR_H, RGR_PWR_DY);
     lv_obj_set_layout(p->alt.grp_bottom, LV_LAYOUT_NONE);
+    nina_dashboard_bind_tap(p->alt.grp_bottom, NINA_TAP_POWER);
 
     lv_obj_t *rule = rgr_rule(p->alt.grp_bottom, w);
     lv_obj_align(rule, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -584,7 +585,7 @@ void nina_layout_rings_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     lv_obj_align(p->alt.lbl_target, LV_ALIGN_CENTER, 0, RGR_DY_NAME);
     ui_fit_label(p->alt.lbl_target, UI_FIT_LADDER_NAME, UI_FIT_LADDER_NAME_N,
                  rgr_name_avail());
-    nina_dashboard_bind_tap(p->alt.lbl_target, NINA_TAP_SEQUENCE);
+    nina_dashboard_bind_tap(p->alt.lbl_target, NINA_TAP_CAPTURE);
 
     /* 5: what lives inside the rings. */
     {
@@ -640,6 +641,7 @@ void nina_layout_rings_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     rgr_arm_rule(p->alt.grp_mid, true, RGR_ARM_R2);
 
     p->alt.lbl_stars = rgr_arm_value(p->alt.grp_mid, true, RGR_ARM_V3);
+    nina_dashboard_bind_tap(p->alt.lbl_stars, NINA_TAP_STARS);
     rgr_arm_caption(p->alt.grp_mid, true, RGR_ARM_C3, "stars");
 
     /* 7: the east arm, the frame length and the two countdowns. */
