@@ -23,13 +23,16 @@
 static const char *TAG = "ota_github";
 
 /* Releases endpoint, paginated. per_page=10 keeps each page's JSON under the
- * 128 KB MAX_RESPONSE_SIZE buffer (measured worst case ~93 KB). The full per-page
- * URL is composed by appending "&page=N" into a stack buffer (see fetch_releases_page). */
+ * 256 KB MAX_RESPONSE_SIZE buffer: a release entry with full notes runs about
+ * 15 KB, so 256 KB holds roughly 17 of them, comfortably above the 10 per page
+ * (issue 313: a page hit 132,672 bytes against the old 128 KB cap). The full
+ * per-page URL is composed by appending "&page=N" into a stack buffer (see
+ * fetch_releases_page). */
 #define GITHUB_API_URL    "https://api.github.com/repos/chvvkumar/ESP32-P4-NINA-Display/releases?per_page=10"
 #define MAX_RELEASE_PAGES 10       /* safety cap: 10 pages x per_page=10 = 100 releases (>2x current 43) */
 #define RELEASE_URL_BUF   256      /* generous bound for GITHUB_API_URL + "&page=NN" */
 #define OTA_BUF_SIZE      4096
-#define MAX_RESPONSE_SIZE (128 * 1024)
+#define MAX_RESPONSE_SIZE (256 * 1024)
 /* The square family keeps this asset name FOREVER: every fielded device matches
  * it with an exact strcmp, so changing it would stop the whole square fleet
  * seeing updates. The round family gets its own name, which is the first of the
@@ -470,7 +473,7 @@ static esp_err_t redirect_event_handler(esp_http_client_event_t *evt) {
  * parse it into a cJSON array. Returns the parsed array (caller owns it and must
  * cJSON_Delete it), or NULL on ANY failure: HTTP error, non-200 status, response
  * buffer overflow, or JSON parse failure. *overflow_out is set true only when the
- * 128 KB response buffer overflowed (so the caller can apply the history fail-safe);
+ * 256 KB response buffer overflowed (so the caller can apply the history fail-safe);
  * *rate_limited_out is set true only when GitHub answered 403/429 (quota exhausted);
  * both are left untouched on other failures. The helper frees its own response buffer.
  */

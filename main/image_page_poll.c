@@ -362,6 +362,43 @@ void image_page_poll_init(void)
     if (!s_fetch_gate) s_fetch_gate = xSemaphoreCreateMutex();
 }
 
+/* PAGE-SCOPED KEEP-ALIVE, one slot per animated page. Every frame of one visit
+ * -- the newest, the 0..2 re-fetches and the whole history backfill, up to
+ * clouds_frames / radar_frames of them -- goes to the SAME host, and a one-shot
+ * client paid a fresh TCP+TLS handshake for each: Cloud Cover to GIBS or
+ * EUMETView (both halves of a date-line split included), radar map styles 1/2
+ * to the NCEP GeoServer, radar style 0 to radar.weather.gov (a fixed literal in
+ * radar_frame_url()). One slot per page covers all of them, because
+ * esp_http_client_set_url() closes the parked socket by itself when the host or
+ * port changes, so a satellite or map-style change just reconnects once.
+ *
+ * The worldwide radar source never reaches here (rainviewer_build_frame()
+ * returns earlier in anim_fetch_frame) and keeps its own tile-host slot inside
+ * rainviewer.c, closed by rainviewer_release() at the same park seam.
+ *
+ * OWNERSHIP: each page's own poll task only. It creates its slot inside
+ * anim_fetch_frame() and destroys it in anim_on_park(), which poll_loop_run()
+ * calls on that same task -- a drained-parked slot holds an OPEN socket, so it
+ * must not outlive the page's fetching against the ~9 connection ceiling. */
+static http_fetch_conn_t *s_anim_conn[IMG_SRC_COUNT];
+
+static http_fetch_conn_t *anim_conn_get(const image_page_t *p)
+{
+    if (s_anim_conn[p->src] == NULL) {
+        s_anim_conn[p->src] = http_fetch_conn_create();
+        if (s_anim_conn[p->src] != NULL) ESP_LOGI(TAG, "%s: keep-alive connection opened", p->name);
+    }
+    return s_anim_conn[p->src];   /* NULL on alloc failure = one-shot, still correct */
+}
+
+static void anim_conn_close(const image_page_t *p)
+{
+    if (s_anim_conn[p->src] == NULL) return;
+    http_fetch_conn_destroy(s_anim_conn[p->src]);
+    s_anim_conn[p->src] = NULL;
+    ESP_LOGI(TAG, "%s: keep-alive connection closed", p->name);
+}
+
 /* Hand a locally rendered Moon frame to the page (instant swap). */
 static void moon_commit(image_page_t *p, uint16_t *img, int w, int h)
 {
@@ -882,7 +919,7 @@ static bool clouds_fetch_split(image_page_t *p, const app_config_t *cfg,
             return false;
         }
         image_frame_t part = {0};
-        esp_err_t err = image_fetch_custom(url, NULL, &part);
+        esp_err_t err = image_fetch_custom(url, NULL, &part, anim_conn_get(p));
         if (err != ESP_OK || part.buf == NULL ||
             part.w != (uint16_t)sp->px_w[k] || part.h != (uint16_t)px) {
             if (part.buf) heap_caps_free(part.buf);
@@ -954,7 +991,9 @@ static bool anim_fetch_frame(image_page_t *p, const app_config_t *cfg, const cha
     }
     char url[RADAR_WMS_URL_MAX];
     if (!anim_frame_url(p, cfg, token, i, url, sizeof(url))) return false;
-    return image_fetch_custom_retain(url, out, src, src_len) == ESP_OK;
+    /* Both animated pages: every frame of this visit is another request to the
+     * host this URL already named, so the page's slot skips the handshake. */
+    return image_fetch_custom_retain(url, out, src, src_len, anim_conn_get(p)) == ESP_OK;
 }
 
 /* Fetch history frame @p i under generation @p gen and hand it to the ring
@@ -1320,7 +1359,7 @@ static bool net_poll_once(void *arg)
             } else {
                 /* Optional user-supplied request header (empty = none), for a
                  * source behind an API key or bearer token. */
-                err = image_fetch_custom(cfg->custom_image_url, cfg->custom_image_header, &fresh);
+                err = image_fetch_custom(cfg->custom_image_url, cfg->custom_image_header, &fresh, NULL);
             }
             break;
     }
@@ -1445,6 +1484,9 @@ static void anim_on_park(void *arg)
     /* The cached coastline map is another panel-sized PSRAM buffer, held for as
      * long as the ring is. Free it at the same seam. */
     if (p->src == IMG_SRC_RADAR) rainviewer_release();
+    /* A drained keep-alive slot parks its socket OPEN, so this page's frame
+     * connection must not survive the page going away. */
+    anim_conn_close(p);
 }
 
 /* ---- Moon ---- */

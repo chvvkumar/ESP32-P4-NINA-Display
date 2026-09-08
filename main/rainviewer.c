@@ -76,6 +76,18 @@ static bool               s_base_valid;
 static int64_t            s_base_retry_us;  /* esp_timer time before which a failed
                                                basemap is not fetched again; 0 = now */
 
+/* PAGE-SCOPED KEEP-ALIVE for the tile host. A frame is 4 to 9 tiles from one
+ * server and a visit is several frames, and a one-shot client paid a fresh
+ * TCP+TLS handshake for every one of them: a New Zealand user's log shows 1.9
+ * to 3.1 s per tile, about 45 s before the page could show anything. Owned by
+ * the radar poll task alone (rainviewer_build_frame and rainviewer_release both
+ * run on it) and destroyed on park, because a drained slot parks its socket
+ * OPEN against this board's ~9 connection ceiling.
+ *
+ * NOT used for the basemap (a different host, GIBS) or for weather-maps.json
+ * (api.rainviewer.com, one request per poll): both stay one-shot. */
+static http_fetch_conn_t *s_tile_conn;
+
 bool radar_use_rainviewer(const app_config_t *c)
 {
     if (c == NULL) return false;
@@ -83,8 +95,26 @@ bool radar_use_rainviewer(const app_config_t *c)
                                c->weather_lat, c->weather_lon);
 }
 
+static http_fetch_conn_t *rv_tile_conn(void)
+{
+    if (s_tile_conn == NULL) {
+        s_tile_conn = http_fetch_conn_create();
+        if (s_tile_conn != NULL) ESP_LOGI(TAG, "tile keep-alive connection opened");
+    }
+    return s_tile_conn;   /* NULL on alloc failure = one-shot, still correct */
+}
+
+static void rv_tile_conn_close(void)
+{
+    if (s_tile_conn == NULL) return;
+    http_fetch_conn_destroy(s_tile_conn);
+    s_tile_conn = NULL;
+    ESP_LOGI(TAG, "tile keep-alive connection closed");
+}
+
 void rainviewer_release(void)
 {
+    rv_tile_conn_close();
     if (s_base != NULL) {
         heap_caps_free(s_base);
         s_base = NULL;
@@ -113,6 +143,10 @@ int rainviewer_refresh(const app_config_t *c, uint32_t *stamps, int max_out)
     if (c == NULL || stamps == NULL || max_out <= 0) return 0;
     if (max_out > RAINVIEWER_MAX_FRAMES) max_out = RAINVIEWER_MAX_FRAMES;
 
+    /* Declared before the failure goto below, which would otherwise jump over it. */
+    char prev_host[RAINVIEWER_HOST_MAX];
+    strlcpy(prev_host, s_host, sizeof(prev_host));
+
     http_fetch_opts_t opts = {
         .timeout_ms = RV_HTTP_TIMEOUT_MS,
         .use_tls_bundle = true,
@@ -129,6 +163,8 @@ int rainviewer_refresh(const app_config_t *c, uint32_t *stamps, int max_out)
     s_nframes = rainviewer_parse_maps(body, len, s_host, sizeof(s_host),
                                       s_frames, RAINVIEWER_MAX_FRAMES);
     heap_caps_free(body);
+    /* A parked socket points at the host it was opened to. */
+    if (strcmp(prev_host, s_host) != 0) rv_tile_conn_close();
     if (s_nframes == 0) {
         ESP_LOGW(TAG, "weather-maps.json had no usable radar frames");
         s_host[0] = '\0';
@@ -309,6 +345,7 @@ static bool rv_add_tile(uint16_t *frame, int frame_px, const app_config_t *c,
         .oversize = HTTP_BIN_OVERSIZE_REJECT,
         .shrink_to_fit = true,
         .user_agent = RV_USER_AGENT,
+        .conn = rv_tile_conn(),
         .label = "Radar tile",
     };
     uint8_t *png = NULL;

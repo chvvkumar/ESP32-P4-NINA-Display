@@ -496,11 +496,15 @@ void nina_round_overlay_set_view(dashboard_page_t *p, nina_view_mode_t mode)
 
     rov_show(p->alt.ov.crown, !picture);
 
-    /* NUMBERS keeps the rim arc unless the layout has an exposure ring of its
-     * own on that page, in which case two rings would say the same thing. The
-     * round Dashboard always has one (p->arc_exposure, its rim ring), so it
-     * qualifies by layout id rather than by arc_progress_num. */
-    const bool layout_has_ring = (p->alt.arc_progress_num != NULL) || (p->layout == 0);
+    /* NUMBERS keeps the rim arc unless the layout draws exposure progress of
+     * its own on that page (a ring in arc_progress_num, or a bar in
+     * bar_progress as the Night rail page does), in which case
+     * two shapes would say the same thing. The round Dashboard always has one
+     * (p->arc_exposure, its rim ring), so it qualifies by layout id rather
+     * than by arc_progress_num. */
+    const bool layout_has_ring = (p->alt.arc_progress_num != NULL)
+                              || (p->alt.bar_progress != NULL)
+                              || (p->layout == 0);
     rov_show(p->alt.arc_progress, !picture && !(numbers && layout_has_ring));
 
     rov_show(p->alt.ov.plate, stack);

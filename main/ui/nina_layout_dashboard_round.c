@@ -306,7 +306,6 @@ void nina_layout_dashboard_round_create(dashboard_page_t *p, lv_obj_t *parent,
 
     /* 4: the sub ring, same block rule as the square ledge. */
     nina_subbar_create_ring(&p->subbar, board, r_sub, DR_W_SUB, 2 * g_sub);
-    p->subbar.hide_single = true;   /* one sub: the exposure ring is enough */
     nina_subbar_set_elapsed_cb(&p->subbar, dr_elapsed_cb, p);
 
     /* 5: the centre spine. One flex column on the widest chords it needs. */

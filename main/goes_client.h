@@ -3,6 +3,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "esp_err.h"
+#include "http_fetch.h"           /* http_fetch_conn_t (optional keep-alive slot) */
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -26,8 +27,16 @@ esp_err_t image_fetch_goes(const char *region, image_frame_t *out);
 esp_err_t image_fetch_solar(uint8_t band, image_frame_t *out);
 /* @p auth_header is an optional raw "Name: value" request header (the Custom
  * URL page's user-supplied header, e.g. "Authorization: Bearer xyz"); NULL or
- * "" sends none, which is the previous behaviour. */
-esp_err_t image_fetch_custom(const char *url, const char *auth_header, image_frame_t *out);
+ * "" sends none, which is the previous behaviour.
+ *
+ * @p conn is an optional keep-alive slot (see http_fetch.h): NULL is the
+ * one-shot behaviour every caller had before. A caller that fetches several
+ * images from ONE host in a row (the Cloud Cover loop) passes its own slot so
+ * only the first request pays TCP+TLS setup. The slot is owned by exactly one
+ * task and MUST be destroyed when that task stops fetching -- a parked slot
+ * holds an open socket against the board's ~9 connection ceiling. */
+esp_err_t image_fetch_custom(const char *url, const char *auth_header, image_frame_t *out,
+                             http_fetch_conn_t *conn);
 
 /* Same fetch+decode as image_fetch_custom(), but the COMPRESSED source bytes
  * survive the call so the caller can re-decode them later without re-fetching.
@@ -42,7 +51,8 @@ esp_err_t image_fetch_custom(const char *url, const char *auth_header, image_fra
  * re-downloading it. The other pages call image_fetch_custom() and the
  * compressed buffer is freed at decode time exactly as before. */
 esp_err_t image_fetch_custom_retain(const char *url, image_frame_t *out,
-                                    uint8_t **out_src, size_t *out_src_len);
+                                    uint8_t **out_src, size_t *out_src_len,
+                                    http_fetch_conn_t *conn);
 
 /* NESDIS sector code -> human-readable region name. Returns the code itself
  * when no match is found. Single source of truth for region labels. */

@@ -7,13 +7,19 @@
  * Selected per instance by app_config_t::nina_layout[i]:
  *   0 = arc dashboard (nina_dashboard.c, unchanged)
  *   1 = Image-forward (nina_layout_image.c / nina_layout_image_round.c)
- *   2 = Halo      (round family only, nina_layout_halo_round.c)
- *   4 = Orbit     (round family only, nina_layout_orbit_round.c)
+ *   2 = Halo        (round family only, nina_layout_halo_round.c)
+ *   4 = Orbit       (round family only, nina_layout_orbit_round.c)
+ *   5 = Night rail  (both families: nina_layout_rail.c / nina_layout_rail_round.c)
+ *   7 = Two rings   (both families: nina_layout_rings.c / nina_layout_rings_round.c)
  *
- * Id 3 is RETIRED (it was Meridian) and is never reused. Ids are global across
- * the families; layout_for_family() in nina_dashboard.c resolves an id this
- * binary cannot draw to 0 without rewriting the stored value, so moving a board
- * between a round and a square panel gives the user their choice back.
+ * Ids 5 and 7 draw no picture on the square family (a pure readings page)
+ * and draw the same shared round overlay (crown, rim arc, plate) as Halo and
+ * Orbit on the round family. Ids 3 and 6 are RETIRED (3 was Meridian, 6 was
+ * Two columns) and are never reused. Ids are global across the families;
+ * layout_for_family() in nina_dashboard.c resolves an id this binary cannot
+ * draw to 0 without
+ * rewriting the stored value, so moving a board between a round and a square
+ * panel gives the user their choice back.
  *
  * The spine (nina_dashboard.c / nina_dashboard_update.c) owns the dispatch, the
  * page root object, the stale indicator, the stale overlay, the disconnected
@@ -88,7 +94,8 @@ typedef enum {
 } nina_capture_fit_t;
 
 /** @brief True for every layout that draws the retained capture: 1, 2 and 4,
- *  plus 0 on the round family, where the Dashboard is a picture layout too. */
+ *  plus 0, 5 and 7 on the round family, where the Dashboard, Night rail
+ *  and Two rings are picture layouts too. */
 bool nina_layout_uses_capture(uint8_t layout);
 
 /** @brief True while that instance holds a decoded capture. */
@@ -271,6 +278,49 @@ void nina_layout_orbit_update(dashboard_page_t *p, const nina_client_t *d,
                               int instance_idx, int gb);
 void nina_layout_orbit_apply_theme(dashboard_page_t *p);
 void nina_layout_orbit_set_view(dashboard_page_t *p, nina_view_mode_t mode);
+
+/* -- Layouts 5 and 7 -- Night rail, Two rings, both families (id 6 retired) */
+
+/**
+ * @brief The four entry points every one of these two layouts defines, once
+ * per family.
+ *
+ * Each name below has TWO definitions, never one: a square body in
+ * nina_layout_rail.c / nina_layout_rings.c, guarded #if !CONFIG_NINA_FAMILY_ROUND,
+ * and a round body in nina_layout_rail_round.c / nina_layout_rings_round.c,
+ * compiled only into the round build through nina_round_srcs. There is no
+ * runtime dispatch inside a pair; the linker takes the family's definitions,
+ * exactly like layout 1's nina_layout_image.c / nina_layout_image_round.c split.
+ *
+ * SQUARE bodies draw NO picture: nina_layout_uses_capture() stays false for
+ * 5 and 7 on the square family, so no capture is ever fetched or attached,
+ * p->alt.cap_img is never created, and set_view() is an empty function like
+ * nina_layout_image_set_view(). Exposure progress arrives through
+ * p->alt.bar_progress (Night rail) or p->alt.arc_progress (Two
+ * rings); elapsed seconds arrive through p->alt.elapsed_cb, registered once at
+ * create time.
+ *
+ * ROUND bodies follow the Halo/Orbit contract above exactly: the spine
+ * creates p->alt.cap_img before create() runs, nina_round_overlay.c draws the
+ * crown, the rim exposure arc and the readings plate over the picture, and
+ * the body builds only its own readings-only page inside one full-panel
+ * transparent group, keeping the top 60 px of the vertical axis clear for the
+ * crown. It registers p->alt.elapsed_hook, NOT elapsed_cb, and its own
+ * exposure indicator goes in p->alt.bar_progress (Night rail) or
+ * p->alt.arc_progress_num (Two rings, which also makes the overlay hide its
+ * own rim arc in NUMBERS, the same way Orbit's inner ring does).
+ */
+void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_index);
+void nina_layout_rail_update(dashboard_page_t *p, const nina_client_t *d,
+                             int instance_idx, int gb);
+void nina_layout_rail_apply_theme(dashboard_page_t *p);
+void nina_layout_rail_set_view(dashboard_page_t *p, nina_view_mode_t mode);
+
+void nina_layout_rings_create(dashboard_page_t *p, lv_obj_t *parent, int page_index);
+void nina_layout_rings_update(dashboard_page_t *p, const nina_client_t *d,
+                              int instance_idx, int gb);
+void nina_layout_rings_apply_theme(dashboard_page_t *p);
+void nina_layout_rings_set_view(dashboard_page_t *p, nina_view_mode_t mode);
 
 /* ── Shared ───────────────────────────────────────────────────────────────── */
 

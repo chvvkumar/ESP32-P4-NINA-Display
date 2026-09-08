@@ -459,6 +459,269 @@ static void test_nested_loop_iterations(void) {
     expect_int("exposure_total_count (ExposureCount untouched)", c.exposure_total_count, 7);
 }
 
+/* =======================================================================
+ * Container plan (nina_plan_t) tests.
+ *
+ * The plan describes the parent container of the RUNNING Smart Exposure:
+ * one item per Smart Exposure in Items order, the container's
+ * "Loop For Iterations" condition as rounds/round_done, and the flattened
+ * image total the sub ring uses to decide whether to draw at all.
+ * ======================================================================= */
+
+/* The live LRGBSHO shape (captured from a real rig): seven Smart Exposures
+ * under a container looping 10 times, 3 rounds done, the third (G) running,
+ * the last (Oiii) disabled. */
+static const char *k_lrgbsho_running =
+    "{"
+    "  \"Response\": ["
+    "    {"
+    "      \"Name\": \"Targets_Container\","
+    "      \"Items\": ["
+    "        {"
+    "          \"Name\": \"NGC 1530_Container\","
+    "          \"Status\": \"RUNNING\","
+    "          \"Items\": ["
+    "            {"
+    "              \"Name\": \"LRGBSHO_Container\","
+    "              \"Status\": \"RUNNING\","
+    "              \"Conditions\": ["
+    "                { \"Name\": \"Loop For Iterations_Condition\", \"Iterations\": 10, \"CompletedIterations\": 3 }"
+    "              ],"
+    "              \"Items\": ["
+    "                { \"Name\": \"Smart Exposure\", \"Status\": \"FINISHED\", \"Filter\": \"L\",    \"Iterations\": 1, \"CompletedIterations\": 1, \"ExposureTime\": 300 },"
+    "                { \"Name\": \"Smart Exposure\", \"Status\": \"FINISHED\", \"Filter\": \"R\",    \"Iterations\": 1, \"CompletedIterations\": 1, \"ExposureTime\": 300 },"
+    "                { \"Name\": \"Smart Exposure\", \"Status\": \"RUNNING\",  \"Filter\": \"G\",    \"Iterations\": 1, \"CompletedIterations\": 0, \"ExposureTime\": 300 },"
+    "                { \"Name\": \"Smart Exposure\", \"Status\": \"CREATED\",  \"Filter\": \"B\",    \"Iterations\": 1, \"CompletedIterations\": 0, \"ExposureTime\": 300 },"
+    "                { \"Name\": \"Smart Exposure\", \"Status\": \"CREATED\",  \"Filter\": \"Sii\",  \"Iterations\": 1, \"CompletedIterations\": 0, \"ExposureTime\": 300 },"
+    "                { \"Name\": \"Smart Exposure\", \"Status\": \"CREATED\",  \"Filter\": \"Ha\",   \"Iterations\": 1, \"CompletedIterations\": 0, \"ExposureTime\": 300 },"
+    "                { \"Name\": \"Smart Exposure\", \"Status\": \"DISABLED\", \"Filter\": \"Oiii\", \"Iterations\": 1, \"CompletedIterations\": 0, \"ExposureTime\": 300 }"
+    "              ]"
+    "            }"
+    "          ]"
+    "        }"
+    "      ]"
+    "    }"
+    "  ]"
+    "}";
+
+/* Same container, still RUNNING, but no Smart Exposure is RUNNING any more
+ * (an autofocus or a dither is in flight between exposures). */
+static const char *k_lrgbsho_idle =
+    "{"
+    "  \"Response\": ["
+    "    {"
+    "      \"Name\": \"Targets_Container\","
+    "      \"Items\": ["
+    "        {"
+    "          \"Name\": \"NGC 1530_Container\","
+    "          \"Status\": \"RUNNING\","
+    "          \"Items\": ["
+    "            {"
+    "              \"Name\": \"LRGBSHO_Container\","
+    "              \"Status\": \"RUNNING\","
+    "              \"Conditions\": ["
+    "                { \"Name\": \"Loop For Iterations_Condition\", \"Iterations\": 10, \"CompletedIterations\": 3 }"
+    "              ],"
+    "              \"Items\": ["
+    "                { \"Name\": \"Smart Exposure\", \"Status\": \"FINISHED\", \"Filter\": \"L\", \"Iterations\": 1, \"CompletedIterations\": 1 },"
+    "                { \"Name\": \"Auto Focus\", \"Status\": \"RUNNING\" }"
+    "              ]"
+    "            }"
+    "          ]"
+    "        }"
+    "      ]"
+    "    }"
+    "  ]"
+    "}";
+
+/* (a) The live shape: every plan field read off one parse. */
+static void test_plan_live_lrgbsho(void) {
+    printf("\n-- test_plan_live_lrgbsho --\n");
+    nina_client_t c;
+    reset_client(&c);
+    run_fetch(k_lrgbsho_running, &c);
+
+    expect_int("plan.n_items (seven Smart Exposures)", c.plan.n_items, 7);
+    expect_int("plan.rounds (Loop For Iterations)", c.plan.rounds, 10);
+    expect_int("plan.round_done (CompletedIterations)", c.plan.round_done, 3);
+    expect_int("plan.running_idx (third item, G)", c.plan.running_idx, 2);
+    expect_int("plan.total_images (10 rounds x 7)", c.plan.total_images, 70);
+    expect_str("plan.container (stripped)", c.plan.container, "LRGBSHO");
+
+    expect_str("plan.items[0].filter", c.plan.items[0].filter, "L");
+    expect_str("plan.items[1].filter", c.plan.items[1].filter, "R");
+    expect_str("plan.items[2].filter", c.plan.items[2].filter, "G");
+    expect_str("plan.items[3].filter", c.plan.items[3].filter, "B");
+    expect_str("plan.items[4].filter", c.plan.items[4].filter, "Sii");
+    expect_str("plan.items[5].filter", c.plan.items[5].filter, "Ha");
+    expect_str("plan.items[6].filter", c.plan.items[6].filter, "Oiii");
+
+    expect_int("plan.items[0].iterations", c.plan.items[0].iterations, 1);
+    expect_int("plan.items[0].completed (round finished)", c.plan.items[0].completed, 1);
+    expect_int("plan.items[0].enabled", c.plan.items[0].enabled ? 1 : 0, 1);
+    expect_int("plan.items[2].running (G)", c.plan.items[2].running ? 1 : 0, 1);
+    expect_int("plan.items[0].running (L, not running)", c.plan.items[0].running ? 1 : 0, 0);
+    expect_int("plan.items[6].enabled (Oiii DISABLED)", c.plan.items[6].enabled ? 1 : 0, 0);
+    expect_int("plan.items[6].iterations (placeholder = 1)", c.plan.items[6].iterations, 1);
+    expect_int("plan.items[6].completed (placeholder never fills)", c.plan.items[6].completed, 0);
+
+    /* The legacy per-filter counters are unchanged by the plan work. */
+    expect_int("exposure_iterations (legacy, 1 x loop 10)", c.exposure_iterations, 10);
+    expect_int("exposure_count (legacy, 3 rounds x 1)", c.exposure_count, 3);
+}
+
+/* (b) A container with no loop condition is exactly one round. */
+static void test_plan_no_loop_condition(void) {
+    printf("\n-- test_plan_no_loop_condition --\n");
+    const char *json =
+        "{"
+        "  \"Response\": ["
+        "    {"
+        "      \"Name\": \"Targets_Container\","
+        "      \"Items\": ["
+        "        {"
+        "          \"Name\": \"M31_Container\","
+        "          \"Status\": \"RUNNING\","
+        "          \"Items\": ["
+        "            {"
+        "              \"Name\": \"RGB_Container\","
+        "              \"Status\": \"RUNNING\","
+        "              \"Items\": ["
+        "                { \"Name\": \"Smart Exposure\", \"Status\": \"RUNNING\", \"Filter\": \"Ha\", \"Iterations\": 20, \"CompletedIterations\": 5 },"
+        "                { \"Name\": \"Smart Exposure\", \"Status\": \"CREATED\", \"Filter\": \"Oiii\", \"Iterations\": 20, \"CompletedIterations\": 0 }"
+        "              ]"
+        "            }"
+        "          ]"
+        "        }"
+        "      ]"
+        "    }"
+        "  ]"
+        "}";
+
+    nina_client_t c;
+    reset_client(&c);
+    run_fetch(json, &c);
+
+    expect_int("plan.n_items", c.plan.n_items, 2);
+    expect_int("plan.rounds (no loop -> 1)", c.plan.rounds, 1);
+    expect_int("plan.round_done (no loop -> 0)", c.plan.round_done, 0);
+    expect_int("plan.running_idx", c.plan.running_idx, 0);
+    expect_int("plan.total_images (1 x (20 + 20))", c.plan.total_images, 40);
+    expect_int("plan.items[0].completed", c.plan.items[0].completed, 5);
+    expect_str("plan.container", c.plan.container, "RGB");
+}
+
+/* (c) A container that plans a single image: total_images 1, the ring hides. */
+static void test_plan_single_image(void) {
+    printf("\n-- test_plan_single_image --\n");
+    const char *json =
+        "{"
+        "  \"Response\": ["
+        "    {"
+        "      \"Name\": \"Targets_Container\","
+        "      \"Items\": ["
+        "        {"
+        "          \"Name\": \"Single_Container\","
+        "          \"Status\": \"RUNNING\","
+        "          \"Items\": ["
+        "            {"
+        "              \"Name\": \"One_Container\","
+        "              \"Status\": \"RUNNING\","
+        "              \"Items\": ["
+        "                { \"Name\": \"Smart Exposure\", \"Status\": \"RUNNING\", \"Filter\": \"L\", \"Iterations\": 1, \"CompletedIterations\": 0 }"
+        "              ]"
+        "            }"
+        "          ]"
+        "        }"
+        "      ]"
+        "    }"
+        "  ]"
+        "}";
+
+    nina_client_t c;
+    reset_client(&c);
+    run_fetch(json, &c);
+
+    expect_int("plan.n_items", c.plan.n_items, 1);
+    expect_int("plan.rounds", c.plan.rounds, 1);
+    expect_int("plan.total_images (single image -> hidden)", c.plan.total_images, 1);
+}
+
+/* (d) Idle retention: the plan survives a gap between exposures while the
+ * container still runs, and is dropped when the target stops running. */
+static void test_plan_idle_retention(void) {
+    printf("\n-- test_plan_idle_retention --\n");
+    nina_client_t c;
+    reset_client(&c);
+    run_fetch(k_lrgbsho_running, &c);
+    expect_int("plan.n_items after first parse", c.plan.n_items, 7);
+
+    run_fetch(k_lrgbsho_idle, &c);
+    expect_int("plan.n_items kept over the gap", c.plan.n_items, 7);
+    expect_str("plan.container kept over the gap", c.plan.container, "LRGBSHO");
+    expect_int("plan.total_images kept over the gap", c.plan.total_images, 70);
+    expect_int("plan.running_idx (-1 while nothing exposes)", c.plan.running_idx, -1);
+
+    /* Target container no longer RUNNING -> the plan is dropped. */
+    const char *finished =
+        "{"
+        "  \"Response\": ["
+        "    {"
+        "      \"Name\": \"Targets_Container\","
+        "      \"Items\": ["
+        "        {"
+        "          \"Name\": \"NGC 1530_Container\","
+        "          \"Status\": \"FINISHED\","
+        "          \"Items\": ["
+        "            {"
+        "              \"Name\": \"LRGBSHO_Container\","
+        "              \"Status\": \"FINISHED\","
+        "              \"Items\": ["
+        "                { \"Name\": \"Smart Exposure\", \"Status\": \"FINISHED\", \"Filter\": \"L\", \"Iterations\": 1, \"CompletedIterations\": 1 }"
+        "              ]"
+        "            }"
+        "          ]"
+        "        }"
+        "      ]"
+        "    }"
+        "  ]"
+        "}";
+    run_fetch(finished, &c);
+    expect_int("plan.n_items zeroed when the target stops", c.plan.n_items, 0);
+    expect_str("plan.container zeroed when the target stops", c.plan.container, "");
+    expect_int("plan.total_images zeroed when the target stops", c.plan.total_images, 0);
+}
+
+/* (e) More Smart Exposures than the plan tracks: items are capped, but the
+ * image total still counts every one of them. */
+static void test_plan_item_cap(void) {
+    printf("\n-- test_plan_item_cap --\n");
+    char json[4096];
+    int n = snprintf(json, sizeof(json), "%s",
+        "{\"Response\":[{\"Name\":\"Targets_Container\",\"Items\":[{"
+        "\"Name\":\"Big_Container\",\"Status\":\"RUNNING\",\"Items\":[{"
+        "\"Name\":\"Loop_Container\",\"Status\":\"RUNNING\","
+        "\"Conditions\":[{\"Name\":\"Loop For Iterations_Condition\",\"Iterations\":2,\"CompletedIterations\":0}],"
+        "\"Items\":[");
+    for (int i = 0; i < 18 && n > 0 && n < (int)sizeof(json); i++) {
+        n += snprintf(json + n, sizeof(json) - (size_t)n,
+                      "%s{\"Name\":\"Smart Exposure\",\"Status\":\"%s\",\"Filter\":\"F%d\","
+                      "\"Iterations\":1,\"CompletedIterations\":0}",
+                      i ? "," : "", (i == 0) ? "RUNNING" : "CREATED", i);
+    }
+    n += snprintf(json + n, sizeof(json) - (size_t)n, "]}]}]}]}");
+
+    nina_client_t c;
+    reset_client(&c);
+    run_fetch(json, &c);
+
+    expect_int("plan.n_items capped at NINA_PLAN_MAX_ITEMS",
+               c.plan.n_items, NINA_PLAN_MAX_ITEMS);
+    expect_int("plan.total_images counts all 18 (2 rounds)", c.plan.total_images, 36);
+    expect_int("plan.running_idx (first item)", c.plan.running_idx, 0);
+    expect_str("plan.items[15].filter (last tracked)", c.plan.items[15].filter, "F15");
+}
+
 int main(void) {
     test_normal_running_smart_exposure();
     test_no_running_target();
@@ -468,6 +731,11 @@ int main(void) {
     test_container_suffix_stripping();
     test_take_many_exposures_not_matched();
     test_nested_loop_iterations();
+    test_plan_live_lrgbsho();
+    test_plan_no_loop_condition();
+    test_plan_single_image();
+    test_plan_idle_retention();
+    test_plan_item_cap();
 
     printf("\n%s (%d failures)\n", fails ? "TESTS FAILED" : "ALL TESTS PASSED", fails);
     return fails ? 1 : 0;
