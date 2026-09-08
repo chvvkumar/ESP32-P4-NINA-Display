@@ -26,15 +26,18 @@ const lv_font_t *const UI_FIT_LADDER_NAME_28[UI_FIT_LADDER_NAME_28_N] = {
     &lv_font_montserrat_24, &lv_font_montserrat_20,
 };
 
-/* 64 slots. A round capture layout routes about 14 labels through this table
- * and up to three NINA pages exist at once, so the first cut of 24 overflowed.
+/* 160 slots. A round capture layout routes about 14 labels through this table
+ * plus the shared overlay's 13, and the Night rail page routes about 20 of
+ * its own, so three NINA pages on that layout need about 100; the first cut
+ * of 24 overflowed and the 64 that replaced it would have too. Each slot is
+ * about 150 bytes of PSRAM.
  * The table is NEVER evicted from: an overflow degrades that one call to the
  * behaviour this code had before the memo existed (measure every time, compare
  * against the label's own text) instead of stealing a live label's slot. An
  * eviction would both silently disable the write guard for the evicted label
  * and leave a delete hook on it that a later re-claim would duplicate.
  * Linear scan; the table is only touched on a label write. */
-#define UI_FIT_SLOTS 64
+#define UI_FIT_SLOTS 160
 
 typedef struct {
     const lv_obj_t  *label;

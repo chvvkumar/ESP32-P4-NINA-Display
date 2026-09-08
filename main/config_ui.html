@@ -1354,15 +1354,24 @@
             '<div class="field-hint">Host or IP of the N.I.N.A. computer running the Advanced API plugin; the web page adds port 1888 and the /v2/api/ path before saving (e.g. 192.168.1.100 becomes http://192.168.1.100:1888/v2/api/).</div></div>'+
             '</div>'+
             '<div class="subsection">'+
-            '<div class="subsection-title">Page Layout</div>'+
+            '<div class="subsection-title">Page Layout <button type="button" class="help-btn" aria-label="About page layouts" onclick="toggleHelp(event,this)"><svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/></svg></button></div>'+
+            '<div class="help-popover"><div class="help-popover-title">Page Layout</div>'+
+            '<p>How the page for this instance is drawn. Dashboard shows the exposure arc with the guider, focuser and sequence tiles, and is available on every screen. Image-forward puts the exposure readout and sub progress in large type over the latest captured image, and is a square-screen design.</p>'+
+            '<p>On a round screen every design shows the picture filling the whole circle, with the safety shield at the top and the exposure progress running around the rim: Dashboard keeps its dials and tiles for the readings view, Halo and Orbit each arrange the readings their own way.</p>'+
+            '<p>Night rail and Two rings are readings-only designs available on every screen shape (on a round screen they still show the picture behind them, the same way Halo and Orbit do): Night rail puts the exposure on one horizontal rail with the subs lined up under it, and Two rings draws the exposure as an outer ring with the subs as a ring inside it.</p>'+
+            '<p>On a round screen, tapping the picture steps through four views, picture with all the readings, picture with just the rim progress, picture on its own, and readings on their own, then back to the start. Holding your finger on the picture opens the full, uncropped image full screen.</p>'+
+            '<p>Only the designs your screen can draw are offered here; the others are not shown, and a choice you made on another screen shape is kept for when you go back to it.</p>'+
+            '</div>'+
             '<div class="field"><label class="field-label">Page layout</label>'+
             '<select class="input" id="nina_layout_'+i+'" onchange="checkDirty()">'+
             '<option value="0">Dashboard</option>'+
             '<option value="1">Image-forward</option>'+
             '<option value="2">Halo</option>'+
             '<option value="4">Orbit</option>'+
+            '<option value="5">Night rail</option>'+
+            '<option value="7">Two rings</option>'+
             '</select>'+
-            '<div class="field-hint">How the page for this instance is drawn. Dashboard shows the exposure arc with the guider, focuser and sequence tiles, and is available on every screen. Image-forward puts the exposure readout and sub progress in large type over the latest captured image, and is a square-screen design. On a round screen every design shows the picture filling the whole circle, with the safety shield at the top and the exposure progress running around the rim: Dashboard keeps its dials and tiles for the readings view, Halo and Orbit each arrange the readings their own way. On all three, tapping the picture steps through four views, picture with all the readings, picture with just the rim progress, picture on its own, and readings on their own, then back to the start. Holding your finger on the picture opens the full, uncropped image full screen. Only the designs your screen can draw are offered here; the others are not shown, and a choice you made on another screen shape is kept for when you go back to it.</div></div>'+
+            '</div>'+
             '</div>'+
             '<div class="subsection">'+
             '<div class="subsection-title">Notifications</div>'+
@@ -5194,7 +5203,7 @@
 
     function toggleHelp(e, btn){
       if(e) e.stopPropagation();
-      var ct = btn.closest('.card-title');
+      var ct = btn.closest('.card-title, .subsection-title');
       if(!ct) return;
       var pop = ct.nextElementSibling;
       if(pop && pop.classList.contains('help-popover')) pop.classList.toggle('open');

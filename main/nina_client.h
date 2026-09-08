@@ -7,6 +7,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "ui/info_overlay_types.h"
+#include "nina_plan_types.h"   /* nina_plan_t: the running container's Smart Exposure plan */
 
 #define MAX_FILTERS 10
 #define HFR_RING_SIZE 500  // Matches GRAPH_MAX_POINTS for HFR graph overlay
@@ -57,6 +58,7 @@ typedef struct {
     char current_filter[32];    // Current filter name (e.g., "Ha", "Sii", "L")
     char container_name[64];    // Running container name (e.g., "LRGBSHO") - stripped of "_Container"
     char container_step[64];    // Currently running step/instruction name (e.g., "Smart Exposure", "Auto Focus")
+    nina_plan_t plan;           // Parent container's Smart Exposure plan (sub bar/ring); n_items 0 = no plan
     char time_remaining[32];    // Time remaining for entire sequence (HH:MM:SS format)
     bool is_dithering;
     bool is_waiting;              // Sequence is in a wait state (TS-WAITSTART)

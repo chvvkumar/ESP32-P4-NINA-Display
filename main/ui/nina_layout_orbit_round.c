@@ -471,8 +471,8 @@ void nina_layout_orbit_set_view(dashboard_page_t *p, nina_view_mode_t mode)
 
     const bool on = (mode == NINA_VIEW_NUMBERS);
 
-    /* The sub ring's flag has one writer, the sub bar (see hide_single). Orbit
-     * keeps its ring for a one-sub target: the segments are its outer rim. */
+    /* The sub ring's flag has one writer, the sub bar, which also hides it
+     * when the container plans a single image. */
     nina_subbar_set_shown(&p->subbar, on);
     orb_show(p->alt.arc_progress_num, on);
     orb_show(p->alt.grp_mid, on);

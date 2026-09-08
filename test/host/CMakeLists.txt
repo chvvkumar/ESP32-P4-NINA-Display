@@ -371,3 +371,17 @@ add_nina_host_test(test_rainviewer
         ${NINA_REPO_ROOT}/main/radar_sites.c
         ${NINA_REPO_ROOT}/main/screen_geom.c
 )
+
+# ---------------------------------------------------------------------------
+# test_nina_plan_segments -- the pure segment list behind the shared sub bar
+# (main/nina_plan_segments.h): one segment per Smart Exposure per loop round in
+# execution order, the stale-completed rule in the running round, disabled
+# placeholders, the single-image hide rule and the collapse to one segment per
+# round past NINA_SEG_MAX. Header-only; the plan structs live in
+# main/nina_plan_types.h (which main/nina_client.h includes), so no ESP-IDF,
+# FreeRTOS or LVGL header is pulled in and no extra source is linked.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_nina_plan_segments
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_nina_plan_segments.c
+)

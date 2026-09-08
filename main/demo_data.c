@@ -244,6 +244,7 @@ static void demo_stop_cleanup(nina_client_t *instances, allsky_data_t *allsky, i
             d->exposure_iterations  = 0;
             d->exposure_total_count = 0;
             d->exposure_end_epoch   = 0;
+            memset(&d->plan, 0, sizeof(d->plan));  /* no container plan: the sub ring hides */
             d->new_image_available  = false;
             d->filter_count         = 0;
             d->guider.rms_total = 0.0f;
