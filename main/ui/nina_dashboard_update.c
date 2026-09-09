@@ -120,12 +120,19 @@ static void alt_reset_elapsed(dashboard_page_t *p);
  * by monotonic time. Falls back to the device wall clock when the pair is
  * unknown. Read lock-free by the 200 ms timer; the pair is written under both
  * locks in update_exposure_arc / update_exposure_anchor. */
-static int64_t page_now_nina(const dashboard_page_t *p) {
+/* NINA-domain "now" in MILLISECONDS. The Date header is whole seconds, so
+ * the estimate lags real time by up to one second; keeping the monotonic
+ * delta in ms (not truncated to whole seconds as before) caps that lag at
+ * one second instead of two. The backward-only wall correction below fires
+ * when this lags the seed by more than a second, so with a two-second lag
+ * it fired on ordinary jitter and the exposure ring on the capture layouts
+ * jumped back a second at a time (dash1, Two rings, 2026-09-08). */
+static int64_t page_now_nina_ms(const dashboard_page_t *p) {
     if (p->cached_nina_epoch != 0) {
-        return p->cached_nina_epoch +
-               (esp_timer_get_time() - p->cached_nina_mono_us) / 1000000;
+        return p->cached_nina_epoch * 1000 +
+               (esp_timer_get_time() - p->cached_nina_mono_us) / 1000;
     }
-    return (int64_t)time(NULL);
+    return (int64_t)time(NULL) * 1000;
 }
 
 /* The capture layouts have no exposure arc of their own: drive whatever they
@@ -146,7 +153,7 @@ static void alt_interp_tick(dashboard_page_t *p) {
     /* Backward-only wall correction (see arc_interp_timer_cb for the rationale).
      * Difference the epochs in int64 first — epoch seconds exceed float's
      * 24-bit integer precision — then cast the small result for the P4 FPU. */
-    int64_t remaining_wall_ms = (p->cached_end_epoch - page_now_nina(p)) * 1000;
+    int64_t remaining_wall_ms = p->cached_end_epoch * 1000 - page_now_nina_ms(p);
     float elapsed_wall = p->cached_total - (float)remaining_wall_ms / 1000.0f;
     if (elapsed_wall < elapsed - 1.0f) {
         p->exp_anchor_us = esp_timer_get_time();
@@ -265,14 +272,7 @@ static void arc_interp_tick(dashboard_page_t *p) {
      * timestamp): advance the cached Date-header epoch by monotonic time.
      * This timer runs WITHOUT the data lock, so it reads the page's cached
      * pair (copied under the lock in update_exposure_arc), never d directly. */
-    int64_t now_nina;
-    if (p->cached_nina_epoch != 0) {
-        now_nina = p->cached_nina_epoch +
-                   (esp_timer_get_time() - p->cached_nina_mono_us) / 1000000;
-    } else {
-        now_nina = (int64_t)time(NULL);
-    }
-    int64_t remaining_wall_ms = (p->cached_end_epoch - now_nina) * 1000;
+    int64_t remaining_wall_ms = p->cached_end_epoch * 1000 - page_now_nina_ms(p);
     float elapsed_wall = p->cached_total - (float)remaining_wall_ms / 1000.0f;
 
     if (elapsed_wall < elapsed - 1.0f) {

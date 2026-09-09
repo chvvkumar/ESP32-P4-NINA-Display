@@ -73,8 +73,7 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define RAIL_Y_RULE        172
 #define RAIL_Y_STAT_CAP    210
 #define RAIL_Y_STAT_VAL    228
-#define RAIL_Y_HERO        200
-#define RAIL_Y_STARS       296
+#define RAIL_HERO_STARS_GAP 22   /* hero digits to the star count under them */
 #define RAIL_Y_BAR         430
 #define RAIL_H_BAR          22
 #define RAIL_Y_BLOCKS      464
@@ -332,13 +331,24 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
     lv_obj_set_style_bg_opa(w->rule, LV_OPA_COVER, 0);
     lv_obj_set_style_bg_color(w->rule, lv_color_hex(RAIL_RULE_COLOR), 0);
 
+    /* The readings band: from the hairline down to the top of the rail. RMS
+     * and HFR are centred in it on their own; the hero digits with the star
+     * count directly under them are centred in it as one block (user,
+     * 2026-09-08). On a 720 panel the band is y 173..430, centre 301. */
+    const int band_cy = (RAIL_Y_RULE + 1 + RAIL_Y_BAR) / 2;
+    const int stat_h  = RAIL_Y_STAT_VAL - RAIL_Y_STAT_CAP
+                      + lv_font_get_line_height(RAIL_FONT_STAT);
+    const int stat_y  = band_cy - stat_h / 2;
+    const int hero_h  = lv_font_get_line_height(RAIL_FONT_HERO);
+    const int stars_h = lv_font_get_line_height(RAIL_FONT_STARS);
+    const int combo_h = hero_h + RAIL_HERO_STARS_GAP + stars_h;
+    const int hero_y  = band_cy - combo_h / 2;
+    const int stars_y = hero_y + hero_h + RAIL_HERO_STARS_GAP;
+
     /* 5: guiding RMS on the left and HFR on the right, one caption above each
      * figure, flanking the hero. */
     {
-        lv_obj_t *box = rail_box(parent, RAIL_STAT_W,
-                                 RAIL_Y_STAT_VAL - RAIL_Y_STAT_CAP
-                                 + lv_font_get_line_height(RAIL_FONT_STAT),
-                                 RAIL_PAD, RAIL_Y_STAT_CAP);
+        lv_obj_t *box = rail_box(parent, RAIL_STAT_W, stat_h, RAIL_PAD, stat_y);
         lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_START);
@@ -349,10 +359,8 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
                         lv_font_get_line_height(RAIL_FONT_STAT));
     }
     {
-        lv_obj_t *box = rail_box(parent, RAIL_STAT_W,
-                                 RAIL_Y_STAT_VAL - RAIL_Y_STAT_CAP
-                                 + lv_font_get_line_height(RAIL_FONT_STAT),
-                                 right - RAIL_STAT_W, RAIL_Y_STAT_CAP);
+        lv_obj_t *box = rail_box(parent, RAIL_STAT_W, stat_h,
+                                 right - RAIL_STAT_W, stat_y);
         lv_obj_set_flex_flow(box, LV_FLEX_FLOW_COLUMN);
         lv_obj_set_flex_align(box, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
                               LV_FLEX_ALIGN_END);
@@ -376,7 +384,7 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END,
                               LV_FLEX_ALIGN_END);
-        lv_obj_align(row, LV_ALIGN_TOP_MID, 0, RAIL_Y_HERO);
+        lv_obj_align(row, LV_ALIGN_TOP_MID, 0, hero_y);
         nina_dashboard_bind_tap(row, NINA_TAP_EXPOSURE);
 
         p->alt.lbl_hero = rail_label(row, RAIL_FONT_HERO, "",
@@ -399,7 +407,7 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
         lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END,
                               LV_FLEX_ALIGN_END);
-        lv_obj_align(row, LV_ALIGN_TOP_MID, 0, RAIL_Y_STARS);
+        lv_obj_align(row, LV_ALIGN_TOP_MID, 0, stars_y);
 
         p->alt.lbl_stars = rail_label(row, RAIL_FONT_STARS, "--",
                                       LV_TEXT_ALIGN_CENTER);
