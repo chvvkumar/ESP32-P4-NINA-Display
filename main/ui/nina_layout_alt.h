@@ -349,6 +349,8 @@ typedef enum {
     NINA_TAP_EXPOSURE,      /* camera + weather overlay (the square arc box) */
     NINA_TAP_VIEW_CYCLE,    /* page background: cycle nina_view_mode_t */
     NINA_TAP_CAPTURE_LONG,  /* page background, LONG PRESS: capture preview */
+    NINA_TAP_STARS,         /* image statistics overlay (the square STARS tile) */
+    NINA_TAP_POWER,         /* jump to the Summary page (the square power row) */
 } nina_tap_target_t;
 
 /**
@@ -357,6 +359,11 @@ typedef enum {
  * Required bindings per the design notes:
  *   Image-forward: capture background -> CAPTURE, sequence row -> SEQUENCE,
  *                  RMS vital -> RMS, flip vital -> FLIP, limit vital -> SESSION
+ *   Any layout with its own STARS tile -> NINA_TAP_STARS (image statistics
+ *                  overlay, same as the square Dashboard's STARS tile);
+ *                  any layout with its own power/status row -> NINA_TAP_POWER
+ *                  (USER-claim jump to the Summary page, same as the square
+ *                  Dashboard's power row)
  *
  * NINA_TAP_VIEW_CYCLE routes SHORT_CLICKED (not CLICKED) so the same object can
  * also carry NINA_TAP_CAPTURE_LONG: LVGL raises CLICKED on the release of a

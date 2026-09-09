@@ -387,6 +387,7 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
     lv_obj_align(p->alt.lbl_target, LV_ALIGN_CENTER, 0, RAILR_DY_NAME);
     ui_fit_label(p->alt.lbl_target, UI_FIT_LADDER_NAME, UI_FIT_LADDER_NAME_N,
                  railr_row_w(RAILR_EXT_NAME, RAILR_NAME_PAD));
+    nina_dashboard_bind_tap(p->alt.lbl_target, NINA_TAP_CAPTURE);
 
     /* 4: guiding RMS on the left and HFR on the right, one caption above each
      * figure, flanking the hero. Both boxes hug the chord at their own row, so
@@ -518,6 +519,8 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
                                 NINA_TAP_FILTER);
         nina_dashboard_bind_tap(lv_obj_get_parent(p->alt.lbl_count),
                                 NINA_TAP_FILTER);
+        nina_dashboard_bind_tap(lv_obj_get_parent(p->alt.lbl_stars),
+                                NINA_TAP_STARS);
     }
 
     /* 10: the power strip on a low chord. Every cell is always present so the
@@ -531,6 +534,7 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
         lv_obj_set_style_bg_color(w->pwr_strip, lv_color_hex(RAILR_PWR_BG), 0);
         lv_obj_set_style_radius(w->pwr_strip, 6, 0);
         lv_obj_set_style_pad_top(w->pwr_strip, RAILR_PWR_PAD_TOP, 0);
+        nina_dashboard_bind_tap(w->pwr_strip, NINA_TAP_POWER);
         lv_obj_set_flex_flow(w->pwr_strip, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(w->pwr_strip, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
