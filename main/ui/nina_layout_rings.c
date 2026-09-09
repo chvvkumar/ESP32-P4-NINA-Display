@@ -474,6 +474,7 @@ static void rg_power_build(dashboard_page_t *p, lv_obj_t *parent, int cw)
     lv_obj_set_size(p->alt.grp_bottom, cw, RG_PWR_H);
     lv_obj_align(p->alt.grp_bottom, LV_ALIGN_BOTTOM_MID, 0, -RG_PWR_BOTTOM);
     lv_obj_set_style_pad_all(p->alt.grp_bottom, 0, 0);
+    nina_dashboard_bind_tap(p->alt.grp_bottom, NINA_TAP_POWER);
 
     lv_obj_t *rule = rg_rule(p->alt.grp_bottom, cw);
     lv_obj_align(rule, LV_ALIGN_TOP_LEFT, 0, 0);
@@ -652,7 +653,7 @@ void nina_layout_rings_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
                                  LV_TEXT_ALIGN_CENTER);
     lv_obj_align(p->alt.lbl_target, LV_ALIGN_TOP_LEFT, RG_MARGIN, RG_Y_TARGET);
     ui_fit_label(p->alt.lbl_target, UI_FIT_LADDER_NAME, UI_FIT_LADDER_NAME_N, cw);
-    nina_dashboard_bind_tap(p->alt.lbl_target, NINA_TAP_SEQUENCE);
+    nina_dashboard_bind_tap(p->alt.lbl_target, NINA_TAP_CAPTURE);
 
     lv_obj_t *rule1 = rg_rule(parent, cw);
     lv_obj_align(rule1, LV_ALIGN_TOP_LEFT, RG_MARGIN, RG_Y_RULE1);
@@ -780,6 +781,7 @@ void nina_layout_rings_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
         p->alt.lbl_stars = rg_stack(parent, false, arm_w, top_2, RG_FONT_ARM,
                                     "stars",
                                 LV_TEXT_ALIGN_CENTER, RG_ARM_X);
+        nina_dashboard_bind_tap(p->alt.lbl_stars, NINA_TAP_STARS);
     }
 
     /* 6: the lower band, below both columns: the flip countdown toward the

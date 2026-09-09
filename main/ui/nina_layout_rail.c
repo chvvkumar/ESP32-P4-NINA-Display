@@ -302,6 +302,7 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
                                    LV_TEXT_ALIGN_RIGHT);
     lv_obj_set_pos(p->alt.lbl_target, RAIL_PAD, RAIL_Y_NAME);
     ui_fit_label(p->alt.lbl_target, UI_FIT_LADDER_NAME, UI_FIT_LADDER_NAME_N, cw);
+    nina_dashboard_bind_tap(p->alt.lbl_target, NINA_TAP_CAPTURE);
 
     /* 3: the sequence row, container on the left, safety shield in the middle,
      * running step on the right. The whole row opens the sequence overlay. */
@@ -402,9 +403,11 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
 
         p->alt.lbl_stars = rail_label(row, RAIL_FONT_STARS, "--",
                                       LV_TEXT_ALIGN_CENTER);
+        nina_dashboard_bind_tap(p->alt.lbl_stars, NINA_TAP_STARS);
         w->cap[RAIL_CAP_STARS] = rail_cap_label(row, "STARS", LV_TEXT_ALIGN_LEFT);
         lv_obj_set_style_translate_y(w->cap[RAIL_CAP_STARS],
             RAIL_FONT_CAP->base_line - RAIL_FONT_STARS->base_line, 0);
+        nina_dashboard_bind_tap(w->cap[RAIL_CAP_STARS], NINA_TAP_STARS);
     }
 
     /* 8: the rail itself. The spine's 200 ms tick owns its value (0..1000) and
@@ -488,6 +491,7 @@ void nina_layout_rail_create(dashboard_page_t *p, lv_obj_t *parent, int page_ind
         lv_obj_set_style_bg_color(w->pwr_strip, lv_color_hex(RAIL_PWR_BG), 0);
         lv_obj_set_style_radius(w->pwr_strip, 6, 0);
         lv_obj_set_style_pad_top(w->pwr_strip, RAIL_PWR_PAD_TOP, 0);
+        nina_dashboard_bind_tap(w->pwr_strip, NINA_TAP_POWER);
         lv_obj_set_flex_flow(w->pwr_strip, LV_FLEX_FLOW_ROW);
         lv_obj_set_flex_align(w->pwr_strip, LV_FLEX_ALIGN_START,
                               LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
