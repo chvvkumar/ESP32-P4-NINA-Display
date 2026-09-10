@@ -310,14 +310,18 @@ static void summary_bar_interp_cb(lv_timer_t *timer) {
          * the cached Date-header epoch by monotonic time. This timer runs
          * WITHOUT the data lock, so it reads the card's cached pair (copied
          * under the lock in summary_page_update), never the instance struct. */
-        int64_t now_nina;
+        /* Milliseconds, not whole seconds: the Date header is already whole
+         * seconds, and truncating the monotonic delta too gave up to 2 s of
+         * lag, which tripped the 1 s backward correction below on ordinary
+         * jitter (same fix as page_now_nina_ms in nina_dashboard_update.c). */
+        int64_t now_nina_ms;
         if (sc->cached_nina_epoch != 0) {
-            now_nina = sc->cached_nina_epoch +
-                       (esp_timer_get_time() - sc->cached_nina_mono_us) / 1000000;
+            now_nina_ms = sc->cached_nina_epoch * 1000 +
+                          (esp_timer_get_time() - sc->cached_nina_mono_us) / 1000;
         } else {
-            now_nina = (int64_t)time(NULL);
+            now_nina_ms = (int64_t)time(NULL) * 1000;
         }
-        int64_t remaining_wall_ms = (sc->cached_end_epoch - now_nina) * 1000;
+        int64_t remaining_wall_ms = sc->cached_end_epoch * 1000 - now_nina_ms;
         float elapsed_wall = sc->cached_total - (float)remaining_wall_ms / 1000.0f;
 
         bool reanchored = false;
