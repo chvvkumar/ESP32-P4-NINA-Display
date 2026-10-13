@@ -4,8 +4,10 @@
  *
  * A segment is one IMAGE of one Smart Exposure of one loop round, in
  * execution order: round 0's items image by image, then round 1's, and so
- * on. Every segment carries weight 1; a 20-iteration item is 20 separate
- * segments, not one wide one. Disabled or zero-iteration items still draw
+ * on. Every segment carries weight 1 (images, for the fill maths) and a
+ * drawn `span` of its item's exposure seconds (1 when unknown), so a
+ * 20-iteration item is 20 separate segments, each as wide as one of its
+ * exposures. Disabled or zero-iteration items still draw
  * one PLACEHOLDER segment of weight 1 per round. Past NINA_SEG_MAX segments
  * (by total image count) the list collapses to one segment per round.
  *
@@ -24,6 +26,8 @@ typedef struct {
     int   item;          /* index into plan->items, or -1 for a per-round segment (overflow mode) */
     int   round;         /* 0-based loop round */
     int   weight;        /* 1 for a per-image segment, or the round's total images in overflow mode */
+    float span;          /* drawn width: the item's exposure seconds per image (1 when
+                          * unknown), or the round's total seconds in overflow mode */
     float done_frac;     /* 0 or 1 for a per-image segment (fractional only in overflow mode) */
     float fill_frac;     /* ACTIVE only: exp_frac (or the overflow round's fractional fill), else == done_frac */
     bool  round_last;    /* true on the last segment of a round: the wider gap follows it */
@@ -55,6 +59,14 @@ static inline int nina_plan_item_weight(const nina_plan_item_t *it)
         return 1;
     }
     return it->iterations;
+}
+
+/* Drawn width of one image of this item: its exposure seconds, or 1 when the
+ * plan carries no exposure time (demo mode, a plan-less source), which keeps
+ * every image the same width as before. */
+static inline float nina_plan_item_span(const nina_plan_item_t *it)
+{
+    return (it->exposure_s > 0.0f) ? it->exposure_s : 1.0f;
 }
 
 /* Fill @p out with the ordered segment list. Returns the count (0 when the
@@ -102,12 +114,15 @@ static inline int nina_plan_segments(const nina_plan_t *plan, float exp_frac,
     const int running_idx = (plan->running_idx >= 0 && plan->running_idx < n_items)
                                 ? plan->running_idx : -1;
 
-    /* Images per round, and how many of them the running round has finished. */
+    /* Images per round, how many of them the running round has finished, and
+     * the round's drawn width (seconds, or images when no exposure is known). */
     int round_images = 0;
     int round_finished = 0;
+    float round_span = 0.0f;
     for (int i = 0; i < n_items; i++) {
         const int w = nina_plan_item_weight(&plan->items[i]);
         round_images += w;
+        round_span += (float)w * nina_plan_item_span(&plan->items[i]);
         if (running_idx >= 0) {
             if (i < running_idx) {
                 round_finished += w;
@@ -146,6 +161,7 @@ static inline int nina_plan_segments(const nina_plan_t *plan, float exp_frac,
             s->item = -1;
             s->round = r;
             s->weight = round_images;
+            s->span = round_span;
             s->round_last = true;
             if (r < round_done) {
                 s->state = NINA_SEG_DONE;
@@ -186,6 +202,7 @@ static inline int nina_plan_segments(const nina_plan_t *plan, float exp_frac,
                 s->item = i;
                 s->round = r;
                 s->weight = 1;
+                s->span = nina_plan_item_span(it);
                 s->round_last = (i == n_items - 1) && (k == w - 1);
                 s->done_frac = 0.0f;
                 s->fill_frac = 0.0f;

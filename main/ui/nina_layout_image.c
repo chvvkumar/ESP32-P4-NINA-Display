@@ -5,9 +5,10 @@
  * The last decoded capture fills the page; two transparent text groups sit
  * flush to the top and bottom screen edges over it: identity (top) and one
  * 64 px baseline value row over a 12 px block ledge (bottom). The value row
- * carries TOTAL RMS and the sub counter on the left, elapsed seconds and the
- * filter name on the right, with an empty centre column where the page dots
- * live. No tiles, no scrim, no stamp, no captions, no guiding underline:
+ * carries TOTAL RMS on the left, the sub counter over the filter name in the
+ * centre, and the elapsed seconds on the right with the exposure length
+ * ("/ 300s", 28 px) stacked above them in the same fixed-width box. No
+ * tiles, no scrim, no stamp, no captions, no guiding underline:
  * legibility rests on the text alone, by the user's choice after on-device
  * review.
  *
@@ -76,7 +77,9 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define IF_FONT_ELAPSED   (&lv_font_hanken_bold_64)
 #define IF_FONT_RMS       (&lv_font_hanken_bold_64)   /* match the exposure readout */
 #define IF_FONT_COUNT     (&lv_font_hanken_bold_28)
+#define IF_FONT_EXP_TOTAL (&lv_font_hanken_bold_28)   /* "/ 300s" over the elapsed digits */
 #define IF_FONT_FILTER    (&lv_font_montserrat_24)
+#define IF_EXP_TOTAL_GAP  2     /* exposure length -> elapsed digits */
 
 /* The page root IS full-bleed 720x720 for this layout: create_dashboard_page()
  * in nina_dashboard.c sizes it screen_size() square and offsets it by
@@ -88,7 +91,6 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define IF_BLOCK_H        12    /* block ledge, flush on the bottom edge */
 #define IF_BAND_H         86    /* value band above the ledge */
 #define IF_GAP_LEFT       16    /* RMS -> counter */
-#define IF_GAP_RIGHT      12    /* elapsed -> filter */
 
 #define IF_TARGET_FG      0xf2f2f4
 #define IF_OK_FG          0x10b981
@@ -296,7 +298,10 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     lv_obj_remove_style_all(p->alt.tile_hero);
     lv_obj_remove_flag(p->alt.tile_hero, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(p->alt.tile_hero, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(p->alt.tile_hero, LV_PCT(100), IF_BAND_H + IF_BLOCK_H);
+    /* The band grows by the exposure-length line that rides above the elapsed
+     * digits; everything is bottom-aligned, so nothing else moves. */
+    int total_h = lv_font_get_line_height(IF_FONT_EXP_TOTAL) + IF_EXP_TOTAL_GAP;
+    lv_obj_set_size(p->alt.tile_hero, LV_PCT(100), IF_BAND_H + total_h + IF_BLOCK_H);
     lv_obj_set_style_pad_all(p->alt.tile_hero, 0, 0);
     lv_obj_set_style_pad_gap(p->alt.tile_hero, 0, 0);
     lv_obj_set_flex_flow(p->alt.tile_hero, LV_FLEX_FLOW_COLUMN);
@@ -310,7 +315,7 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     lv_obj_remove_style_all(p->alt.row_vals);
     lv_obj_remove_flag(p->alt.row_vals, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_remove_flag(p->alt.row_vals, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_set_size(p->alt.row_vals, LV_PCT(100), row_h);
+    lv_obj_set_size(p->alt.row_vals, LV_PCT(100), row_h + total_h);
     lv_obj_set_style_pad_hor(p->alt.row_vals, IF_GROUP_PAD_H, 0);
     lv_obj_set_style_pad_ver(p->alt.row_vals, 0, 0);
     lv_obj_set_style_pad_gap(p->alt.row_vals, 0, 0);
@@ -346,10 +351,25 @@ void nina_layout_image_create(dashboard_page_t *p, lv_obj_t *parent, int page_in
     lv_obj_set_style_text_align(p->alt.lbl_filter, LV_TEXT_ALIGN_CENTER, 0);
     nina_dashboard_bind_tap(p->alt.lbl_filter, NINA_TAP_FILTER);
 
-    /* Right: elapsed, "s" pinned by right alignment, bottom-aligned. */
-    lv_obj_t *grp_right = if_hrow(p->alt.row_vals, IF_GAP_RIGHT);
+    /* Right: a two-line stack, exposure length ("/ 300s", hanken 28) over the
+     * elapsed digits, both right aligned in the SAME fixed box sized to
+     * "9999s" at 64, so the "s" stays pinned and nothing moves sideways. */
+    lv_obj_t *grp_right = lv_obj_create(p->alt.row_vals);
+    lv_obj_remove_style_all(grp_right);
+    lv_obj_remove_flag(grp_right, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(grp_right, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(grp_right, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_flex_flow(grp_right, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(grp_right, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_all(grp_right, 0, 0);
+    lv_obj_set_style_pad_gap(grp_right, IF_EXP_TOTAL_GAP, 0);
+    p->alt.lbl_exp_total = if_fixed_label(grp_right, IF_FONT_EXP_TOTAL, "9999s", LV_TEXT_ALIGN_RIGHT);
+    lv_obj_set_style_translate_y(p->alt.lbl_exp_total, 0, 0);   /* stacked, not on the 64 baseline */
+    lv_label_set_text(p->alt.lbl_exp_total, "");
     p->alt.lbl_elapsed = if_fixed_label(grp_right, IF_FONT_ELAPSED, "9999s", LV_TEXT_ALIGN_RIGHT);
     lv_label_set_text(p->alt.lbl_elapsed, "--s");
+    /* Same box as the 64 px digits, so both right edges coincide. */
+    lv_obj_set_width(p->alt.lbl_exp_total, lv_obj_get_style_width(p->alt.lbl_elapsed, 0));
 
     /* The ledge. The spine drives its progress and its theme. */
     nina_subbar_create(&p->subbar, p->alt.tile_hero, IF_BLOCK_H);
@@ -374,6 +394,7 @@ static void if_theme_page(dashboard_page_t *p, int gb) {
 
     lv_obj_set_style_text_color(p->alt.lbl_count, lv_color_hex(text), 0);
     lv_obj_set_style_text_color(p->alt.lbl_elapsed, lv_color_hex(text), 0);
+    lv_obj_set_style_text_color(p->alt.lbl_exp_total, lv_color_hex(text), 0);
     lv_obj_set_style_text_color(p->alt.lbl_filter,
         lv_color_hex(if_filter_color(p->subbar.cached_filter, p->alt.inst, gb)), 0);
     /* The RMS tone depends on the live value; the next update() repaints it. */
@@ -471,6 +492,19 @@ void nina_layout_image_update(dashboard_page_t *p, const nina_client_t *d,
         if_set_text(p->alt.lbl_filter, filter);
         lv_obj_set_style_text_color(p->alt.lbl_filter,
             lv_color_hex(if_filter_color(filter, instance_idx, gb)), 0);
+    }
+
+    /* Exposure length over the digits; blank when nothing is exposing. */
+    {
+        char buf[16];
+        int total = (int)d->exposure_total;
+        if (total > 9999) total = 9999;
+        if (total > 0) {
+            snprintf(buf, sizeof(buf), "/ %ds", total);
+        } else {
+            buf[0] = '\0';
+        }
+        if_set_text(p->alt.lbl_exp_total, buf);
     }
 
     /* Elapsed: the tick writes the digits; only the idle reset lives here,
