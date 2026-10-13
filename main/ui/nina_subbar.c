@@ -2,12 +2,13 @@
  * @file nina_subbar.c
  * @brief Segmented sub bar, block row and ring (see nina_subbar.h).
  *
- * The segment list comes from nina_plan_segments.h: one segment per Smart
- * Exposure per loop round of the running container, in execution order, as
- * wide as that item's iteration count. Row form: flex grow = weight with a
+ * The segment list comes from nina_plan_segments.h: one segment per image of
+ * each Smart Exposure per loop round of the running container, in execution
+ * order, drawn as wide as that item's exposure seconds (`span`; one unit when
+ * unknown). Row form: flex grow = span scaled so the widest is 255, with a
  * 4 px floor, 3 px radius, 3 px gap widening to 9 px at a round boundary.
  * Ring form: the same segments as lv_arc arcs on one circle, angular span
- * proportional to weight with about 4 px of arc as the floor and the same two
+ * proportional to span with about 4 px of arc as the floor and the same two
  * gaps. Done = the item's filter colour, running = 30 % base plus a fill,
  * remaining = a dim (LV_OPA_30) preview of that same item's filter colour;
  * the running segment's fill is full brightness, its unfilled part dim
@@ -171,10 +172,19 @@ static uint32_t sb_fingerprint(void) {
     for (int i = 0; i < s_nsegs; i++) {
         uint32_t v = (uint32_t)(s_segs[i].item + 1) * 131u
                    + (uint32_t)s_segs[i].weight * 7u
+                   + (uint32_t)(s_segs[i].span * 4.0f) * 3u
                    + (s_segs[i].round_last ? 1u : 0u);
         h = (h ^ v) * 16777619u;
     }
     return h ^ (uint32_t)s_nsegs;
+}
+
+/* Drawn width of segment @p k: exposure seconds per image (or 1 when the plan
+ * carries none), so a 420 s sub is wider than a 240 s one. The fill maths
+ * keeps using `weight` (images), never this. */
+static float sb_span(int k) {
+    float s = s_segs[k].span;
+    return (s > 0.0f) ? s : 1.0f;
 }
 
 /* Wider gap after segment @p i. A round boundary takes it, but only when a
@@ -217,7 +227,7 @@ static void sb_ring_geom(const nina_subbar_t *sb, int i, int *a0, int *a1) {
 
     float total = 0.0f;
     for (int k = 0; k < n; k++) {
-        total += (float)((s_segs[k].weight > 0) ? s_segs[k].weight : 1);
+        total += sb_span(k);
     }
     if (total <= 0.0f) total = (float)n;
 
@@ -228,7 +238,7 @@ static void sb_ring_geom(const nina_subbar_t *sb, int i, int *a0, int *a1) {
                     : 1.0f;
     float need = 0.0f;
     for (int k = 0; k < n; k++) {
-        float d = draw * (float)((s_segs[k].weight > 0) ? s_segs[k].weight : 1) / total;
+        float d = draw * sb_span(k) / total;
         need += (d < min_deg) ? min_deg : d;
     }
     const float scale = (need > draw && need > 0.0f) ? (draw / need) : 1.0f;
@@ -236,7 +246,7 @@ static void sb_ring_geom(const nina_subbar_t *sb, int i, int *a0, int *a1) {
     float start = sb->ring_gap * 0.5f;
     float w = 1.0f;
     for (int k = 0; k <= i; k++) {
-        float d = draw * (float)((s_segs[k].weight > 0) ? s_segs[k].weight : 1) / total;
+        float d = draw * sb_span(k) / total;
         if (d < min_deg) d = min_deg;
         d *= scale;
         if (k == i) {
@@ -341,6 +351,13 @@ static void sb_rebuild_blocks(nina_subbar_t *sb) {
     sb->hold_within = 0.0f;
     sb_apply_visibility(sb);
 
+    /* Row widths are flex grow, a uint8_t: scale the widest span to 255 so a
+     * 420 s sub next to a 240 s one keeps its 7:4 ratio without clipping. */
+    float max_span = 1.0f;
+    for (int i = 0; i < n; i++) {
+        if (sb_span(i) > max_span) max_span = sb_span(i);
+    }
+
     for (int i = 0; i < n; i++) {
         lv_obj_t *b;
         if (sb->ring) {
@@ -348,7 +365,7 @@ static void sb_rebuild_blocks(nina_subbar_t *sb) {
             sb_ring_geom(sb, i, &a0, &a1);
             b = ui_dial_arc(sb->cont, sb->ring_radius, sb->ring_width, a0, a1);
         } else {
-            int w = s_segs[i].weight;
+            int w = (int)(sb_span(i) * 255.0f / max_span + 0.5f);
             if (w < 1)   w = 1;
             if (w > 255) w = 255;      /* lv_obj_set_flex_grow takes a uint8_t */
             b = lv_obj_create(sb->cont);

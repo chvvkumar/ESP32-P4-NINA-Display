@@ -163,6 +163,8 @@ typedef struct dashboard_page_s {
         lv_obj_t *lbl_elapsed;      /* "247s", hanken 64, written by the tick only;
                                       * also round layout 0's elapsed digits */
         lv_obj_t *lbl_filter;       /* filter name, montserrat 24, filter colour */
+        lv_obj_t *lbl_exp_total;    /* "/ 300s" exposure length over the elapsed
+                                      * digits, hanken 28, square Image-forward only */
         lv_obj_t *lbl_unit;         /* elapsed unit "s", round layout 0 only */
         int       inst;             /* owning NINA instance index */
 
