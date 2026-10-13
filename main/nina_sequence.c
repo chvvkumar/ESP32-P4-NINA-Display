@@ -342,6 +342,10 @@ static void build_plan(cJSON *parent, cJSON *running, nina_plan_t *out) {
             slot->iterations = iters;
             slot->completed  = completed;
             slot->enabled    = enabled;
+            cJSON *exp_s = cJSON_GetObjectItem(item, "ExposureTime");
+            if (exp_s && cJSON_IsNumber(exp_s) && exp_s->valuedouble > 0.0) {
+                slot->exposure_s = (float)exp_s->valuedouble;
+            }
             slot->running    = (item == running);
             if (slot->running) out->running_idx = count;
         }

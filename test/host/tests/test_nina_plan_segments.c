@@ -233,6 +233,47 @@ int main(void) {
         check_int("d: last round index", segs[19].round, 19);
     }
 
+    /* ---- (d2) span: exposure seconds per image (astromele1 2026-10-12:
+     *      L 240 s x 2 done, Ha 420 s x 1 running, one round) ---------------- */
+    {
+        nina_plan_t p;
+        memset(&p, 0, sizeof(p));
+        p.n_items = 2;
+        p.rounds = 1;
+        p.running_idx = 1;
+        p.total_images = 3;
+        snprintf(p.items[0].filter, sizeof(p.items[0].filter), "L");
+        p.items[0].iterations = 2;
+        p.items[0].completed = 2;
+        p.items[0].exposure_s = 240.0f;
+        p.items[0].enabled = true;
+        snprintf(p.items[1].filter, sizeof(p.items[1].filter), "Ha");
+        p.items[1].iterations = 1;
+        p.items[1].exposure_s = 420.0f;
+        p.items[1].enabled = true;
+        p.items[1].running = true;
+        int n = nina_plan_segments(&p, 0.25f, segs, NINA_SEG_MAX);
+        check_int("d2: three per-image segments", n, 3);
+        check_f("d2: L image 0 span 240", segs[0].span, 240.0f);
+        check_f("d2: L image 1 span 240", segs[1].span, 240.0f);
+        check_f("d2: Ha span 420", segs[2].span, 420.0f);
+        check_int("d2: weight stays 1 per image", segs[2].weight, 1);
+        check_int("d2: Ha is ACTIVE", segs[2].state, NINA_SEG_ACTIVE);
+        check_f("d2: Ha fill = exp_frac", segs[2].fill_frac, 0.25f);
+
+        /* unknown exposure -> span 1, the pre-span width */
+        p.items[1].exposure_s = 0.0f;
+        nina_plan_segments(&p, 0.25f, segs, NINA_SEG_MAX);
+        check_f("d2: unknown exposure -> span 1", segs[2].span, 1.0f);
+
+        /* overflow: span = the round's total seconds */
+        nina_plan_t q;
+        build_lrgbsho(&q, 20);
+        for (int i = 0; i < 7; i++) q.items[i].exposure_s = 60.0f * (float)(i + 1);
+        nina_plan_segments(&q, 0.5f, segs, NINA_SEG_MAX);
+        check_f("d2: overflow span = round seconds", segs[0].span, 60.0f * 28.0f);
+    }
+
     /* ---- (e) no plan ----------------------------------------------------- */
     {
         nina_plan_t p;

@@ -16,6 +16,8 @@ typedef struct {
     char filter[32];     /* Smart Exposure "Filter", "" when absent */
     int  iterations;     /* per round; placeholders carry 1 */
     int  completed;      /* CompletedIterations of the current round, clamped 0..iterations */
+    float exposure_s;    /* Smart Exposure "ExposureTime" in seconds, 0 when unknown;
+                          * sets the drawn width of each of its images */
     bool enabled;        /* false = Status DISABLED or Iterations <= 0: a dim placeholder */
     bool running;        /* this item is the RUNNING Smart Exposure */
 } nina_plan_item_t;
