@@ -18,23 +18,25 @@ choice NINA_PANEL_FAMILY
         bool "Round (3.4C 800x800 and 4C 720x720, JD9365)"
 endchoice
 
-endmenu
-
 # espressif/esp_hosted 3.1.0 (published 2026-11-05) made its USB host
-# dependencies conditional on these three options. The component manager reads
-# those conditions for every published version while resolving dependencies,
-# and esp_hosted 2.12.3 (the version this project pins) does not define them,
-# so a fresh configure ended with "Missing required kconfig option after
-# retry". Declaring them here, hidden and off, lets the conditions be
-# evaluated. Remove once the pinned esp_hosted defines them itself.
+# dependencies conditional on these three options, with rules of the form
+# "$CONFIG{...} == 1". The component manager evaluates those rules for every
+# published version each time CMake configures, and esp_hosted 2.12.3 (the
+# version this project pins) does not define the options, so every configure
+# ended with "Missing required kconfig option after retry". They must exist
+# in sdkconfig.json and must be integers: a bool fails the rule with
+# 'Invalid boolean "1" in "if" clause'. Zero keeps the USB dependencies out.
+# Remove once the pinned esp_hosted defines them itself.
 config ESP_HOSTED_HOST_USB_CDC_ACM_MANIFEST
-    bool
-    default n
+    int
+    default 0
 
 config ESP_HOSTED_HOST_USB_CHERRYUSB_MANIFEST
-    bool
-    default n
+    int
+    default 0
 
 config ESP_HOSTED_HOST_USB_RNDIS_MANIFEST
-    bool
-    default n
+    int
+    default 0
+
+endmenu
