@@ -25,9 +25,10 @@ typedef struct {
     char target_name[64];
     char prev_target_container[64];   // last RUNNING target container Name (stripped) — for new-target detection
     char profile_name[64];
+    char profile_id[64];      // NINA profile Id (falls back to Name); keys the per-profile colours
     char telescope_name[64];
     char camera_name[64];
-    
+
     struct {
         float temp;
         float cooler_power;
@@ -143,6 +144,17 @@ typedef struct {
     // static data (profile name, filters, telescope) on the next poll cycle.
     _Atomic bool profile_refresh_needed;
 
+    // Set on every static (re)fetch and by the PROFILE-REMOVED WebSocket event.
+    // The instance poll task consumes it after the profile switch and drops
+    // remembered per-profile colours whose profile no longer exists in NINA.
+    _Atomic bool profile_prune_needed;
+
+    // Set when a profile change may have been missed (the WebSocket just
+    // (re)connected, or the static pass got no profile id). The poll re-reads
+    // the active profile, at most once per NINA_PROFILE_CHECK_MIN_MS, and asks
+    // for a full static pass only when the id really changed.
+    _Atomic bool profile_check_needed;
+
     // Timestamp (ms from esp_timer_get_time/1000) of last successful poll.
     // Used by the UI to display a stale-data indicator.  0 = never polled.
     int64_t last_successful_poll_ms;
@@ -214,6 +226,7 @@ int64_t nina_client_now_epoch(const nina_client_t *client);
 // 30-600 s apart, so probing on every fast cycle just doubled the request rate
 // exactly when the link was already degraded enough to drop the WebSocket.
 #define NINA_POLL_IMAGE_COUNT_MS 8000
+#define NINA_PROFILE_CHECK_MIN_MS 30000  // Floor between active-profile re-reads
 
 // Polling state - tracks timers and cached static data between polls
 typedef struct {
@@ -221,12 +234,14 @@ typedef struct {
     int64_t last_slow_poll_ms;
     int64_t last_sequence_poll_ms;
     int64_t last_image_count_ms;   // Last /image-history count probe (WS-down path)
+    int64_t last_profile_check_ms; // Last active-profile re-read (profile_check_needed)
 
     // Static data fetched once
     bool static_fetched;
 
     // Cached static data (survives across polls)
     char cached_profile[64];
+    char cached_profile_id[64];
     char cached_telescope[64];
     nina_filter_t cached_filters[MAX_FILTERS];
     int cached_filter_count;
@@ -258,6 +273,12 @@ void nina_client_poll_heartbeat(const char *base_url, nina_client_t *data, int i
 // (profile, filters, focuser, mount, switch, sequence) so it's ready on page switch.
 // Skips fast-changing data: guider RMS, HFR/stars, current filter position.
 void nina_client_poll_background(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance);
+
+// Fetch NINA's full profile list (profile/show without active=true) and drop
+// remembered per-profile colours whose profile no longer exists. Skips the
+// clean on a failed fetch, a non-array or empty list, or a list that does not
+// contain the loaded profile. Call from the instance poll task.
+void nina_client_prune_profiles(const char *base_url, int instance);
 
 // DNS pre-check: resolve hostname from a NINA base URL.
 // Returns true if hostname resolves (or is an IP address), false on DNS failure.

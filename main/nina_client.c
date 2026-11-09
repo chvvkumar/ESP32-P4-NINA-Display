@@ -37,6 +37,7 @@ static const char *TAG = "nina_client";
 // =============================================================================
 
 #include "app_config.h"  // MAX_NINA_INSTANCES
+#include "nina_profile_sets.h"
 
 typedef struct {
     TaskHandle_t      task;
@@ -495,6 +496,30 @@ void nina_poll_state_init(nina_poll_state_t *state) {
     state->cached_image_count = -1;  // Force initial full fetch
 }
 
+/* A profile change is announced by the PROFILE-CHANGED WebSocket event, but
+ * the WebSocket is down whenever no NINA page is showing or the screen sleeps,
+ * and NINA stays reachable through the change, so no static pass would run.
+ * When profile_check_needed is set, re-read the active profile (one GET, at
+ * most once per NINA_PROFILE_CHECK_MIN_MS) and raise profile_refresh_needed
+ * only when the id differs from the one the static data was fetched for. */
+static void profile_check_if_due(const char *base_url, nina_client_t *data,
+                                 nina_poll_state_t *state, int instance, int64_t now_ms) {
+    if (!state->static_fetched || !atomic_load(&data->profile_check_needed)) {
+        return;
+    }
+    if (state->last_profile_check_ms != 0 &&
+        now_ms - state->last_profile_check_ms < NINA_PROFILE_CHECK_MIN_MS) {
+        return;
+    }
+    atomic_store(&data->profile_check_needed, false);
+    state->last_profile_check_ms = now_ms;
+    fetch_profile_robust(base_url, data);
+    if (data->profile_id[0] != '\0' && strcmp(data->profile_id, state->cached_profile_id) != 0) {
+        ESP_LOGI(TAG, "Instance %d: NINA profile differs from the cached one, refreshing", instance);
+        atomic_store(&data->profile_refresh_needed, true);
+    }
+}
+
 void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state_t *state, int instance) {
     // Set per-task HTTP context for client reuse during this poll cycle.
     // Lazily create the persistent keep-alive slot on first use (mirrors the
@@ -521,6 +546,27 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
     ESP_LOGI(TAG, "=== Polling NINA data (%s: %s) ===",
              state->bundle_not_available ? "tiered" : "bundled",
              state->bundle_not_available ? "equipment/*/info" : "equipment/info");
+
+    // --- Handle PROFILE-CHANGED: invalidate cached static data ---
+    // Runs BEFORE the equipment fetch so the bundle below is asked for the
+    // static part (the filter list) in this same cycle. After it, the bundle
+    // had already run without the list and the old profile's filters stayed.
+    profile_check_if_due(base_url, data, state, instance, now_ms);
+    if (atomic_exchange(&data->profile_refresh_needed, false)) {
+        state->static_fetched = false;
+        state->cached_image_count = -1;
+        nina_connection_set_static_data_ready(instance, false);
+        ESP_LOGI(TAG, "Profile changed, re-fetching static data for instance %d", instance);
+    }
+
+    // Every static pass starts from an empty filter list. The list in hand may
+    // belong to another profile, and the filter sync removes the colours of
+    // filters missing from the list, so a stale list must never be passed on
+    // as the loaded profile's. The fetch below refills it when NINA reports one.
+    if (!state->static_fetched && nina_client_lock(data, 100)) {
+        data->filter_count = 0;
+        nina_client_unlock(data);
+    }
 
     // --- BUNDLED: All equipment in one request (ninaAPI 2.2.15+) ---
     if (!state->bundle_not_available) {
@@ -573,18 +619,14 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         return;
     }
 
-    // --- Handle PROFILE-CHANGED: invalidate cached static data ---
-    if (atomic_exchange(&data->profile_refresh_needed, false)) {
-        state->static_fetched = false;
-        state->cached_image_count = -1;
-        nina_connection_set_static_data_ready(instance, false);
-        ESP_LOGI(TAG, "Profile changed — re-fetching static data for instance %d", instance);
-    }
-
     // --- ONCE: Static data (profile, image history; filters/switch/safety handled by bundle) ---
     if (!state->static_fetched) {
         perf_timer_start(&g_perf.poll_profile);
         fetch_profile_robust(base_url, data);
+        atomic_store(&data->profile_prune_needed, true);   /* once per connect */
+        /* This fetch is the profile check. No id = it failed: re-read later. */
+        atomic_store(&data->profile_check_needed, data->profile_id[0] == '\0');
+        state->last_profile_check_ms = now_ms;
         perf_timer_stop(&g_perf.poll_profile);
 
         if (state->bundle_not_available) {
@@ -605,6 +647,7 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         perf_timer_stop(&g_perf.poll_image_history);
 
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
+        snprintf(state->cached_profile_id, sizeof(state->cached_profile_id), "%s", data->profile_id);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
         memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
         state->cached_filter_count = data->filter_count;
@@ -619,6 +662,7 @@ void nina_client_poll(const char *base_url, nina_client_t *data, nina_poll_state
         data->sequence_poll_needed = true;
     } else if (nina_client_lock(data, 100)) {
         snprintf(data->profile_name, sizeof(data->profile_name), "%s", state->cached_profile);
+        snprintf(data->profile_id, sizeof(data->profile_id), "%s", state->cached_profile_id);
         if (state->cached_telescope[0] != '\0') {
             snprintf(data->telescope_name, sizeof(data->telescope_name), "%s", state->cached_telescope);
         }
@@ -777,6 +821,21 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
     // Use the full bundle only on first connect (to seed static data: filters, switch, etc.).
     // Subsequent background polls use camera-only heartbeat (~1-2 KB vs ~10 KB bundle),
     // reducing network traffic by ~80% for background instances.
+    // PROFILE-CHANGED is handled BEFORE the equipment fetch so the full bundle
+    // (with the filter list) is fetched in this same cycle; see nina_client_poll().
+    profile_check_if_due(base_url, data, state, instance, now_ms);
+    if (atomic_exchange(&data->profile_refresh_needed, false)) {
+        state->static_fetched = false;
+        state->cached_image_count = -1;
+        nina_connection_set_static_data_ready(instance, false);
+        ESP_LOGI(TAG, "Profile changed, re-fetching static data for background instance %d", instance);
+    }
+    // Every static pass starts from an empty filter list; see nina_client_poll().
+    if (!state->static_fetched && nina_client_lock(data, 100)) {
+        data->filter_count = 0;
+        nina_client_unlock(data);
+    }
+
     if (!state->static_fetched && !state->bundle_not_available) {
         int bundle_result = fetch_equipment_info_bundled(base_url, data, true, NULL);
         if (bundle_result == -2) {
@@ -813,17 +872,13 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         return;
     }
 
-    // --- Handle PROFILE-CHANGED: invalidate cached static data ---
-    if (atomic_exchange(&data->profile_refresh_needed, false)) {
-        state->static_fetched = false;
-        state->cached_image_count = -1;
-        nina_connection_set_static_data_ready(instance, false);
-        ESP_LOGI(TAG, "Profile changed — re-fetching static data for background instance %d", instance);
-    }
-
     // --- ONCE: Static data (profile, image history; filters/switch/safety from bundle) ---
     if (!state->static_fetched) {
         fetch_profile_robust(base_url, data);
+        atomic_store(&data->profile_prune_needed, true);   /* once per connect */
+        /* This fetch is the profile check. No id = it failed: re-read later. */
+        atomic_store(&data->profile_check_needed, data->profile_id[0] == '\0');
+        state->last_profile_check_ms = now_ms;
 
         if (state->bundle_not_available) {
             // Legacy: fetch equipment data individually
@@ -835,6 +890,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         fetch_image_history_robust(base_url, data);
 
         snprintf(state->cached_profile, sizeof(state->cached_profile), "%s", data->profile_name);
+        snprintf(state->cached_profile_id, sizeof(state->cached_profile_id), "%s", data->profile_id);
         snprintf(state->cached_telescope, sizeof(state->cached_telescope), "%s", data->telescope_name);
         memcpy(state->cached_filters, data->filters, sizeof(state->cached_filters));
         state->cached_filter_count = data->filter_count;
@@ -845,6 +901,7 @@ void nina_client_poll_background(const char *base_url, nina_client_t *data, nina
         state->last_sequence_poll_ms = now_ms;
     } else if (nina_client_lock(data, 100)) {
         snprintf(data->profile_name, sizeof(data->profile_name), "%s", state->cached_profile);
+        snprintf(data->profile_id, sizeof(data->profile_id), "%s", state->cached_profile_id);
         if (state->cached_telescope[0] != '\0') {
             snprintf(data->telescope_name, sizeof(data->telescope_name), "%s", state->cached_telescope);
         }
@@ -1158,4 +1215,43 @@ uint8_t *nina_client_fetch_prepared_image(const char *base_url, int width, int h
     *out_size = total_read;
     ESP_LOGI(TAG, "Image fetched: %u bytes", (unsigned)total_read);
     return buffer;
+}
+
+/* -- Clean remembered per-profile colours of profiles deleted in NINA --
+ * The key rule matches fetch_profile_robust(): Id, or Name when Id is absent
+ * or empty, truncated exactly as the store truncates it. Each remembered id is
+ * tested against the parsed cJSON list itself, never a fixed-size copy. */
+static bool profile_key_in_list(const char *id, void *ctx) {
+    const cJSON *list = (const cJSON *)ctx;
+    const cJSON *item = NULL;
+    cJSON_ArrayForEach(item, list) {
+        const char *k = nps_str(item, "Id");
+        if (!k[0]) {
+            k = nps_str(item, "Name");
+        }
+        char key[NPS_ID_MAX];
+        nps_copy(key, sizeof(key), k);
+        if (key[0] && strcmp(key, id) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void nina_client_prune_profiles(const char *base_url, int instance) {
+    char url[256];
+    /* No ?active=true: the bare endpoint returns every profile as a stub. */
+    snprintf(url, sizeof(url), "%sprofile/show", base_url);
+    cJSON *json = http_get_json(url);
+    if (!json) {
+        ESP_LOGW(TAG, "Profile list fetch failed for instance %d, remembered profiles kept", instance);
+        return;
+    }
+    cJSON *list = cJSON_GetObjectItem(json, "Response");
+    if (cJSON_IsArray(list) && cJSON_GetArraySize(list) > 0) {
+        app_config_profile_prune(instance, profile_key_in_list, list);
+    } else {
+        ESP_LOGW(TAG, "Profile list for instance %d empty or not a list, remembered profiles kept", instance);
+    }
+    cJSON_Delete(json);
 }
