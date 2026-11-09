@@ -751,6 +751,8 @@
       transition: transform 0.15s ease;
     }
     .thresh-edit-row .thresh-dot:hover { transform: scale(1.08); }
+    /* Bad row has no value box: push its color to the right column */
+    .thresh-edit-row .thresh-label-sm + .thresh-dot { margin-left: auto; }
 
     /* === PAGE LISTS (Home Page / Pages in Rotation / idle target) === */
     /* Title row: subsection title left, current pick right in accent */
