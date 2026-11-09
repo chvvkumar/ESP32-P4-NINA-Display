@@ -1312,6 +1312,8 @@ static void update_alt_layout_page(dashboard_page_t *p, const nina_client_t *d,
 #endif
         case 5: nina_layout_rail_update(p, d, inst, gb); break;
         case 7: nina_layout_rings_update(p, d, inst, gb); break;
+        case 8: nina_layout_ground_update(p, d, inst, gb); break;
+        case 9: nina_layout_skywords_update(p, d, inst, gb); break;
         default: break;
     }
 

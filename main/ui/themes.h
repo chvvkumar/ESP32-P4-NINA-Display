@@ -30,6 +30,19 @@ static inline bool theme_is_red_night(const theme_t *t) {
 }
 
 /**
+ * Red Night luminance map: Rec.601 luminance of @p raw into R, G = B = 0.
+ * A colour that is already a pure red shade (including black) passes through
+ * unchanged, so the map is idempotent. Brightness is the caller's job.
+ */
+static inline uint32_t theme_red_luma(uint32_t raw) {
+    if ((raw & 0x00FFFFu) == 0u) return raw;
+    uint32_t r = (raw >> 16) & 0xFFu;
+    uint32_t g = (raw >> 8) & 0xFFu;
+    uint32_t b = raw & 0xFFu;
+    return ((299u * r + 587u * g + 114u * b) / 1000u) << 16;
+}
+
+/**
  * @brief Get the total number of available themes
  */
 int themes_get_count(void);

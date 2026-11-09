@@ -476,12 +476,8 @@ static uint32_t themed(uint32_t raw)
  */
 static uint32_t page_col(uint32_t raw)
 {
-    if (theme_is_red_night(current_theme) && (raw & 0x00FFFFu) != 0u) {
-        uint32_t r = (raw >> 16) & 0xFFu;
-        uint32_t g = (raw >> 8) & 0xFFu;
-        uint32_t b = raw & 0xFFu;
-        uint32_t luma = (299u * r + 587u * g + 114u * b) / 1000u;
-        raw = luma << 16;
+    if (theme_is_red_night(current_theme)) {
+        raw = theme_red_luma(raw);
     }
     return themed(raw);
 }

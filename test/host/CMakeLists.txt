@@ -396,3 +396,16 @@ add_nina_host_test(test_nina_profile_sets
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_nina_profile_sets.c
 )
+
+# ---------------------------------------------------------------------------
+# test_sky_scene_math -- the pure geometry and camera logic behind NINA page
+# layouts 8 and 9 (main/sky_scene_math.h): sky directions and sidereal time,
+# the horizon outline resample, the target's path and its rise and set, the
+# equatorial mount pose for both sides of the pier and both hemispheres, the
+# telescope model, the pinhole camera fit, edge arrows, picture counts and the
+# activity word. Header-only, float only, over main/nina_plan_types.h.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_sky_scene_math
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_sky_scene_math.c
+)

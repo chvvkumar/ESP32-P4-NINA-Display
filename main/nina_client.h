@@ -11,6 +11,7 @@
 
 #define MAX_FILTERS 10
 #define HFR_RING_SIZE 500  // Matches GRAPH_MAX_POINTS for HFR graph overlay
+#define NINA_HORIZON_N 72  // horizon_alt[] samples, 5 degrees of azimuth each; equals SKY_HORIZON_N
 
 // Filter information
 typedef struct {
@@ -94,6 +95,47 @@ typedef struct {
     float mount_az_deg;         // MountInfo Azimuth (degrees)
     float site_elev_m;          // MountInfo SiteElevation (metres)
     bool  mount_pointing_valid;
+
+    // Sky scene inputs (NINA page layouts 8 and 9). Filled per poll by
+    // parse_mount_pointing() in nina_api_fetchers.c, from the same MountInfo
+    // object the pointing above comes from (bundled /equipment/info "Mount"
+    // every foreground cycle, or /equipment/mount/info on the legacy tier).
+    // Recomputed from scratch on every parse; a NULL mount object clears every
+    // flag below to false. demo_data.c fills all of them in demo mode.
+    bool    mount_connected;    // MountInfo Connected
+    bool    mount_at_park;      // AtPark. Gate on this BEFORE mount_slewing: a real
+                                // mount at park has reported Slewing true with AtPark true
+    bool    mount_slewing;      // Slewing
+    bool    mount_tracking;     // TrackingEnabled
+    uint8_t mount_pier_side;    // SideOfPier: 0 unknown/absent, 1 "pierEast", 2 "pierWest"
+                                // (values equal sky_pier_t in sky_scene_math.h)
+    bool    site_valid;         // SiteLatitude AND SiteLongitude both numbers this parse
+    float   site_lat_deg;       // SiteLatitude, degrees north
+    float   site_lon_deg;       // SiteLongitude, degrees east
+    bool    lst_valid;          // SiderealTime was a number this parse
+    float   lst_hours;          // SiderealTime, hours [0,24), at lst_mono_us
+    int64_t lst_mono_us;        // esp_timer_get_time() when lst_hours was parsed
+    bool    flip_valid;         // TimeToMeridianFlip usable: connected, !at_park, tracking,
+                                // and 0 <= value < 23.99 h (NINA reports 24 as "none")
+    float   flip_minutes;       // TimeToMeridianFlip * 60, minutes until the flip
+
+    // Target coordinates from sequence/json (nina_sequence.c), the active
+    // target container's first item carrying Coordinates {RA (hours), Dec
+    // (degrees)}: "Slew and center" / "Slew, center and rotate", else the
+    // "Center After Drift" trigger's Coordinates.Coordinates. J2000 as NINA
+    // stores them. Rewritten on every sequence poll; valid=false when the
+    // container has no such item.
+    bool    target_coord_valid;
+    float   target_ra_h;        // hours [0,24)
+    float   target_dec_deg;     // degrees [-90,90]
+
+    // Horizon outline of the active profile (profile/horizon), fetched once
+    // per connect in the static pass and resampled to NINA_HORIZON_N
+    // altitudes, one per 5 degrees of azimuth (index i = azimuth 5*i), whole
+    // degrees. horizon_valid=false (draw a flat horizon) when the endpoint
+    // fails, is missing on an old ninaAPI, or returns no points.
+    bool    horizon_valid;
+    int8_t  horizon_alt[NINA_HORIZON_N];
 
     // Camera sensor geometry (camera info XSize/YSize/PixelSize) — FOV math.
     int   cam_x_size;

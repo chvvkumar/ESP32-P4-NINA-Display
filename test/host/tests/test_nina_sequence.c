@@ -722,6 +722,47 @@ static void test_plan_item_cap(void) {
     expect_str("plan.items[15].filter (last tracked)", c.plan.items[15].filter, "F15");
 }
 
+/* =======================================================================
+ * Target coordinates: Slew item (nested), trigger fallback, none.
+ * ======================================================================= */
+static const char *k_coords_item =
+    "{\"Response\":[{\"Name\":\"Targets_Container\",\"Items\":["
+    "{\"Name\":\"Sh2 157_Container\",\"Status\":\"RUNNING\",\"Items\":["
+    "{\"Name\":\"Wait until Above horizon\",\"Status\":\"FINISHED\"},"
+    "{\"Name\":\"Prepare Target_Container\",\"Status\":\"FINISHED\",\"Items\":["
+    "{\"Name\":\"Slew, center and rotate\",\"Coordinates\":{\"RA\":23.315440,\"Dec\":61.240375}}"
+    "]}]}]}],\"Success\":true}";
+
+static const char *k_coords_trigger =
+    "{\"Response\":[{\"Name\":\"Targets_Container\",\"Items\":["
+    "{\"Name\":\"M45_Container\",\"Status\":\"RUNNING\",\"Items\":[],\"Triggers\":["
+    "{\"Name\":\"Center After Drift_Trigger\",\"Coordinates\":{\"Coordinates\":{\"RA\":3.770614,\"Dec\":24.194701}}}"
+    "]}]}],\"Success\":true}";
+
+static const char *k_coords_none =
+    "{\"Response\":[{\"Name\":\"Targets_Container\",\"Items\":["
+    "{\"Name\":\"M45_Container\",\"Status\":\"RUNNING\",\"Items\":["
+    "{\"Name\":\"Wait\",\"Status\":\"FINISHED\"}]}]}],\"Success\":true}";
+
+static void test_target_coords(void) {
+    nina_client_t c;
+    reset_client(&c);
+    run_fetch(k_coords_item, &c);
+    expect_int("coords item valid", c.target_coord_valid, 1);
+    expect_float("coords item ra", c.target_ra_h, 23.3154f, 1e-4f);
+    expect_float("coords item dec", c.target_dec_deg, 61.2404f, 1e-4f);
+
+    reset_client(&c);
+    run_fetch(k_coords_trigger, &c);
+    expect_int("coords trigger valid", c.target_coord_valid, 1);
+    expect_float("coords trigger ra", c.target_ra_h, 3.770614f, 1e-4f);
+    expect_float("coords trigger dec", c.target_dec_deg, 24.194701f, 1e-4f);
+
+    reset_client(&c);
+    run_fetch(k_coords_none, &c);
+    expect_int("coords none invalid", c.target_coord_valid, 0);
+}
+
 int main(void) {
     test_normal_running_smart_exposure();
     test_no_running_target();
@@ -736,6 +777,7 @@ int main(void) {
     test_plan_single_image();
     test_plan_idle_retention();
     test_plan_item_cap();
+    test_target_coords();
 
     printf("\n%s (%d failures)\n", fails ? "TESTS FAILED" : "ALL TESTS PASSED", fails);
     return fails ? 1 : 0;

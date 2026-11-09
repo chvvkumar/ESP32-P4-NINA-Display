@@ -9,6 +9,7 @@
 #include "nina_sequence.h"
 #include "nina_client_internal.h"
 #include "json_get.h"
+#include "sky_scene_math.h"
 #include "esp_log.h"
 #include "cJSON.h"
 #include <string.h>
@@ -111,6 +112,64 @@ static void find_earliest_condition(cJSON *container, earliest_condition_t *out)
             }
         }
     }
+}
+
+static bool find_target_coords(cJSON *container, float *ra_h, float *dec_deg);
+
+#define COORD_SEARCH_MAX_DEPTH 8
+
+static bool coords_from_obj(cJSON *obj, float *ra_h, float *dec_deg) {
+    cJSON *ra = cJSON_GetObjectItem(obj, "RA");
+    cJSON *dec = cJSON_GetObjectItem(obj, "Dec");
+    if (!cJSON_IsNumber(ra) || !cJSON_IsNumber(dec)) {
+        return false;
+    }
+    *ra_h = (float)ra->valuedouble;
+    *dec_deg = (float)dec->valuedouble;
+    return true;
+}
+
+// Depth first over Items for the first item carrying Coordinates {RA, Dec}.
+static bool find_coords_in_items(cJSON *node, int depth, float *ra_h, float *dec_deg) {
+    if (!node || depth > COORD_SEARCH_MAX_DEPTH) {
+        return false;
+    }
+    cJSON *items = cJSON_GetObjectItem(node, "Items");
+    if (!cJSON_IsArray(items)) {
+        return false;
+    }
+    cJSON *item = NULL;
+    cJSON_ArrayForEach(item, items) {
+        cJSON *coords = cJSON_GetObjectItem(item, "Coordinates");
+        if (cJSON_IsObject(coords) && coords_from_obj(coords, ra_h, dec_deg)) {
+            return true;
+        }
+        if (find_coords_in_items(item, depth + 1, ra_h, dec_deg)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Target RA (hours) / Dec (degrees) of a target container: first Slew item's
+// Coordinates, else a trigger's Coordinates.Coordinates.
+static bool find_target_coords(cJSON *container, float *ra_h, float *dec_deg) {
+    if (find_coords_in_items(container, 0, ra_h, dec_deg)) {
+        return true;
+    }
+    cJSON *triggers = cJSON_GetObjectItem(container, "Triggers");
+    if (!cJSON_IsArray(triggers)) {
+        return false;
+    }
+    cJSON *trig = NULL;
+    cJSON_ArrayForEach(trig, triggers) {
+        cJSON *coords = cJSON_GetObjectItem(trig, "Coordinates");
+        cJSON *inner = cJSON_IsObject(coords) ? cJSON_GetObjectItem(coords, "Coordinates") : NULL;
+        if (cJSON_IsObject(inner) && coords_from_obj(inner, ra_h, dec_deg)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // Find the active target container (RUNNING preferred, otherwise last FINISHED)
@@ -440,6 +499,20 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                         strlcpy(data->target_name, temp_name, sizeof(data->target_name));
                         ESP_LOGI(TAG, "Target (fallback from sequence): %s", data->target_name);
                     }
+                }
+
+                // Target coordinates (sky scene layouts).
+                float tc_ra = 0.0f;
+                float tc_dec = 0.0f;
+                data->target_coord_valid = find_target_coords(target_container, &tc_ra, &tc_dec);
+                if (data->target_coord_valid) {
+                    if (tc_dec > 90.0f) {
+                        tc_dec = 90.0f;
+                    } else if (tc_dec < -90.0f) {
+                        tc_dec = -90.0f;
+                    }
+                    data->target_ra_h = sky_wrap24(tc_ra);
+                    data->target_dec_deg = tc_dec;
                 }
 
                 // Find the active container name

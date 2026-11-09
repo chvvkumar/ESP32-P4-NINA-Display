@@ -855,9 +855,9 @@ static const restore_numrange_t s_restore_numrange[] = {
     {"octoprint_image_source",  0,    1,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"octoprint_layout",        0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
     {"clock_layout",            0,    6,     false},  /* settings_table.h INT_RESET row (out of range -> 0) */
-    {"nina_layout_1",           0,    7,     false},  /* app_config.c validate_config (out of range -> 0) */
-    {"nina_layout_2",           0,    7,     false},  /* app_config.c validate_config (out of range -> 0) */
-    {"nina_layout_3",           0,    7,     false},  /* app_config.c validate_config (out of range -> 0) */
+    {"nina_layout_1",           0,    9,     false},  /* app_config.c validate_config (out of range -> 0) */
+    {"nina_layout_2",           0,    9,     false},  /* app_config.c validate_config (out of range -> 0) */
+    {"nina_layout_3",           0,    9,     false},  /* app_config.c validate_config (out of range -> 0) */
     {"allsky_dew_offset",       -50,  50,    true},   /* app_config.c:2552 */
     {"goes_update_interval_s",  300,  7200,  false},  /* app_config.c:2556 */
     {"solar_update_interval_s", 300,  7200,  false},  /* settings_table.h INT_RESET row (out of range -> 600) */
@@ -1474,7 +1474,8 @@ static app_config_t *parse_config_from_json(cJSON *root, unsigned *skipped_nodes
     JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
 
     /* Per-instance NINA page layout (0 Dashboard, 1 Image-forward, 2 Halo,
-     * 4 Orbit, 5 Night rail, 7 Two rings; 3 and 6 are retired; 1 draws
+     * 4 Orbit, 5 Night rail, 7 Two rings, 8 Readout on the ground, 9 In the
+     * sky; 3 and 6 are retired; 8 and 9 draw on both shapes; 1 draws
      * only on a square panel, 2 and 4 only on a round one). Array field, so
      * keyed 1-indexed per instance like instance_enabled_N above rather than as
      * a SETTINGS_TABLE row. Out of range resets to the Dashboard, matching
@@ -1490,7 +1491,7 @@ static app_config_t *parse_config_from_json(cJSON *root, unsigned *skipped_nodes
         cJSON *jlayout = cJSON_GetObjectItem(root, k_nina_layout_keys[li]);
         if (cJSON_IsNumber(jlayout)) {
             int v = jlayout->valueint;
-            cfg->nina_layout[li] = (v >= 0 && v <= 7 && v != 3 && v != 6) ? (uint8_t)v : 0;
+            cfg->nina_layout[li] = (v >= 0 && v <= 9 && v != 3 && v != 6) ? (uint8_t)v : 0;
         }
     }
 
