@@ -762,11 +762,18 @@ static void handle_websocket_message(int index, const char *payload, int len) {
         nina_event_log_add(EVENT_SEV_WARNING, index, "Guider stopped");
         ESP_LOGI(TAG, "WS[%d]: Guider stopped", index);
     }
+    // PROFILE-REMOVED: a profile was deleted in NINA; drop its remembered colours
+    else if (strcmp(evt->valuestring, "PROFILE-REMOVED") == 0) {
+        ESP_LOGI(TAG, "WS[%d]: Profile removed, will re-check remembered profiles", index);
+        atomic_store(&data->profile_prune_needed, true);
+    }
     // PROFILE-CHANGED: Invalidate cached static data to force re-fetch
     else if (strcmp(evt->valuestring, "PROFILE-CHANGED") == 0) {
         ESP_LOGI(TAG, "WS[%d]: Profile changed, will re-fetch static data", index);
+        /* Atomic flag, set outside the lock so a busy client lock cannot
+         * lose the profile change. */
+        atomic_store(&data->profile_refresh_needed, true);
         if (nina_client_lock(data, 50)) {
-            data->profile_refresh_needed = true;
             data->sequence_poll_needed = true;
             data->ui_refresh_needed = true;
             nina_client_unlock(data);
@@ -1089,6 +1096,9 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
         ws_backoff_ms[index] = WS_BACKOFF_INITIAL_MS;
         ws_needs_reconnect[index] = false;
         if (ws_client_data[index]) {
+            /* A PROFILE-CHANGED sent while this socket was down was never
+             * heard: have the poll re-read the active profile. */
+            atomic_store(&ws_client_data[index]->profile_check_needed, true);
             if (nina_client_lock(ws_client_data[index], 50)) {
                 ws_client_data[index]->websocket_connected = true;
                 nina_connection_report_ws(index, true);

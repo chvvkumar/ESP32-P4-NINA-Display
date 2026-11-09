@@ -7840,6 +7840,40 @@ esp_err_t   app_config_set_ha_tiles(const char *s);
 esp_err_t   app_config_set_json_tiles_ram(const char *s);
 esp_err_t   app_config_set_ha_tiles_ram(const char *s);
 
+/* Per-NINA-profile colours and thresholds (main/nina_profile_sets.h). The
+ * node's filter_colors / rms_thresholds / hfr_thresholds stay the working
+ * values of the loaded profile; the other remembered profiles live in NVS
+ * keys "prof_sets0".."prof_sets2", mirrored in PSRAM caches. */
+
+/* Called by the instance poll task after a successful poll. Cheap when nothing
+ * changed (strcmp against a RAM copy of the loaded id and name). Returns true
+ * when the node's working colours and thresholds were replaced (caller must
+ * re-run filter sync). On a switch the store key is persisted FIRST, then the
+ * config; a failed store write aborts the switch (retried next poll). */
+bool app_config_profile_switch(int instance_index, const char *profile_id, const char *profile_name);
+
+/* Raw store JSON for a node ("" when nothing recorded). Pointer to the PSRAM
+ * cache; same contract as app_config_get_json_tiles(). */
+const char *app_config_get_profile_sets(int instance_index);
+
+/* Replace a node's store (backup restore). Rejects text failing
+ * nps_store_valid() with ESP_ERR_INVALID_ARG. Refreshes the RAM loaded copy. */
+esp_err_t app_config_set_profile_sets(int instance_index, const char *json);
+
+/* Forget one remembered (not loaded) profile. ESP_ERR_NOT_FOUND when absent. */
+esp_err_t app_config_profile_forget(int instance_index, const char *profile_id);
+
+/* Copy the loaded profile's id and name (empty strings when none recorded). */
+void app_config_get_profile_current(int instance_index, char *id, size_t id_size,
+                                    char *name, size_t name_size);
+
+/* Drop remembered profiles NINA no longer has. exists(id, ctx) must test the
+ * full parsed profile list; it runs under the config mutex, so it must not
+ * call back into app_config. Nothing happens unless the loaded profile is in
+ * that list. Persists only when something was removed; returns the count. */
+int app_config_profile_prune(int instance_index,
+                             bool (*exists)(const char *id, void *ctx), void *ctx);
+
 bool app_config_is_instance_enabled(int index);
 int app_config_get_enabled_instance_count(void);
 uint32_t app_config_get_filter_color(const char *filter_name, int instance_index);

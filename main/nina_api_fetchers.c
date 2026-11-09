@@ -334,6 +334,14 @@ void fetch_profile_robust(const char *base_url, nina_client_t *data) {
 
     if (profile) {
         JSON_GET_STR(profile, "Name", data->profile_name);
+        /* ProfileInfo.Id (api-1.yaml:10018) keys the per-profile colours and
+         * thresholds, so a rename in NINA keeps them. Falls back to the Name
+         * when the API gives no Id. */
+        data->profile_id[0] = '\0';
+        JSON_GET_STR_NONEMPTY(profile, "Id", data->profile_id);
+        if (data->profile_id[0] == '\0') {
+            snprintf(data->profile_id, sizeof(data->profile_id), "%s", data->profile_name);
+        }
         /* TelescopeSettings.FocalLength in mm (api-1.yaml:10836-10844). Absent
          * on the array shape, so focal_length_mm stays 0 = unknown and the FOV
          * math falls back to its default. */

@@ -195,6 +195,7 @@ esp_err_t perf_get_handler(httpd_req_t *req);
 esp_err_t perf_reset_post_handler(httpd_req_t *req);
 esp_err_t config_apply_handler(httpd_req_t *req);
 esp_err_t config_revert_handler(httpd_req_t *req);
+esp_err_t nina_profile_forget_post_handler(httpd_req_t *req);
 esp_err_t check_update_post_handler(httpd_req_t *req);
 esp_err_t check_update_json_handler(httpd_req_t *req);
 esp_err_t ota_github_post_handler(httpd_req_t *req);

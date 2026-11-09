@@ -1388,6 +1388,9 @@
             '</div>'+
             '<div class="subsection">'+
             '<div class="subsection-title">Colors &amp; Thresholds</div>'+
+            '<div class="field-label" id="profile_line_'+i+'">No NINA profile seen yet</div>'+
+            '<div class="field-hint">These colors and limits are kept separately for each NINA profile. The ones shown belong to the profile named above. The screen switches by itself when NINA loads another profile, and a profile seen for the first time starts with default values.</div>'+
+            '<div class="field" id="profile_list_'+i+'" style="display:none"></div>'+
             '<div class="field"><label class="field-label">Filter colors</label>'+
             '<div id="filters_'+i+'" class="filter-grid"></div>'+
             '<div class="field-hint">Sets the color used for the exposure arc and labels when each filter is active; detected filters appear after the instance connects.</div></div>'+
@@ -2403,6 +2406,9 @@
       data.url1=mkUrl(host1);
       data.url2=mkUrl(host2);
       data.url3=mkUrl(host3);
+      data.nina_profile_id_1=profileLoadedId[0];
+      data.nina_profile_id_2=profileLoadedId[1];
+      data.nina_profile_id_3=profileLoadedId[2];
       data.filter_colors_1=JSON.stringify(filterColorsArr[0]);
       data.filter_colors_2=JSON.stringify(filterColorsArr[1]);
       data.filter_colors_3=JSON.stringify(filterColorsArr[2]);
@@ -2819,6 +2825,16 @@
         });
       }
       _touched.forEach(function(k){ if(k in data) out[k]=data[k]; });
+      /* View-only profile fields never go out on their own. */
+      Object.keys(out).forEach(function(k){
+        if(k.indexOf('nina_profiles_')===0||k.indexOf('nina_profile_name_')===0||k.indexOf('nina_profile_id_')===0) delete out[k];
+      });
+      /* Colors and limits travel with the profile they were loaded for. */
+      for(var n=1;n<=3;n++){
+        if(('filter_colors_'+n) in out||('rms_thresholds_'+n) in out||('hfr_thresholds_'+n) in out){
+          out['nina_profile_id_'+n]=profileLoadedId[n-1];
+        }
+      }
       return out;
     }
 
@@ -2866,6 +2882,82 @@
        injected -- between the two, every tab still ends up populated exactly
        once per fragment load / per config reload, whichever tab order the
        user actually opens them in. */
+
+    /* NINA profile each node's colors and limits were loaded for. Sent back
+       with any colors/limits edit so the device can tell when NINA switched
+       profile while this page was open. */
+    var profileLoadedId=['','',''];
+    function renderProfileInfo(data,i){
+      var n=i+1;
+      profileLoadedId[i]=data['nina_profile_id_'+n]||'';
+      var nm=data['nina_profile_name_'+n]||'';
+      var line=$('profile_line_'+i);
+      if(line) line.textContent=profileLoadedId[i]?('NINA profile: '+(nm||profileLoadedId[i])):'No NINA profile seen yet';
+      var box=$('profile_list_'+i);
+      if(!box) return;
+      box.textContent='';
+      var list=data['nina_profiles_'+n]||[];
+      if(!list.length){ box.style.display='none'; return; }
+      box.style.display='';
+      var t=document.createElement('label');
+      t.className='field-label';
+      t.textContent='Remembered profiles';
+      box.appendChild(t);
+      list.forEach(function(p){
+        var row=document.createElement('div');
+        row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0';
+        var s=document.createElement('span');
+        s.textContent=p.name||p.id;
+        var b=document.createElement('button');
+        b.type='button';
+        b.className='btn btn-outline';
+        b.style.cssText='padding:4px 10px;min-height:0';
+        b.textContent='Forget';
+        b.onclick=function(){ forgetProfile(i,p.id,row,box); };
+        row.appendChild(s);
+        row.appendChild(b);
+        box.appendChild(row);
+      });
+    }
+    function forgetProfile(i,id,row,box){
+      postJson('/api/nina-profile-forget',{node:i+1,id:id}).then(function(r){
+        if(!r.ok&&r.status!==404) throw new Error('failed');
+        row.remove();
+        if(box.querySelectorAll('button').length===0) box.style.display='none';
+        invalidateConfigCache();
+        showToast(r.ok?'Profile forgotten':'That profile was already forgotten','success');
+      }).catch(function(){ showToast('Could not forget the profile','error'); });
+    }
+    /* Show one node's colors, limits and profile from fresh device data. */
+    function applyProfileNode(data,i){
+      var n=i+1;
+      try{filterColorsArr[i]=data['filter_colors_'+n]?JSON.parse(data['filter_colors_'+n]):{};}catch(e){filterColorsArr[i]={};}
+      renderFilterColors(i);
+      loadThresholds(data,i,'rms_thresholds_'+n,'hfr_thresholds_'+n);
+      renderProfileInfo(data,i);
+    }
+    /* Reply to a save or live preview: when NINA switched profile under an open
+       page the device keeps the new profile's values and names the nodes it
+       skipped. refresh=true reloads those nodes in place. Returns true when a
+       node was skipped. */
+    function handleProfileSkipped(txt,refresh){
+      var nodes=[];
+      try{ var j=JSON.parse(txt); if(j&&j.profile_skipped) nodes=j.profile_skipped; }catch(e){}
+      if(!nodes.length) return false;
+      showToast('NINA loaded a different profile while this page was open. Colors and limits for '+nodes.map(function(n){return 'node '+n;}).join(' and ')+' were not saved.','info');
+      if(refresh){
+        fetchConfig(true).then(function(d){
+          nodes.forEach(function(n){
+            applyProfileNode(d,n-1);
+            ['filter_colors_','rms_thresholds_','hfr_thresholds_'].forEach(function(k){ _touched.delete(k+n); });
+          });
+          _prevSnap=null;
+          baselineAdoptTab('nodes');
+          checkDirty();
+        }).catch(function(){});
+      }
+      return true;
+    }
 
     function populateTab_nodes(data){
       /* Build the per-instance node cards first (P6d: tab-nodes is now a
@@ -2916,6 +3008,7 @@
         var key='filter_colors_'+(i+1);
         try{filterColorsArr[i]=data[key]?JSON.parse(data[key]):{};}catch(e){filterColorsArr[i]={};}
         renderFilterColors(i);
+        renderProfileInfo(data,i);
       }
 
       loadThresholds(data,0,'rms_thresholds_1','hfr_thresholds_1');
@@ -3750,6 +3843,7 @@
     }
 
     /* === Save / Discard / Reboot / Reset === */
+    var _profSkipped=false;
     function save(){
       if(!configLoadedGuard()) return;
       var btn=$('saveBtn');
@@ -3760,10 +3854,10 @@
       postJson('/api/config',touchedPayload(getConfigData())).then(r=>{
         if(!r.ok) throw new Error('Save failed');
         return r.text();
-      }).then(()=>savePageFragments()).then(()=>{
+      }).then(txt=>{ _profSkipped=handleProfileSkipped(txt,false); return savePageFragments(); }).then(()=>{
         _touched.clear();
         invalidateConfigCache();
-        showToast('Settings saved','success');
+        if(!_profSkipped) showToast('Settings saved','success');
         $('saveBar').classList.remove('visible');
         /* Re-read from the device rather than re-snapshotting the local form:
            the save may have merged with changes made elsewhere, and _cfgCache
@@ -3884,6 +3978,9 @@
         ok:'Reboot',tone:'caution'})) return;
       postJson('/api/config',touchedPayload(getConfigData())).then(r=>{
         if(!r.ok) throw new Error('Save failed');
+        return r.text();
+      }).then(txt=>{
+        handleProfileSkipped(txt,false);
         return savePageFragments();
       }).then(()=>{
         _touched.clear();
@@ -4521,7 +4618,7 @@
         delete data.pass;
         var body=touchedPayload(data);
         if(!Object.keys(body).length) return;  /* nothing touched: skip the POST */
-        postJson('/api/config/apply',body).catch(e=>console.error('Live apply failed:',e));
+        postJson('/api/config/apply',body).then(r=>r.text()).then(t=>{handleProfileSkipped(t,true);}).catch(e=>console.error('Live apply failed:',e));
       },400);
     }
 
