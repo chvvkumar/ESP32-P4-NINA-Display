@@ -18,6 +18,9 @@
 #include "voice_store.h"
 #include "board_profile.h"
 #include "ui/page_registry.h"
+#include "nina_profile_sets.h"
+#include "esp_timer.h"
+#include <stdio.h>
 
 static const char *TAG = "app_config";
 static app_config_t s_config;
@@ -177,6 +180,270 @@ static const char *DEFAULT_RMS_THRESHOLDS =
 static const char *DEFAULT_HFR_THRESHOLDS =
     "{\"good_max\":2.0,\"ok_max\":3.5,"
     "\"good_color\":\"#15803d\",\"ok_color\":\"#ca8a04\",\"bad_color\":\"#b91c1c\"}";
+
+/* -- Per-NINA-profile colour and threshold stores --
+ * One NVS string key per node ("prof_sets0".."prof_sets2"), mirrored in a
+ * PSRAM cache allocated once and never freed (same contract as the tiles
+ * caches). s_prof_cur_* hold the loaded profile's id and name so the poll
+ * task's per-cycle check is a strcmp, no JSON parse. They are written under
+ * s_config_mutex and read lock-free by that check: a torn read only sends the
+ * caller down the locked slow path, which re-decides from the store. */
+static char *s_prof_cache[MAX_NINA_INSTANCES];
+static char s_prof_cur_id[MAX_NINA_INSTANCES][NPS_ID_MAX];
+static char s_prof_cur_name[MAX_NINA_INSTANCES][NPS_ID_MAX];
+/* After a failed store write the switch waits this long before trying again. */
+#define PROF_RETRY_US (60LL * 1000000LL)
+static int64_t s_prof_retry_us[MAX_NINA_INSTANCES];
+
+static void persist_config_locked(void);
+
+static void prof_key(int i, char *key, size_t n) {
+    snprintf(key, n, "prof_sets%d", i);
+}
+
+/* Alloc-guarded like tiles_caches_alloc(); contents reset to "". */
+static void prof_caches_alloc(void) {
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (!s_prof_cache[i]) {
+            s_prof_cache[i] = heap_caps_malloc(NPS_STORE_MAX, MALLOC_CAP_SPIRAM);
+        }
+        if (s_prof_cache[i]) {
+            s_prof_cache[i][0] = '\0';
+        }
+        s_prof_cur_id[i][0] = '\0';
+        s_prof_cur_name[i][0] = '\0';
+    }
+}
+
+/* Load every node's store from NVS. Handle must be open. Missing key or text
+ * that fails validation -> "" (nothing recorded). */
+static void prof_caches_load(nvs_handle_t h) {
+    char key[24];
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        if (!s_prof_cache[i]) {
+            continue;
+        }
+        prof_key(i, key, sizeof(key));
+        size_t len = NPS_STORE_MAX;
+        if (nvs_get_str(h, key, s_prof_cache[i], &len) != ESP_OK) {
+            s_prof_cache[i][0] = '\0';
+        }
+        s_prof_cache[i][NPS_STORE_MAX - 1] = '\0';
+        if (!nps_store_valid(s_prof_cache[i])) {
+            ESP_LOGW(TAG, "Profile store %d unreadable, starting empty", i);
+            s_prof_cache[i][0] = '\0';
+        }
+        nps_current(s_prof_cache[i], s_prof_cur_id[i], NPS_ID_MAX,
+                    s_prof_cur_name[i], NPS_ID_MAX);
+    }
+}
+
+/* Write one node's store key. Caller holds s_config_mutex. The length is
+ * checked here because NVS rejects a string past 4000 bytes. */
+static esp_err_t prof_store_write_locked(int i, const char *text) {
+    if (strlen(text) + 1 > NPS_STORE_MAX) {
+        ESP_LOGE(TAG, "Profile store %d too large (%d bytes), not saved", i, (int)strlen(text));
+        return ESP_ERR_INVALID_SIZE;
+    }
+    char key[24];
+    prof_key(i, key, sizeof(key));
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err == ESP_OK) {
+        err = nvs_set_str(h, key, text);
+        if (err == ESP_OK) {
+            err = nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Profile store %d save failed: %s", i, esp_err_to_name(err));
+    }
+    return err;
+}
+
+/* Replace the cache text and the RAM loaded copy. Caller holds the mutex and
+ * has already persisted the text. */
+static void prof_cache_put_locked(int i, const char *text) {
+    if (!s_prof_cache[i]) {
+        s_prof_cache[i] = heap_caps_malloc(NPS_STORE_MAX, MALLOC_CAP_SPIRAM);
+    }
+    if (s_prof_cache[i]) {
+        nps_copy(s_prof_cache[i], NPS_STORE_MAX, text);
+    }
+    nps_current(text, s_prof_cur_id[i], NPS_ID_MAX, s_prof_cur_name[i], NPS_ID_MAX);
+}
+
+typedef struct {
+    nps_set_t working;
+    nps_set_t defaults;
+    char store[NPS_STORE_MAX];
+} prof_work_t;
+
+bool app_config_profile_switch(int instance_index, const char *profile_id, const char *profile_name) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES || !profile_id || !profile_id[0]) {
+        return false;
+    }
+    char nid[NPS_ID_MAX];
+    char nname[NPS_ID_MAX];
+    nps_copy(nid, sizeof(nid), profile_id);
+    nps_copy(nname, sizeof(nname), profile_name);
+    if (strcmp(nid, s_prof_cur_id[instance_index]) == 0 &&
+        strcmp(nname, s_prof_cur_name[instance_index]) == 0) {
+        return false;   /* fast path: nothing changed */
+    }
+    if (esp_timer_get_time() < s_prof_retry_us[instance_index]) {
+        return false;   /* a store write failed recently; wait before retrying */
+    }
+
+    /* Runs on a poll-task stack: the ~5 KB of working space goes to PSRAM. */
+    prof_work_t *w = heap_caps_malloc(sizeof(*w), MALLOC_CAP_SPIRAM);
+    if (!w) {
+        ESP_LOGE(TAG, "Profile switch: out of memory");
+        return false;
+    }
+    nps_copy(w->defaults.filter_colors, sizeof(w->defaults.filter_colors), "{}");
+    nps_copy(w->defaults.rms, sizeof(w->defaults.rms), DEFAULT_RMS_THRESHOLDS);
+    nps_copy(w->defaults.hfr, sizeof(w->defaults.hfr), DEFAULT_HFR_THRESHOLDS);
+
+    bool switched = false;
+    /* One critical section: the working values read, the store write and the
+     * config write cannot interleave with a web save. */
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    nps_copy(w->working.filter_colors, sizeof(w->working.filter_colors),
+             s_config.filter_colors[instance_index]);
+    nps_copy(w->working.rms, sizeof(w->working.rms), s_config.rms_thresholds[instance_index]);
+    nps_copy(w->working.hfr, sizeof(w->working.hfr), s_config.hfr_thresholds[instance_index]);
+    const char *in = s_prof_cache[instance_index] ? s_prof_cache[instance_index] : "";
+    nps_result_t r = nps_switch(in, nid, nname, &w->working, &w->defaults,
+                                w->store, sizeof(w->store));
+    if (r == NPS_NOOP) {
+        /* Either the store already names this profile (RAM copy was out of
+         * step) or nps_switch failed. Re-read the RAM copy from the store, so
+         * a failed switch is retried on a later poll instead of being taken
+         * for done. */
+        nps_current(in, s_prof_cur_id[instance_index], NPS_ID_MAX,
+                    s_prof_cur_name[instance_index], NPS_ID_MAX);
+        if (strcmp(s_prof_cur_id[instance_index], nid) != 0) {
+            s_prof_retry_us[instance_index] = esp_timer_get_time() + PROF_RETRY_US;
+        }
+    } else if (prof_store_write_locked(instance_index, w->store) != ESP_OK) {
+        /* Storage refused the write: do not hammer it every poll cycle. */
+        s_prof_retry_us[instance_index] = esp_timer_get_time() + PROF_RETRY_US;
+    } else {
+        prof_cache_put_locked(instance_index, w->store);
+        if (r == NPS_SWITCHED) {
+            invalidate_json_caches();
+            nps_copy(s_config.filter_colors[instance_index],
+                     sizeof(s_config.filter_colors[instance_index]), w->working.filter_colors);
+            nps_copy(s_config.rms_thresholds[instance_index],
+                     sizeof(s_config.rms_thresholds[instance_index]), w->working.rms);
+            nps_copy(s_config.hfr_thresholds[instance_index],
+                     sizeof(s_config.hfr_thresholds[instance_index]), w->working.hfr);
+            persist_config_locked();
+            switched = true;
+        }
+    }
+    xSemaphoreGive(s_config_mutex);
+    free(w);
+
+    if (r == NPS_ADOPTED) {
+        ESP_LOGI(TAG, "Node %d: NINA profile '%s' keeps the current colours", instance_index + 1, nname);
+    } else if (r == NPS_RENAMED) {
+        ESP_LOGI(TAG, "Node %d: NINA profile renamed to '%s'", instance_index + 1, nname);
+    } else if (switched) {
+        ESP_LOGI(TAG, "Node %d: switched colours and limits to NINA profile '%s'", instance_index + 1, nname);
+    }
+    return switched;
+}
+
+const char *app_config_get_profile_sets(int instance_index) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES || !s_prof_cache[instance_index]) {
+        return "";
+    }
+    return s_prof_cache[instance_index];
+}
+
+esp_err_t app_config_set_profile_sets(int instance_index, const char *json) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!json) {
+        json = "";
+    }
+    if (!nps_store_valid(json)) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    esp_err_t err = prof_store_write_locked(instance_index, json);
+    if (err == ESP_OK) {
+        prof_cache_put_locked(instance_index, json);
+    }
+    xSemaphoreGive(s_config_mutex);
+    return err;
+}
+
+esp_err_t app_config_profile_forget(int instance_index, const char *profile_id) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES || !profile_id || !profile_id[0]) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    char *out = heap_caps_malloc(NPS_STORE_MAX, MALLOC_CAP_SPIRAM);
+    if (!out) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_err_t err = ESP_ERR_NOT_FOUND;
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    const char *in = s_prof_cache[instance_index] ? s_prof_cache[instance_index] : "";
+    if (nps_forget(in, profile_id, out, NPS_STORE_MAX)) {
+        err = prof_store_write_locked(instance_index, out);
+        if (err == ESP_OK) {
+            prof_cache_put_locked(instance_index, out);
+        }
+    }
+    xSemaphoreGive(s_config_mutex);
+    free(out);
+    return err;
+}
+
+void app_config_get_profile_current(int instance_index, char *id, size_t id_size,
+                                    char *name, size_t name_size) {
+    bool ok = (instance_index >= 0 && instance_index < MAX_NINA_INSTANCES);
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    nps_copy(id, id_size, ok ? s_prof_cur_id[instance_index] : "");
+    nps_copy(name, name_size, ok ? s_prof_cur_name[instance_index] : "");
+    xSemaphoreGive(s_config_mutex);
+}
+
+static void prof_log_removed(const char *id, const char *name, void *ctx) {
+    (void)id;
+    int node = *(const int *)ctx;
+    ESP_LOGI(TAG, "Node %d: forgetting colours of NINA profile '%s' (deleted in NINA)", node, name);
+}
+
+int app_config_profile_prune(int instance_index,
+                             bool (*exists)(const char *id, void *ctx), void *ctx) {
+    if (instance_index < 0 || instance_index >= MAX_NINA_INSTANCES || !exists) {
+        return 0;
+    }
+    char *out = heap_caps_malloc(NPS_STORE_MAX, MALLOC_CAP_SPIRAM);
+    if (!out) {
+        return 0;
+    }
+    int node = instance_index + 1;
+    xSemaphoreTake(s_config_mutex, portMAX_DELAY);
+    const char *in = s_prof_cache[instance_index] ? s_prof_cache[instance_index] : "";
+    int removed = nps_prune(in, exists, ctx, prof_log_removed, &node, out, NPS_STORE_MAX);
+    if (removed > 0) {
+        if (prof_store_write_locked(instance_index, out) == ESP_OK) {
+            prof_cache_put_locked(instance_index, out);
+        } else {
+            removed = 0;
+        }
+    }
+    xSemaphoreGive(s_config_mutex);
+    free(out);
+    return removed;
+}
 
 // Default AllSky field configuration — empty structure, user must configure via web UI
 static const char *DEFAULT_ALLSKY_FIELD_CONFIG =
@@ -4129,6 +4396,7 @@ void app_config_init(void) {
      * early-return path below (NVS-open fail, fresh install). Alloc-guarded, so
      * a factory-reset re-init reuses the existing buffers without leaking. */
     tiles_caches_alloc();
+    prof_caches_alloc();   /* same rules: alloc-guarded, contents reset to "" */
     /* Deferred-save worker + reboot flush. Started before every early return
      * below so the debounce path is available regardless of NVS state, and
      * guarded so a factory-reset re-init does not spawn a second worker.
@@ -4956,6 +5224,8 @@ void app_config_init(void) {
         tiles_cache_load_key(handle, "json_tiles", s_json_tiles_cache);
         tiles_cache_load_key(handle, "ha_tiles",   s_ha_tiles_cache);
     }
+    /* Per-NINA-profile stores: no migration ever writes them, so always load. */
+    prof_caches_load(handle);
 
     free(raw);
     nvs_close(handle);

@@ -16,6 +16,7 @@
 #include "ui/nina_nav_arbiter.h"        /* nav_arbiter_submit_user — live Home Page USER claim */
 #include "ui/page_registry.h"           /* page_ref_navigate, PAGE_REF_ID_MAX, PAGE_REF_SETTINGS */
 #include "settings_table.h"             /* settings_json_serialize/parse — table-driven config JSON */
+#include "nina_profile_sets.h"          /* NPS_STORE_MAX, NPS_ID_MAX */
 
 extern const uint8_t config_html_start[] asm("_binary_config_ui_html_start");
 extern const uint8_t config_html_end[]   asm("_binary_config_ui_html_end");
@@ -418,6 +419,36 @@ esp_err_t config_get_handler(httpd_req_t *req)
     #undef REDACT_STRING_FIELD
     /* admin_password is never serialized by serialize_config_to_json() at all. */
 
+    /* NINA profile view fields (view only, never part of a backup): the profile
+     * each node's colours and limits belong to, plus the remembered others. */
+    for (int n = 0; n < 3; n++) {
+        char key[32];
+        char pid[NPS_ID_MAX];
+        char pname[NPS_ID_MAX];
+        app_config_get_profile_current(n, pid, sizeof(pid), pname, sizeof(pname));
+        snprintf(key, sizeof(key), "nina_profile_id_%d", n + 1);
+        cJSON_AddStringToObject(root, key, pid);
+        snprintf(key, sizeof(key), "nina_profile_name_%d", n + 1);
+        cJSON_AddStringToObject(root, key, pname);
+        snprintf(key, sizeof(key), "nina_profiles_%d", n + 1);
+        cJSON *list = cJSON_AddArrayToObject(root, key);
+        const char *store = app_config_get_profile_sets(n);
+        cJSON *sj = (list && store && store[0]) ? cJSON_Parse(store) : NULL;
+        cJSON *sets = sj ? cJSON_GetObjectItem(sj, "sets") : NULL;
+        cJSON *ent = NULL;
+        cJSON_ArrayForEach(ent, sets) {
+            cJSON *eid = cJSON_GetObjectItem(ent, "id");
+            cJSON *enm = cJSON_GetObjectItem(ent, "name");
+            if (!cJSON_IsString(eid)) continue;
+            cJSON *o = cJSON_CreateObject();
+            if (!o) continue;
+            cJSON_AddStringToObject(o, "id", eid->valuestring);
+            cJSON_AddStringToObject(o, "name", cJSON_IsString(enm) ? enm->valuestring : eid->valuestring);
+            cJSON_AddItemToArray(list, o);
+        }
+        cJSON_Delete(sj);
+    }
+
     /* WiFi networks: serialize from app_config. SSIDs exposed; passwords
      * replaced with "********" (sentinel) when present so the UI can
      * round-trip without knowing the real value. */
@@ -542,6 +573,9 @@ static const backup_field_t s_backup_fields[] = {
     {"json_auth_header",       "JSON Auth Header",         "Nodes & Data", true,  false, true},
     {"json_update_interval_s", "JSON Poll Interval",       "Nodes & Data", false, false},
     {"json_tiles_config",      "JSON Display Tiles",       "Nodes & Data", false, true},
+    {"nina_profile_sets_1",    "Remembered NINA Profiles 1", "Nodes & Data", false, true},
+    {"nina_profile_sets_2",    "Remembered NINA Profiles 2", "Nodes & Data", false, true},
+    {"nina_profile_sets_3",    "Remembered NINA Profiles 3", "Nodes & Data", false, true},
     {"ha_enabled",             "Home Assistant Page",      "Nodes & Data", false, false},
     {"ha_base_url",            "Home Assistant URL",       "Nodes & Data", false, false},
     {"ha_token",               "Home Assistant Token",     "Nodes & Data", true,  false, true},
@@ -765,6 +799,9 @@ static const restore_strmax_t s_restore_strmax[] = {
     {"custom_image_header", 256},
     {"flights_url",         128},
     {"json_tiles_config",   JSON_TILES_CONFIG_MAX},
+    {"nina_profile_sets_1", NPS_STORE_MAX},
+    {"nina_profile_sets_2", NPS_STORE_MAX},
+    {"nina_profile_sets_3", NPS_STORE_MAX},
     {"ha_tiles_config",     HA_TILES_CONFIG_MAX},
     {"json_url",            256},
     {"json_auth_header",    256},
@@ -1236,6 +1273,12 @@ static bool validate_config_fields(cJSON *root, httpd_req_t *req)
         !validate_string_len(root, "json_url", sizeof(((app_config_t *)0)->json_url)) ||
         !validate_string_len(root, "json_auth_header", sizeof(((app_config_t *)0)->json_auth_header)) ||
         !validate_string_len(root, "json_tiles_config", JSON_TILES_CONFIG_MAX) ||
+        !validate_string_len(root, "nina_profile_sets_1", NPS_STORE_MAX) ||
+        !validate_string_len(root, "nina_profile_sets_2", NPS_STORE_MAX) ||
+        !validate_string_len(root, "nina_profile_sets_3", NPS_STORE_MAX) ||
+        !validate_string_len(root, "nina_profile_id_1", NPS_ID_MAX) ||
+        !validate_string_len(root, "nina_profile_id_2", NPS_ID_MAX) ||
+        !validate_string_len(root, "nina_profile_id_3", NPS_ID_MAX) ||
         !validate_string_len(root, "ha_base_url", sizeof(((app_config_t *)0)->ha_base_url)) ||
         !validate_string_len(root, "ha_token", sizeof(((app_config_t *)0)->ha_token)) ||
         !validate_string_len(root, "ha_tiles_config", HA_TILES_CONFIG_MAX) ||
@@ -1294,7 +1337,11 @@ static void strip_masked_secrets(cJSON *root)
 // NOTE: mutates `root` -- strip_masked_secrets() removes redacted secrets so
 // they cannot be written. Callers delete `root` shortly after, and the restore
 // path relies on the same removal.
-static app_config_t *parse_config_from_json(cJSON *root)
+/* skipped_nodes: when non-NULL the stale-page rule is on. A node whose
+ * nina_profile_id_N key is present and differs from the profile NINA has loaded
+ * now keeps its colours and limits (the page was showing another profile), and
+ * bit N-1 is set in *skipped_nodes. NULL (restore) applies them unconditionally. */
+static app_config_t *parse_config_from_json(cJSON *root, unsigned *skipped_nodes)
 {
     app_config_t *cfg = heap_caps_malloc(sizeof(app_config_t), MALLOC_CAP_SPIRAM);
     if (!cfg) {
@@ -1328,6 +1375,30 @@ static app_config_t *parse_config_from_json(cJSON *root)
         if (!((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9'))) {
             cfg->radar_token[0] = '\0';
             break;
+        }
+    }
+
+    if (skipped_nodes) {
+        *skipped_nodes = 0;
+        for (int n = 0; n < 3; n++) {
+            char key[32];
+            snprintf(key, sizeof(key), "nina_profile_id_%d", n + 1);
+            cJSON *pid_item = cJSON_GetObjectItem(root, key);
+            /* An empty id means the page loaded before any profile was recorded
+             * for this node. The first profile seen adopts the values without
+             * changing them, so that edit is still about the right values. */
+            if (!cJSON_IsString(pid_item) || pid_item->valuestring[0] == '\0') continue;
+            char cur_id[NPS_ID_MAX];
+            char cur_name[NPS_ID_MAX];
+            app_config_get_profile_current(n, cur_id, sizeof(cur_id), cur_name, sizeof(cur_name));
+            if (strncmp(pid_item->valuestring, cur_id, NPS_ID_MAX - 1) == 0) continue;
+            *skipped_nodes |= (1u << n);
+            snprintf(key, sizeof(key), "filter_colors_%d", n + 1);
+            cJSON_DeleteItemFromObject(root, key);
+            snprintf(key, sizeof(key), "rms_thresholds_%d", n + 1);
+            cJSON_DeleteItemFromObject(root, key);
+            snprintf(key, sizeof(key), "hfr_thresholds_%d", n + 1);
+            cJSON_DeleteItemFromObject(root, key);
         }
     }
 
@@ -1530,6 +1601,26 @@ cJSON *receive_json_body(httpd_req_t *req, int max_size)
     return root;
 }
 
+/* Success reply for save and preview. Plain "OK" as before; when the stale-page
+ * rule skipped nodes, a JSON body {"ok":true,"profile_skipped":[1,3]} (1-based
+ * node numbers) so the page can reload those nodes' colours and limits. */
+static void send_config_ok(httpd_req_t *req, unsigned skipped_nodes)
+{
+    if (skipped_nodes == 0) {
+        httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+        return;
+    }
+    char body[64];
+    int len = snprintf(body, sizeof(body), "{\"ok\":true,\"profile_skipped\":[%s%s%s%s%s]}",
+                       (skipped_nodes & 1u) ? "1" : "",
+                       ((skipped_nodes & 1u) && (skipped_nodes & 6u)) ? "," : "",
+                       (skipped_nodes & 2u) ? "2" : "",
+                       ((skipped_nodes & 2u) && (skipped_nodes & 4u)) ? "," : "",
+                       (skipped_nodes & 4u) ? "3" : "");
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, body, len);
+}
+
 // Handler for saving config (persists to NVS)
 esp_err_t config_post_handler(httpd_req_t *req)
 {
@@ -1542,7 +1633,8 @@ esp_err_t config_post_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    app_config_t *cfg = parse_config_from_json(root);
+    unsigned skipped_nodes = 0;
+    app_config_t *cfg = parse_config_from_json(root, &skipped_nodes);
     if (!cfg) {
         cJSON_Delete(root);
         httpd_resp_send_500(req);
@@ -1672,7 +1764,7 @@ esp_err_t config_post_handler(httpd_req_t *req)
     free(cfg);
 
     ESP_LOGI(TAG, "Config saved to NVS");
-    httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
+    send_config_ok(req, skipped_nodes);
     return ESP_OK;
 }
 
@@ -1688,7 +1780,8 @@ esp_err_t config_apply_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    app_config_t *cfg = parse_config_from_json(root);
+    unsigned skipped_nodes = 0;
+    app_config_t *cfg = parse_config_from_json(root, &skipped_nodes);
     cJSON_Delete(root);
     if (!cfg) {
         httpd_resp_send_500(req);
@@ -1706,6 +1799,38 @@ esp_err_t config_apply_handler(httpd_req_t *req)
     free(old_cfg);
     free(cfg);
 
+    send_config_ok(req, skipped_nodes);
+    return ESP_OK;
+}
+
+/* POST /api/nina-profile-forget  {"node":1..3,"id":"<profile id>"}
+ * Drops one remembered (not loaded) NINA profile for a node. */
+esp_err_t nina_profile_forget_post_handler(httpd_req_t *req)
+{
+    REQUIRE_AUTH(req);
+    cJSON *root = receive_json_body(req, 512);
+    if (!root) return ESP_OK;
+
+    cJSON *node = cJSON_GetObjectItem(root, "node");
+    cJSON *id = cJSON_GetObjectItem(root, "id");
+    if (!cJSON_IsNumber(node) || node->valueint < 1 || node->valueint > 3 ||
+        !cJSON_IsString(id) || id->valuestring[0] == '\0' ||
+        strlen(id->valuestring) >= NPS_ID_MAX) {
+        cJSON_Delete(root);
+        return send_400(req, "Expected node 1-3 and a profile id");
+    }
+
+    esp_err_t err = app_config_profile_forget(node->valueint - 1, id->valuestring);
+    cJSON_Delete(root);
+    if (err == ESP_ERR_NOT_FOUND) {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_send(req, "Profile not remembered", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
+    }
+    if (err != ESP_OK) {
+        httpd_resp_send_500(req);
+        return ESP_OK;
+    }
     httpd_resp_send(req, "OK", HTTPD_RESP_USE_STRLEN);
     return ESP_OK;
 }
@@ -1824,6 +1949,9 @@ esp_err_t backup_get_handler(httpd_req_t *req)
     cJSON_AddStringToObject(full_config, "ha_token",               cfg->ha_token);
     cJSON_AddNumberToObject(full_config, "ha_update_interval_s",   cfg->ha_update_interval_s);
     cJSON_AddStringToObject(full_config, "ha_tiles_config",        app_config_get_ha_tiles());
+    cJSON_AddStringToObject(full_config, "nina_profile_sets_1",    app_config_get_profile_sets(0));
+    cJSON_AddStringToObject(full_config, "nina_profile_sets_2",    app_config_get_profile_sets(1));
+    cJSON_AddStringToObject(full_config, "nina_profile_sets_3",    app_config_get_profile_sets(2));
 
     /* Split into config and sensitive sections */
     cJSON *config_section = cJSON_CreateObject();
@@ -1965,6 +2093,9 @@ esp_err_t restore_post_handler(httpd_req_t *req)
             cJSON_AddStringToObject(current_json, "ha_token",               live->ha_token);
             cJSON_AddNumberToObject(current_json, "ha_update_interval_s",   live->ha_update_interval_s);
             cJSON_AddStringToObject(current_json, "ha_tiles_config",        app_config_get_ha_tiles());
+            cJSON_AddStringToObject(current_json, "nina_profile_sets_1",    app_config_get_profile_sets(0));
+            cJSON_AddStringToObject(current_json, "nina_profile_sets_2",    app_config_get_profile_sets(1));
+            cJSON_AddStringToObject(current_json, "nina_profile_sets_3",    app_config_get_profile_sets(2));
         }
 
         cJSON *preview = build_restore_preview(backup, current_json);
@@ -2021,7 +2152,7 @@ esp_err_t restore_post_handler(httpd_req_t *req)
         }
 
         /* Parse into config struct using existing parse_config_from_json */
-        app_config_t *new_cfg = parse_config_from_json(merged);
+        app_config_t *new_cfg = parse_config_from_json(merged, NULL);
 
         if (!new_cfg) {
             cJSON_Delete(merged);
@@ -2115,6 +2246,9 @@ esp_err_t restore_post_handler(httpd_req_t *req)
          * after the save, only if something on that page actually moved. */
         bool json_page_changed = false;
         bool ha_page_changed = false;
+        /* Remembered NINA profiles from the backup, applied after the config
+         * save further down (copies, because `merged` is freed before it). */
+        char *prof_restore[3] = { NULL, NULL, NULL };
         {
             const app_config_t *live = app_config_get();
 
@@ -2170,6 +2304,15 @@ esp_err_t restore_post_handler(httpd_req_t *req)
                 esp_err_t te = app_config_set_ha_tiles(ht->valuestring);
                 if (te != ESP_OK) ESP_LOGW(TAG, "restore: ha tiles persist failed: %s", esp_err_to_name(te));
             }
+
+            for (int n = 0; n < 3; n++) {
+                char key[32];
+                snprintf(key, sizeof(key), "nina_profile_sets_%d", n + 1);
+                cJSON *ps = cJSON_GetObjectItem(merged, key);
+                if (cJSON_IsString(ps) && ps->valuestring) {
+                    prof_restore[n] = strdup(ps->valuestring);
+                }
+            }
         }
 
         cJSON_Delete(merged);
@@ -2179,10 +2322,27 @@ esp_err_t restore_post_handler(httpd_req_t *req)
         app_config_t *old_cfg = config_snapshot_for_request(req);
         if (!old_cfg) {
             free(new_cfg);
+            for (int n = 0; n < 3; n++) {
+                free(prof_restore[n]);
+            }
             return ESP_OK;   /* 500 already sent */
         }
 
         app_config_save(new_cfg);
+        /* Remembered NINA profiles, AFTER the save: the colours and limits just
+         * saved came from the backup, and the store names the profile they
+         * belong to plus the others. In the other order a poll landing between
+         * the two would switch profiles using the pre-restore values. An
+         * invalid text is refused by the setter and the current store stays. */
+        for (int n = 0; n < 3; n++) {
+            if (prof_restore[n]) {
+                esp_err_t pe = app_config_set_profile_sets(n, prof_restore[n]);
+                if (pe != ESP_OK) {
+                    ESP_LOGW(TAG, "restore: NINA profile sets %d refused: %s", n + 1, esp_err_to_name(pe));
+                }
+                free(prof_restore[n]);
+            }
+        }
         config_trigger_side_effects(old_cfg, new_cfg);
         free(old_cfg);
         free(new_cfg);

@@ -397,6 +397,7 @@ void start_web_server(void)
         { { "/api/config/apply",     HTTP_POST, config_apply_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/config/revert",    HTTP_POST, config_revert_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/config/pull",      HTTP_POST, config_pull_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
+        { { "/api/nina-profile-forget", HTTP_POST, nina_profile_forget_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/check-update",     HTTP_POST, check_update_post_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/check-update-json", HTTP_GET, check_update_json_handler, NULL }, ROUTE_AUTH_REQUIRED },
         { { "/api/ota-github",       HTTP_POST, ota_github_post_handler, NULL }, ROUTE_AUTH_REQUIRED },

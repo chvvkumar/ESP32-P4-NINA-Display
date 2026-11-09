@@ -32,7 +32,10 @@ jobs:
 
   cppcheck:
     name: Static Analysis (cppcheck)
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, whose cppcheck 2.19 reports 30
+    # errors (28 syntaxError on lv_font LV_VERSION_CHECK and asm("...") asset
+    # labels, plus two false positives) on sources the 24.04 cppcheck accepts.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v5

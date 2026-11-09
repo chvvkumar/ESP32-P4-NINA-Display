@@ -445,6 +445,10 @@ void input_task(void *arg) {
 // Per-Instance Poll Task — blocks independently on HTTP for its own instance
 // =============================================================================
 
+/* Last NINA profile id each poll task saw, so a profile change re-runs the
+ * filter sync. Written only by that instance's own poll task. */
+static char s_last_profile_id[MAX_NINA_INSTANCES][64];
+
 void instance_poll_task(void *arg) {
     instance_poll_ctx_t *ctx = (instance_poll_ctx_t *)arg;
     int idx = ctx->index;
@@ -596,8 +600,31 @@ void instance_poll_task(void *arg) {
             }
         }
 
-        // Sync filters on first successful fetch
-        if (!ctx->filters_synced && ctx->client->filter_count > 0) {
+        /* Per-NINA-profile colours and limits: follow the loaded profile.
+         * profile_id/profile_name are written only by this task's own poll,
+         * so they are read here without the client lock. */
+        if (nina_connection_is_connected(idx) && ctx->client->profile_id[0] != '\0' &&
+            ctx->client->profile_name[0] != '\0') {
+            if (strcmp(ctx->client->profile_id, s_last_profile_id[idx]) != 0) {
+                /* Any profile change means a new filter list to sync. */
+                ctx->filters_synced = false;
+                snprintf(s_last_profile_id[idx], sizeof(s_last_profile_id[idx]), "%s",
+                         ctx->client->profile_id);
+            }
+            if (app_config_profile_switch(idx, ctx->client->profile_id, ctx->client->profile_name)) {
+                ctx->filters_synced = false;
+            }
+            /* After the switch, so the store's loaded profile is current. */
+            if (atomic_exchange(&ctx->client->profile_prune_needed, false)) {
+                nina_client_prune_profiles(url, idx);
+            }
+        }
+
+        // Sync filters on first successful fetch. Not before the profile is
+        // known: the sync removes colours of filters missing from the list, so
+        // it must only ever run against the loaded profile's own colours.
+        if (!ctx->filters_synced && ctx->client->filter_count > 0 &&
+            ctx->client->profile_id[0] != '\0') {
             const char *names[MAX_FILTERS];
             for (int f = 0; f < ctx->client->filter_count; f++)
                 names[f] = ctx->client->filters[f].name;

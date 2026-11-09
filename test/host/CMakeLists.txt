@@ -385,3 +385,14 @@ add_nina_host_test(test_nina_plan_segments
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_nina_plan_segments.c
 )
+
+# ---------------------------------------------------------------------------
+# test_nina_profile_sets -- per-NINA-profile colours and RMS/HFR limits
+# (main/nina_profile_sets.h): adopt, rename, switch and switch back, age order,
+# the profile cap, the size cap, forget, prune of profiles deleted in NINA and
+# store validation. Header-only over the vendored cJSON.
+# ---------------------------------------------------------------------------
+add_nina_host_test(test_nina_profile_sets
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_nina_profile_sets.c
+)
