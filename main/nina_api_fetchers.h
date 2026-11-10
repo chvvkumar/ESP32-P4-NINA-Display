@@ -16,6 +16,7 @@ void fetch_image_history_robust(const char *base_url, nina_client_t *data);
 void fetch_profile_robust(const char *base_url, nina_client_t *data);
 void fetch_guider_robust(const char *base_url, nina_client_t *data);
 void fetch_mount_robust(const char *base_url, nina_client_t *data);
+void fetch_horizon_robust(const char *base_url, nina_client_t *data);
 void fetch_focuser_robust(const char *base_url, nina_client_t *data);
 void fetch_switch_info(const char *base_url, nina_client_t *data);
 void fetch_safety_monitor_info(const char *base_url, nina_client_t *data);

@@ -9,6 +9,8 @@
 #include "nina_api_fetchers.h"
 #include "nina_client_internal.h"
 #include "json_get.h"
+#include "sky_scene_math.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "cJSON.h"
@@ -42,6 +44,14 @@ static void nina_fetch_set_offline(nina_client_t *data) {
 static void parse_mount_pointing(cJSON *mount, nina_client_t *data) {
     if (!mount) {
         data->mount_pointing_valid = false;
+        data->mount_connected = false;
+        data->mount_at_park = false;
+        data->mount_slewing = false;
+        data->mount_tracking = false;
+        data->mount_pier_side = 0;
+        data->site_valid = false;
+        data->lst_valid = false;
+        data->flip_valid = false;
         return;
     }
     JSON_GET_FLOAT(mount, "SiteElevation", data->site_elev_m);
@@ -52,6 +62,49 @@ static void parse_mount_pointing(cJSON *mount, nina_client_t *data) {
     bool at_park = false;
     JSON_GET_BOOL(mount, "Connected", connected);
     JSON_GET_BOOL(mount, "AtPark", at_park);
+
+    /* Sky scene inputs. Stored as reported: a parked real mount can report
+     * Slewing true together with AtPark true, consumers gate on park first. */
+    bool slewing = false;
+    bool tracking = false;
+    JSON_GET_BOOL(mount, "Slewing", slewing);
+    JSON_GET_BOOL(mount, "TrackingEnabled", tracking);
+    data->mount_connected = connected;
+    data->mount_at_park = at_park;
+    data->mount_slewing = slewing;
+    data->mount_tracking = tracking;
+
+    uint8_t pier = 0;
+    cJSON *side = cJSON_GetObjectItem(mount, "SideOfPier");
+    if (cJSON_IsString(side) && side->valuestring) {
+        if (strcmp(side->valuestring, "pierEast") == 0) {
+            pier = 1;
+        } else if (strcmp(side->valuestring, "pierWest") == 0) {
+            pier = 2;
+        }
+    }
+    data->mount_pier_side = pier;
+
+    cJSON *lat = cJSON_GetObjectItem(mount, "SiteLatitude");
+    cJSON *lon = cJSON_GetObjectItem(mount, "SiteLongitude");
+    data->site_valid = cJSON_IsNumber(lat) && cJSON_IsNumber(lon);
+    if (data->site_valid) {
+        data->site_lat_deg = (float)lat->valuedouble;
+        data->site_lon_deg = (float)lon->valuedouble;
+    }
+
+    cJSON *sid = cJSON_GetObjectItem(mount, "SiderealTime");
+    data->lst_valid = cJSON_IsNumber(sid);
+    if (data->lst_valid) {
+        data->lst_hours = sky_wrap24((float)sid->valuedouble);
+        data->lst_mono_us = esp_timer_get_time();
+    }
+
+    /* NINA sends 24 h for "no flip". */
+    cJSON *ttf = cJSON_GetObjectItem(mount, "TimeToMeridianFlip");
+    data->flip_valid = connected && !at_park && tracking && cJSON_IsNumber(ttf) &&
+                       ttf->valuedouble >= 0.0 && ttf->valuedouble < 23.99;
+    data->flip_minutes = data->flip_valid ? (float)(ttf->valuedouble * 60.0) : 0.0f;
 
     if (cJSON_IsNumber(alt) && cJSON_IsNumber(az)) {
         data->mount_alt_deg = (float)alt->valuedouble;
@@ -416,6 +469,65 @@ void fetch_mount_robust(const char *base_url, nina_client_t *data) {
     }
 
     cJSON_Delete(json);
+}
+
+_Static_assert(NINA_HORIZON_N == SKY_HORIZON_N, "horizon sample count");
+
+/**
+ * @brief Fetch the active profile's horizon outline (once per connect).
+ * Resampled to NINA_HORIZON_N altitudes; horizon_valid=false on any failure.
+ */
+void fetch_horizon_robust(const char *base_url, nina_client_t *data) {
+    char url[256];
+    snprintf(url, sizeof(url), "%sprofile/horizon", base_url);
+
+    int8_t tmp72[NINA_HORIZON_N] = {0};
+    bool ok = false;
+
+    cJSON *json = http_get_json(url);
+    if (json && nina_api_envelope_ok(json)) {
+        cJSON *resp = cJSON_GetObjectItem(json, "Response");
+        cJSON *alts = resp ? cJSON_GetObjectItem(resp, "Altitudes") : NULL;
+        cJSON *azs = resp ? cJSON_GetObjectItem(resp, "Azimuths") : NULL;
+        int n = 0;
+        if (cJSON_IsArray(alts) && cJSON_IsArray(azs)) {
+            n = cJSON_GetArraySize(alts);
+            int na = cJSON_GetArraySize(azs);
+            if (na < n) {
+                n = na;
+            }
+            if (n > SKY_HORIZON_IN_MAX) {
+                n = SKY_HORIZON_IN_MAX;
+            }
+        }
+        if (n > 0) {
+            float *az_f = heap_caps_malloc(sizeof(float) * (size_t)n, MALLOC_CAP_SPIRAM);
+            float *alt_f = heap_caps_malloc(sizeof(float) * (size_t)n, MALLOC_CAP_SPIRAM);
+            if (az_f && alt_f) {
+                for (int i = 0; i < n; i++) {
+                    cJSON *a = cJSON_GetArrayItem(alts, i);
+                    cJSON *z = cJSON_GetArrayItem(azs, i);
+                    alt_f[i] = cJSON_IsNumber(a) ? (float)a->valuedouble : 0.0f;
+                    az_f[i] = cJSON_IsNumber(z) ? (float)z->valuedouble : 0.0f;
+                }
+                ok = sky_horizon_resample(az_f, alt_f, n, tmp72);
+            }
+            heap_caps_free(az_f);
+            heap_caps_free(alt_f);
+        }
+    }
+    if (json) {
+        cJSON_Delete(json);
+    }
+
+    if (!ok) {
+        memset(tmp72, 0, sizeof(tmp72));
+    }
+    if (nina_client_lock(data, FETCH_LOCK_MS)) {
+        memcpy(data->horizon_alt, tmp72, sizeof(tmp72));
+        data->horizon_valid = ok;
+        nina_client_unlock(data);
+    }
 }
 
 /**

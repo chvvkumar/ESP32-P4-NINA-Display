@@ -116,9 +116,9 @@ typedef struct dashboard_page_s {
     /* Page layout for this instance, from app_config_t::nina_layout[i]:
      * 0 = arc dashboard (every field below the `alt` block applies),
      * 1 = Image-forward, 2 = Halo, 4 = Orbit, 5 = Night rail,
-     * 7 = Two rings (nina_layout_alt.h; 2 and 4 are round family only, 5
-     * and 7 draw on both; 3 and 6 are retired and validate_config resets
-     * them to 0).
+     * 7 = Two rings, 8 = Readout on the ground, 9 = In the sky
+     * (nina_layout_alt.h; 2 and 4 are round family only, 5, 7, 8 and 9 draw
+     * on both; 3 and 6 are retired and validate_config resets them to 0).
      * On any non-zero layout the arc-path widgets are never created and the
      * arc-path updaters never run — only `subbar`, `alt` and the shared
      * pieces (stale label/overlay, empty_state_cont, exposure clock) exist. */
@@ -218,6 +218,7 @@ typedef struct dashboard_page_s {
          * either one, so do not assume an object class from the name. */
         lv_obj_t *ring_rim;
         lv_obj_t *ring_inner;
+        struct nina_sky_scene_s *sky;   /* layouts 8 and 9: the sky scene, freed with the page root */
 
         /* Shared round picture overlay (nina_round_overlay.h/.c), drawn over
          * the capture on every round capture layout, the round Dashboard
