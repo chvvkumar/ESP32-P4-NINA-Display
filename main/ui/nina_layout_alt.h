@@ -11,6 +11,11 @@
  *   4 = Orbit       (round family only, nina_layout_orbit_round.c)
  *   5 = Night rail  (both families: nina_layout_rail.c / nina_layout_rail_round.c)
  *   7 = Two rings   (both families: nina_layout_rings.c / nina_layout_rings_round.c)
+ *   8 = Readout on the ground (both families, ONE body: nina_layout_ground.c)
+ *   9 = In the sky            (both families, ONE body: nina_layout_skywords.c)
+ *
+ * Ids 8 and 9 are NOT picture layouts on either family: no capture, no shared
+ * round overlay, no view cycle (see the section for them below).
  *
  * Ids 5 and 7 draw no picture on the square family (a pure readings page)
  * and draw the same shared round overlay (crown, rim arc, plate) as Halo and
@@ -321,6 +326,44 @@ void nina_layout_rings_update(dashboard_page_t *p, const nina_client_t *d,
                               int instance_idx, int gb);
 void nina_layout_rings_apply_theme(dashboard_page_t *p);
 void nina_layout_rings_set_view(dashboard_page_t *p, nina_view_mode_t mode);
+
+/* -- Layouts 8 and 9 -- the sky scene, both families, one body each -------- */
+
+/**
+ * @brief The three entry points of each sky scene layout.
+ *
+ * ONE definition per name, compiled into BOTH binaries from nina_srcs (no
+ * _round twin): geometry is taken at runtime from screen_size(),
+ * screen_safe_radius() and SCREEN_ROUND. Both draw the shared scene
+ * (nina_sky_scene.h) as their first child of the page root and place their
+ * own words over it: 8 in a readout on the ground band, 9 next to the objects.
+ *
+ * NOT picture layouts: nina_layout_uses_capture() and the spine's
+ * layout_uses_round_overlay() stay false for 8 and 9 on both families, so
+ * the spine never creates p->alt.cap_img, never fetches a capture, never
+ * builds the round overlay, and nina_dashboard_refresh_view() returns early.
+ * There is therefore no set_view entry point: the spine's set_view switch
+ * keeps falling through its default for 8 and 9. The page dots stay hidden
+ * (update_indicators() shows them for layout 0 only) and the round stale badge
+ * takes the non-overlay drop (34 px).
+ *
+ * The exposure seconds have ONE writer: p->alt.elapsed_cb, registered in
+ * create(), called by the spine's 200 ms tick (-1 = idle). It also feeds the
+ * scene's exposure ring through nina_sky_scene_set_exposure(). The scene
+ * handle is stored in p->alt.sky and is freed with the page root.
+ *
+ * All entry points run with the LVGL display lock held by the caller; update()
+ * also runs inside the caller's nina_client lock.
+ */
+void nina_layout_ground_create(dashboard_page_t *p, lv_obj_t *parent, int page_index);
+void nina_layout_ground_update(dashboard_page_t *p, const nina_client_t *d,
+                               int instance_idx, int gb);
+void nina_layout_ground_apply_theme(dashboard_page_t *p);
+
+void nina_layout_skywords_create(dashboard_page_t *p, lv_obj_t *parent, int page_index);
+void nina_layout_skywords_update(dashboard_page_t *p, const nina_client_t *d,
+                                 int instance_idx, int gb);
+void nina_layout_skywords_apply_theme(dashboard_page_t *p);
 
 /* ── Shared ───────────────────────────────────────────────────────────────── */
 

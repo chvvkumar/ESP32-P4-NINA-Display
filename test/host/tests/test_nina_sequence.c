@@ -35,9 +35,14 @@
  * which is deliberately not linked into this test binary.
  * --------------------------------------------------------------------- */
 static const char *s_mock_json = NULL; /* NULL => simulate HTTP/parse failure */
+static const char *s_mock_state = NULL; /* answer for a sequence/state URL */
+static int s_state_fetches = 0;         /* sequence/state requests seen */
 
 cJSON *http_get_json(const char *url) {
-    (void)url;
+    if (strstr(url, "sequence/state")) {
+        s_state_fetches++;
+        return s_mock_state ? cJSON_Parse(s_mock_state) : NULL;
+    }
     if (!s_mock_json) {
         return NULL;
     }
@@ -722,6 +727,123 @@ static void test_plan_item_cap(void) {
     expect_str("plan.items[15].filter (last tracked)", c.plan.items[15].filter, "F15");
 }
 
+/* =======================================================================
+ * Target coordinates: Slew item (nested), trigger fallback, none.
+ * ======================================================================= */
+static const char *k_coords_item =
+    "{\"Response\":[{\"Name\":\"Targets_Container\",\"Items\":["
+    "{\"Name\":\"Sh2 157_Container\",\"Status\":\"RUNNING\",\"Items\":["
+    "{\"Name\":\"Wait until Above horizon\",\"Status\":\"FINISHED\"},"
+    "{\"Name\":\"Prepare Target_Container\",\"Status\":\"FINISHED\",\"Items\":["
+    "{\"Name\":\"Slew, center and rotate\",\"Coordinates\":{\"RA\":23.315440,\"Dec\":61.240375}}"
+    "]}]}]}],\"Success\":true}";
+
+static const char *k_coords_trigger =
+    "{\"Response\":[{\"Name\":\"Targets_Container\",\"Items\":["
+    "{\"Name\":\"M45_Container\",\"Status\":\"RUNNING\",\"Items\":[],\"Triggers\":["
+    "{\"Name\":\"Center After Drift_Trigger\",\"Coordinates\":{\"Coordinates\":{\"RA\":3.770614,\"Dec\":24.194701}}}"
+    "]}]}],\"Success\":true}";
+
+static const char *k_coords_none =
+    "{\"Response\":[{\"Name\":\"Targets_Container\",\"Items\":["
+    "{\"Name\":\"M45_Container\",\"Status\":\"RUNNING\",\"Items\":["
+    "{\"Name\":\"Wait\",\"Status\":\"FINISHED\"}]}]}],\"Success\":true}";
+
+static void test_target_coords(void) {
+    nina_client_t c;
+    reset_client(&c);
+    run_fetch(k_coords_item, &c);
+    expect_int("coords item valid", c.target_coord_valid, 1);
+    expect_float("coords item ra", c.target_ra_h, 23.3154f, 1e-4f);
+    expect_float("coords item dec", c.target_dec_deg, 61.2404f, 1e-4f);
+
+    reset_client(&c);
+    run_fetch(k_coords_trigger, &c);
+    expect_int("coords trigger valid", c.target_coord_valid, 1);
+    expect_float("coords trigger ra", c.target_ra_h, 3.770614f, 1e-4f);
+    expect_float("coords trigger dec", c.target_dec_deg, 24.194701f, 1e-4f);
+
+    reset_client(&c);
+    run_fetch(k_coords_none, &c);
+    expect_int("coords none invalid", c.target_coord_valid, 0);
+}
+
+/* =======================================================================
+ * Target coordinates from sequence/state when sequence/json has none:
+ * the container's own Target.InputCoordinates, remembered per container.
+ * ======================================================================= */
+static const char *k_state_m45 =
+    "{\"Response\":[{\"Name\":\"Start_Container\",\"Status\":\"FINISHED\"},"
+    "{\"Name\":\"Targets_Container\",\"Status\":\"RUNNING\",\"Items\":["
+    "{\"Name\":\"M45_Container\",\"Status\":\"RUNNING\",\"Target\":{\"TargetName\":\"M45\","
+    "\"PositionAngle\":195.0,\"InputCoordinates\":{\"RAHours\":3,\"RAMinutes\":47,\"RASeconds\":24.0,"
+    "\"NegativeDec\":false,\"DecDegrees\":24,\"DecMinutes\":7,\"DecSeconds\":0.0}}}]}],\"Success\":true}";
+
+static const char *k_state_south =
+    "{\"Response\":[{\"Name\":\"Targets_Container\",\"Items\":["
+    "{\"Name\":\"NGC 253_Container\",\"Target\":{\"InputCoordinates\":{\"RAHours\":0,\"RAMinutes\":47,"
+    "\"RASeconds\":33.0,\"NegativeDec\":true,\"DecDegrees\":25,\"DecMinutes\":17,\"DecSeconds\":18.0}}}]}]}";
+
+static void test_target_coords_state(void) {
+    printf("\n-- test_target_coords_state --\n");
+    nina_client_t c;
+    reset_client(&c);
+    s_mock_state = k_state_m45;
+    run_fetch(k_coords_none, &c);
+    expect_int("state coords valid", c.target_coord_valid, 1);
+    expect_float("state coords ra", c.target_ra_h, 3.79f, 1e-4f);
+    expect_float("state coords dec", c.target_dec_deg, 24.1167f, 1e-3f);
+    expect_str("state coords remembered for", c.state_coord_container, "M45_Container");
+
+    /* Same container again with sequence/state unreachable: the remembered
+     * coordinates still apply. */
+    s_mock_state = NULL;
+    run_fetch(k_coords_none, &c);
+    expect_int("state coords cached valid", c.target_coord_valid, 1);
+    expect_float("state coords cached ra", c.target_ra_h, 3.79f, 1e-4f);
+
+    /* Fresh client, state unreachable: no coordinates. */
+    reset_client(&c);
+    run_fetch(k_coords_none, &c);
+    expect_int("state unreachable invalid", c.target_coord_valid, 0);
+
+    /* State reachable but holds no Target for this container (plain
+     * Sequential container with a slew item): json slew coordinates are the
+     * fallback, and the "no Target" answer is remembered, so the second poll
+     * of the same container does not ask sequence/state again. */
+    reset_client(&c);
+    s_mock_state = k_state_south;   /* only NGC 253 in here, not Sh2 157 */
+    s_state_fetches = 0;
+    run_fetch(k_coords_item, &c);
+    expect_int("no-Target: json slew fallback valid", c.target_coord_valid, 1);
+    expect_float("no-Target: json slew ra", c.target_ra_h, 23.3154f, 1e-4f);
+    expect_str("no-Target: container remembered", c.state_coord_container, "Sh2 157_Container");
+    expect_int("no-Target: one state fetch", s_state_fetches, 1);
+    run_fetch(k_coords_item, &c);
+    expect_int("no-Target: still valid", c.target_coord_valid, 1);
+    expect_int("no-Target: no refetch", s_state_fetches, 1);
+
+    /* State wins over a json slew item when the container has a Target. */
+    reset_client(&c);
+    s_mock_state = k_state_m45;
+    run_fetch(k_coords_trigger, &c);  /* M45 container, trigger says RA 3.770614 */
+    expect_float("state over json trigger ra", c.target_ra_h, 3.79f, 1e-4f);
+    s_mock_state = NULL;
+
+    /* Pure walker: southern target, NegativeDec, name must match in full. */
+    cJSON *st = cJSON_Parse(k_state_south);
+    float ra = 0.0f, dec = 0.0f;
+    expect_int("state walker south found",
+               nina_seq_state_target_coords(cJSON_GetObjectItem(st, "Response"),
+                                            "NGC 253_Container", &ra, &dec), 1);
+    expect_float("state walker south ra", ra, 0.7925f, 1e-4f);
+    expect_float("state walker south dec", dec, -25.2883f, 1e-3f);
+    expect_int("state walker wrong name",
+               nina_seq_state_target_coords(cJSON_GetObjectItem(st, "Response"),
+                                            "NGC 253", &ra, &dec), 0);
+    cJSON_Delete(st);
+}
+
 int main(void) {
     test_normal_running_smart_exposure();
     test_no_running_target();
@@ -736,6 +858,8 @@ int main(void) {
     test_plan_single_image();
     test_plan_idle_retention();
     test_plan_item_cap();
+    test_target_coords();
+    test_target_coords_state();
 
     printf("\n%s (%d failures)\n", fails ? "TESTS FAILED" : "ALL TESTS PASSED", fails);
     return fails ? 1 : 0;

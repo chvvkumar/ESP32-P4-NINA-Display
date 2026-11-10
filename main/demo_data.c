@@ -10,6 +10,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "time_parse.h"
+#include "sky_scene_math.h"
 #include <string.h>
 #include <math.h>
 #include <time.h>
@@ -63,6 +64,8 @@ typedef struct {
     float rotator_angle;
     bool  rotator_connected;
     float moon_illumination;
+    float ra_h;           /* target right ascension, hours */
+    float dec_deg;        /* target declination, degrees   */
 
     int   flip_start_s;   /* initial countdown seconds, 0 = no flip */
     int   flip_reset_s;   /* reset value after countdown expires    */
@@ -96,6 +99,8 @@ static const demo_profile_t profiles[3] = {
         .rotator_angle     = 127.5f,
         .rotator_connected = true,
         .moon_illumination = 23.0f,
+        .ra_h              = 20.94f,
+        .dec_deg           = 30.72f,
         .flip_start_s      = 8100,
         .flip_reset_s      = 16200,
         .power_voltage     = 12.2f,
@@ -124,6 +129,8 @@ static const demo_profile_t profiles[3] = {
         .rotator_angle     = 0.0f,
         .rotator_connected = false,
         .moon_illumination = 23.0f,
+        .ra_h              = 0.712f,
+        .dec_deg           = 41.27f,
         .flip_start_s      = 0,
         .flip_reset_s      = 0,
         .power_voltage     = 13.2f,
@@ -152,6 +159,8 @@ static const demo_profile_t profiles[3] = {
         .rotator_angle     = 45.0f,
         .rotator_connected = true,
         .moon_illumination = 23.0f,
+        .ra_h              = 21.65f,
+        .dec_deg           = 57.50f,
         .flip_start_s      = 2700,
         .flip_reset_s      = 10800,
         .power_voltage     = 12.0f,
@@ -163,6 +172,10 @@ static const demo_profile_t profiles[3] = {
         .star_base         = 110,
     },
 };
+
+#define DEMO_SIDEREAL_DEG_PER_H 15.041f
+#define DEMO_LAT_DEG            41.9f
+#define DEMO_LON_DEG            (-87.6f)
 
 /* ── Per-instance mutable runtime state ───────────────────────────── */
 
@@ -177,6 +190,9 @@ typedef struct {
     float hfr;
     int   focuser_pos;
     int   flip_countdown_s;
+    float ha_deg;         /* mount hour angle, degrees */
+    uint8_t pier;         /* sky_pier_t: 1 east, 2 west */
+    int   flip_phase_s;   /* seconds left in a running flip, 0 = none */
 
     float voltage;
     float amps;
@@ -265,6 +281,20 @@ static void demo_stop_cleanup(nina_client_t *instances, allsky_data_t *allsky, i
             d->power.switch_connected = false;
             d->power.pwm_count        = 0;
             d->is_dithering = false;
+            d->is_exposing  = false;
+            d->mount_pointing_valid = false;
+            d->mount_connected = false;
+            d->mount_at_park   = false;
+            d->mount_slewing   = false;
+            d->mount_tracking  = false;
+            d->mount_pier_side = 0;
+            d->site_valid      = false;
+            d->lst_valid       = false;
+            d->flip_valid      = false;
+            d->flip_minutes    = 0.0f;
+            d->target_coord_valid = false;
+            d->horizon_valid   = false;
+            memset(d->horizon_alt, 0, sizeof(d->horizon_alt));
             d->last_image_stats.has_data = false;
             d->hfr_ring.write_idx = 0;
             d->hfr_ring.count     = 0;
@@ -311,6 +341,14 @@ static void demo_run(nina_client_t *instances, allsky_data_t *allsky, int count)
         st->hfr           = prof->hfr_base;
         st->focuser_pos   = prof->focuser_base;
         st->flip_countdown_s = prof->flip_start_s;
+        st->flip_phase_s     = 0;
+        if (prof->flip_start_s > 0) {
+            st->ha_deg = -((float)prof->flip_start_s / 3600.0f) * DEMO_SIDEREAL_DEG_PER_H;
+            st->pier   = 2;
+        } else {
+            st->ha_deg = 30.0f;
+            st->pier   = 1;
+        }
         st->voltage       = prof->power_voltage;
         st->amps          = prof->power_amps;
         st->dew_pwm       = prof->dew_heater_pwm;
@@ -321,6 +359,30 @@ static void demo_run(nina_client_t *instances, allsky_data_t *allsky, int count)
         nina_connection_report_poll(i, true);
         nina_connection_report_ws(i, true);
         nina_connection_set_static_data_ready(i, true);
+    }
+
+    /* Demo horizon outline, once per demo start (same for every rig). */
+    for (int i = 0; i < count; i++) {
+        nina_client_t *d = &instances[i];
+        if (!nina_client_lock(d, 1000)) {
+            continue;
+        }
+        for (int k = 0; k < NINA_HORIZON_N; k++) {
+            float az = 5.0f * (float)k;
+            float w1 = sky_wrap180(az - 225.0f) / 18.0f;
+            float w2 = sky_wrap180(az - 130.0f) / 8.0f;
+            float alt = 3.0f + 2.5f * sinf(3.0f * az) + 7.0f * expf(-(w1 * w1)) +
+                        5.0f * expf(-(w2 * w2));
+            long r = lroundf(alt);
+            if (r < 0) {
+                r = 0;
+            } else if (r > 20) {
+                r = 20;
+            }
+            d->horizon_alt[k] = (int8_t)r;
+        }
+        d->horizon_valid = true;
+        nina_client_unlock(d);
     }
 
     /* Report safety monitor as connected and safe */
@@ -395,7 +457,9 @@ static void demo_run(nina_client_t *instances, allsky_data_t *allsky, int count)
                     sizeof(d->current_filter) - 1);
 
             /* ── Exposure progress ───────────────────────────────── */
-            st->exposure_current += 2.0f; /* 2 second tick */
+            if (st->flip_phase_s == 0) {
+                st->exposure_current += 2.0f; /* 2 second tick, held during a flip */
+            }
             d->exposure_current    = st->exposure_current;
             d->exposure_total      = prof->filter_exposure_s[fidx];
             d->exposure_count      = st->exposure_count;
@@ -439,14 +503,72 @@ static void demo_run(nina_client_t *instances, allsky_data_t *allsky, int count)
 
             /* ── Meridian flip ───────────────────────────────────── */
             if (prof->flip_start_s > 0) {
-                st->flip_countdown_s -= 2;
-                if (st->flip_countdown_s <= 0) {
-                    st->flip_countdown_s = prof->flip_reset_s;
+                if (st->flip_phase_s > 0) {
+                    st->flip_phase_s -= 2;
+                    if (st->flip_phase_s <= 45 && st->pier == 2) {
+                        st->pier = 1;
+                    }
+                    if (st->flip_phase_s <= 0) {
+                        st->flip_phase_s = 0;
+                        st->ha_deg = 0.0f;
+                        st->pier = 1;
+                        strncpy(d->meridian_flip, "--:--", sizeof(d->meridian_flip) - 1);
+                    } else {
+                        strncpy(d->meridian_flip, "FLIPPING", sizeof(d->meridian_flip) - 1);
+                    }
+                } else if (st->flip_countdown_s > 0) {
+                    st->flip_countdown_s -= 2;
+                    if (st->flip_countdown_s <= 0) {
+                        st->flip_countdown_s = 0;
+                        st->flip_phase_s = 90;
+                        strncpy(d->meridian_flip, "FLIPPING", sizeof(d->meridian_flip) - 1);
+                    } else {
+                        st->ha_deg = -((float)st->flip_countdown_s / 3600.0f) * DEMO_SIDEREAL_DEG_PER_H;
+                        st->pier = 2;
+                        fmt_duration(d->meridian_flip, sizeof(d->meridian_flip),
+                                     st->flip_countdown_s, FMT_DUR_HM_CLOCK);
+                    }
+                } else {
+                    /* Past the flip: keep tracking east of the pier until the night restarts. */
+                    st->ha_deg += 2.0f * DEMO_SIDEREAL_DEG_PER_H / 3600.0f;
+                    strncpy(d->meridian_flip, "--:--", sizeof(d->meridian_flip) - 1);
+                    if (st->ha_deg > 60.0f) {
+                        st->flip_countdown_s = prof->flip_reset_s;
+                        st->ha_deg = -((float)st->flip_countdown_s / 3600.0f) * DEMO_SIDEREAL_DEG_PER_H;
+                        st->pier = 2;
+                    }
                 }
-                fmt_duration(d->meridian_flip, sizeof(d->meridian_flip),
-                             st->flip_countdown_s, FMT_DUR_HM_CLOCK);
             } else {
+                st->ha_deg += 2.0f * DEMO_SIDEREAL_DEG_PER_H / 3600.0f;
+                if (st->ha_deg > 75.0f) {
+                    st->ha_deg = 30.0f;
+                }
                 strncpy(d->meridian_flip, "--:--", sizeof(d->meridian_flip) - 1);
+            }
+
+            /* ── Sky scene fields ────────────────────────────────── */
+            {
+                bool flipping = st->flip_phase_s > 0;
+                d->site_valid   = true;
+                d->site_lat_deg = DEMO_LAT_DEG;
+                d->site_lon_deg = DEMO_LON_DEG;
+                d->lst_hours    = sky_wrap24(prof->ra_h + st->ha_deg / 15.0f);
+                d->lst_valid    = true;
+                d->lst_mono_us  = esp_timer_get_time();
+                d->mount_connected = true;
+                d->mount_at_park   = false;
+                d->mount_tracking  = true;
+                d->mount_slewing   = flipping;
+                d->mount_pier_side = st->pier;
+                sky_vec_to_altaz(sky_hadec_to_vec(st->ha_deg, prof->dec_deg, DEMO_LAT_DEG),
+                                 &d->mount_alt_deg, &d->mount_az_deg);
+                d->mount_pointing_valid = true;
+                d->target_coord_valid = true;
+                d->target_ra_h        = prof->ra_h;
+                d->target_dec_deg     = prof->dec_deg;
+                d->flip_valid   = st->flip_countdown_s > 0 && st->flip_phase_s == 0;
+                d->flip_minutes = d->flip_valid ? (float)st->flip_countdown_s / 60.0f : 0.0f;
+                d->is_exposing  = !flipping;
             }
 
             /* ── Target conditions ───────────────────────────────── */
