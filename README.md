@@ -221,8 +221,23 @@ Each instance page can also use one of a few alternate layouts, chosen per insta
 - **Orbit** (round panels only): the captured image fills the whole circle the same way, with the readings arranged between two rings instead of a plate: an outer ring marks each completed exposure and an inner ring shows exposure progress around the numbers at the centre.
 - **Night rail** (both panel shapes): a readings-only design with the exposure progress on one horizontal rail and the sub blocks lined up under it; on a round panel it still shows the captured image behind the readings, the same way Halo and Orbit do.
 - **Two rings** (both panel shapes): the exposure progress is drawn as an outer ring with the sub blocks as a ring inside it, and the rest of the readings arranged around them.
+- **Readout on the ground** (both panel shapes): a fully 3D night scene of your own back yard, described below, with one calm readout of the target, RMS, elapsed seconds, HFR, filter, count and flip time on the ground band at the bottom.
+- **In the sky** (both panel shapes): the same 3D scene with the words placed next to the things they describe: the flip time at the flip mark on the path, the target name and the exposure count in the bottom corners.
 
-On a round panel, every one of these designs, Dashboard included, shares the same picture and the same tap behaviour: a short tap on the picture steps through four views and back to the start, the picture with every reading, the picture with just the safety icon and exposure ring, the picture on its own, and the readings on their own with no picture. Before the first picture arrives, or after leaving the page, it shows the readings on their own and the tap does nothing. A long press on the picture opens the full, uncropped image full screen. On a square panel, Dashboard has no picture at all, Image-forward's picture is a plain tap to the full-screen preview with no cycle, and Night rail and Two rings also have no picture.
+The two sky scene designs are not a picture and not a diagram: they are a real 3D view, drawn from the actual angles. The telescope stands on its pier at the bottom of the scene in the pose the mount reports, tube pointing where it points, counterweight where it is, with a thin beam to the spot in the sky it is aimed at. The hills around it are your own horizon from the N.I.N.A. profile, drawn as a solid skyline, and compass bearings run along the ground. The dashed arc is the target's path across the sky tonight, from where it rises over your horizon to where it sets behind it: dots mark each finished exposure along the way, the target sits on the path where it is now with a ring filling up around it as the current exposure runs, and a tick marks where the meridian flip will happen. The view is a camera, not a flat projection: it starts behind the telescope looking north and the display flies it round to look along the path while imaging, so the telescope, the sky and the horizon stay in true relation to each other. Neither design shows the captured image and neither has a tap cycle.
+
+<table>
+  <tr>
+    <td align="center"><img src="images/nina_layout_ground.jpg" alt="Readout on the ground layout" width="400"></td>
+    <td align="center"><img src="images/nina_layout_in_the_sky.jpg" alt="In the sky layout" width="400"></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Readout on the ground</em></td>
+    <td align="center"><em>In the sky</em></td>
+  </tr>
+</table>
+
+On a round panel, every one of these designs, Dashboard included, shares the same picture and the same tap behaviour: a short tap on the picture steps through four views and back to the start, the picture with every reading, the picture with just the safety icon and exposure ring, the picture on its own, and the readings on their own with no picture. Before the first picture arrives, or after leaving the page, it shows the readings on their own and the tap does nothing. A long press on the picture opens the full, uncropped image full screen. On a square panel, Dashboard has no picture at all, Image-forward's picture is a plain tap to the full-screen preview with no cycle, and Night rail, Two rings, Readout on the ground and In the sky also have no picture.
 
 ---
 
