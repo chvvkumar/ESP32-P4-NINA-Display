@@ -44,10 +44,26 @@ jobs:
         timeout-minutes: 5
         run: sudo apt-get install -y --no-install-recommends cppcheck || (sudo apt-get update && sudo apt-get install -y --no-install-recommends cppcheck)
 
+      # cppcheck's build dir caches per-file analysis keyed by the hash of
+      # the preprocessed source, so unchanged files are skipped on the next
+      # run (full tree about 110 s at 4 threads, warm run about 3 s). The
+      # key never matches exactly, so every run restores the newest prior
+      # entry through restore-keys and saves a fresh one.
+      - name: Restore cppcheck analysis cache
+        uses: actions/cache@v4
+        with:
+          path: cppcheck-build
+          key: cppcheck-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            cppcheck-${{ runner.os }}-
+
       - name: Run cppcheck against firmware sources
         run: |
+          mkdir -p cppcheck-build
           cppcheck \
             -j "$(nproc)" \
+            --cppcheck-build-dir=cppcheck-build \
+            -USTB_IMAGE_IMPLEMENTATION \
             --enable=warning,portability \
             --error-exitcode=1 \
             --inline-suppr \
@@ -67,7 +83,6 @@ jobs:
             -i main/ui/lv_font_playfair_228.c \
             -i main/ui/lv_font_playfair_90.c \
             -i main/stb_image.c \
-            -i main/stb_image.h \
             main main/ui
         # Suppression rationale (kept explicit and narrow; any new finding
         # outside these exact classes/files still fails the job):
@@ -86,12 +101,18 @@ jobs:
         #     objects. Confirmed false positive for this pattern, not a
         #     first-party logic bug; suppressed by rule id only after
         #     manual verification of every occurrence.
-        #   internalError / zerodivcond on main/stb_image.h - the -i excludes
-        #     above only skip stb_image.c/.h as standalone translation units;
-        #     cppcheck still analyzes stb_image.h's body when it is #included
-        #     (with STB_IMAGE_IMPLEMENTATION) by a non-excluded .c file, so
+        #   internalError / zerodivcond on main/stb_image.h - -i cannot
+        #     exclude a header (cppcheck says so and ignores it), so the
+        #     header body is still analyzed wherever it is #included and
         #     these need an explicit per-file suppression. stb_image.h is
         #     vendored third-party code we do not maintain.
+        #   -USTB_IMAGE_IMPLEMENTATION - stb_image.h's #ifdef forest made
+        #     cppcheck enumerate 12 preprocessor configurations for every
+        #     includer (jpeg_utils.c, rainviewer.c, moon_sphere.cpp), each
+        #     re-expanding the 277 KB implementation body: 178 CPU seconds
+        #     for three files. Undefining the implementation macro keeps
+        #     the declarations and drops the body, which is suppressed
+        #     anyway; 44 CPU seconds, same findings.
         #   -i (excluded files) - generated LVGL bitmap font sources
         #     (main/ui/lv_font_*.c) are machine-generated glyph tables, and
         #     main/stb_image.* is a vendored third-party single-header
