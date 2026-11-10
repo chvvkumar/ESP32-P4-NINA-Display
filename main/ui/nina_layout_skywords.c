@@ -4,8 +4,8 @@
  *
  * The shared sky scene (nina_sky_scene.h) fills the whole safe area, and this
  * file writes the words: the target name in the bottom-left corner (wrapping
- * to more lines for a long name), the picture count with the filter and
- * seconds in the bottom-right corner, the flip line beside the flip mark, and
+ * to more lines for a long name), the filter, picture count and seconds
+ * stacked in the bottom-right corner, the flip line beside the flip mark, and
  * the rig word ("resting", "moving", "flipping") beside the telescope. On a
  * round panel the two corners are those of the square inscribed in the safe
  * disc, so both blocks sit on the glass.
@@ -555,12 +555,15 @@ void nina_layout_skywords_create(dashboard_page_t *p, lv_obj_t *parent, int page
     lv_obj_set_width(p->alt.lbl_target, sw_name_width());
     sw_set_name(p, "----");
 
-    /* Count, then filter and seconds on one row, bottom-right, right aligned. */
+    /* Filter, count, then the seconds: bottom-right, right aligned. */
     p->alt.grp_bottom = sw_group(parent, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(p->alt.grp_bottom, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
                           LV_FLEX_ALIGN_END);
     lv_obj_set_style_pad_gap(p->alt.grp_bottom, sw_sc(2), 0);
     nina_dashboard_bind_tap(p->alt.grp_bottom, NINA_TAP_SEQUENCE);
+
+    p->alt.lbl_filter = sw_label(p->alt.grp_bottom, SW_FONT_FILTER, "");
+    sw_show(p->alt.lbl_filter, false);
 
     p->alt.lbl_count = sw_label(p->alt.grp_bottom, SW_FONT_COUNT, "");
     lv_obj_set_style_text_opa(p->alt.lbl_count, SW_COUNT_OPA, 0);
@@ -569,8 +572,6 @@ void nina_layout_skywords_create(dashboard_page_t *p, lv_obj_t *parent, int page
     p->alt.grp_top = sw_group(p->alt.grp_bottom, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(p->alt.grp_top, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
-    lv_obj_set_style_pad_gap(p->alt.grp_top, sw_sc(10), 0);
-    p->alt.lbl_filter = sw_label(p->alt.grp_top, SW_FONT_FILTER, "");
     p->alt.lbl_hero = sw_label(p->alt.grp_top, SW_FONT_SECS, "");
     sw_show(p->alt.grp_top, false);
 
@@ -673,15 +674,16 @@ void nina_layout_skywords_update(dashboard_page_t *p, const nina_client_t *d,
         sw_show(p->alt.lbl_count, show);
     }
 
-    /* Filter and seconds row: only while a picture runs on the target. */
+    /* Filter (above the count) and the seconds row: only while a picture
+     * runs on the target. */
     {
         const bool known = sw_filter_known(d->current_filter);
         sw_set_text(p->alt.lbl_filter, known ? d->current_filter : "");
         s_sw_fc[inst] = sw_filter_color(known ? d->current_filter : NULL, instance_idx, gb);
         sw_set_color(p->alt.lbl_filter, s_sw_fc[inst]);
-        sw_show(p->alt.lbl_filter, known);
 
         const bool row = act == SKY_ACT_EXPOSING && info && info->on_target;
+        sw_show(p->alt.lbl_filter, known && row);
         sw_show(p->alt.grp_top, row);
     }
 

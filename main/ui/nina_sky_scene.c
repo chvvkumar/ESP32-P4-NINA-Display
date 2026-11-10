@@ -51,6 +51,7 @@
 #define SCN_HZ_STEP_DEG 2.0f
 #define SCN_HZ_MAX      182    /* outline edge segments kept (on screen only) */
 #define SCN_COMPASS_MAX 24     /* compass labels along the level horizon */
+#define SCN_STRIP_MAX   800    /* rows of a dithered gradient strip (largest panel) */
 #define SCN_COMPASS_MIN_PX 96.0f /* least centre-to-centre spacing of two labels */
 #define SCN_COL_W       6      /* land column width, px */
 #define SCN_COL_MAX     136    /* column runs: ceil(800 / SCN_COL_W) = 134 at most */
@@ -210,6 +211,17 @@ struct nina_sky_scene_s {
     float    exp_frac;
     uint32_t exp_color;
 
+    /* Sky and floor gradients as 2 px wide RGB565 strips with a 2x2 ordered
+     * dither, tiled across the panel by lv_draw_image: the 16-bit panel shows
+     * a plain dark gradient as 40 px bands and LVGL 9 has no dither of its own.
+     * Re-baked only when the rows, the span or the colours change. */
+    uint16_t strip_sky[2 * SCN_STRIP_MAX];
+    uint16_t strip_floor[2 * SCN_STRIP_MAX];
+    lv_image_dsc_t strip_sky_dsc;
+    lv_image_dsc_t strip_floor_dsc;
+    uint32_t strip_sky_key[4];
+    uint32_t strip_floor_key[4];
+
     /* output */
     uint32_t pal[PAL_N];
     dl_t     dl;
@@ -262,6 +274,9 @@ static void draw_tri(const dctx_t *c, const int16_t *xs, const int16_t *ys,
                      uint32_t color, lv_opa_t opa);
 static void draw_dashes(const dctx_t *c, const seg_px_t *segs, int n, uint32_t color, int width,
                         lv_opa_t opa, float dash, float gap);
+static void strip_bake(uint16_t *buf, lv_image_dsc_t *dsc, uint32_t *key, int rows, int span,
+                       uint32_t c0, uint32_t c1);
+static void draw_strip(lv_layer_t *layer, const lv_image_dsc_t *dsc, const lv_area_t *a);
 
 /* ---- small helpers ---------------------------------------------------------- */
 
@@ -1527,6 +1542,81 @@ static void draw_line(const dctx_t *c, int x1, int y1, int x2, int y2,
     lv_draw_line(c->layer, &d);
 }
 
+/* RGB565 of a 24-bit colour with a 2x2 ordered dither (Bayer thresholds
+ * centred: 1/8, 5/8, 7/8, 3/8), picked by column and row parity. */
+static uint16_t dither565(uint32_t rgb, int x, int y)
+{
+    static const float th[4] = { 0.125f, 0.625f, 0.875f, 0.375f };
+    const float t = th[((y & 1) << 1) | (x & 1)];
+    int r = (int)((float)((rgb >> 16) & 0xffu) * (31.0f / 255.0f) + t);
+    int g = (int)((float)((rgb >> 8) & 0xffu) * (63.0f / 255.0f) + t);
+    int b = (int)((float)(rgb & 0xffu) * (31.0f / 255.0f) + t);
+    if (r > 31) {
+        r = 31;
+    }
+    if (g > 63) {
+        g = 63;
+    }
+    if (b > 31) {
+        b = 31;
+    }
+    return (uint16_t)((r << 11) | (g << 5) | b);
+}
+
+/* A 2 x @p rows strip whose row i is c0 blended toward c1 by min(i, span) /
+ * span, dithered. Skipped when the key (rows, span, c0, c1) is unchanged. */
+static void strip_bake(uint16_t *buf, lv_image_dsc_t *dsc, uint32_t *key, int rows, int span,
+                       uint32_t c0, uint32_t c1)
+{
+    if (rows > SCN_STRIP_MAX) {
+        rows = SCN_STRIP_MAX;
+    }
+    if (rows < 1) {
+        rows = 1;
+    }
+    if (span < 1) {
+        span = 1;
+    }
+    if (key[0] == (uint32_t)rows && key[1] == (uint32_t)span && key[2] == c0 && key[3] == c1 &&
+        dsc->data != NULL) {
+        return;
+    }
+    key[0] = (uint32_t)rows;
+    key[1] = (uint32_t)span;
+    key[2] = c0;
+    key[3] = c1;
+    const float r0 = (float)((c0 >> 16) & 0xffu), g0 = (float)((c0 >> 8) & 0xffu), b0 = (float)(c0 & 0xffu);
+    const float r1 = (float)((c1 >> 16) & 0xffu), g1 = (float)((c1 >> 8) & 0xffu), b1 = (float)(c1 & 0xffu);
+    for (int y = 0; y < rows; y++) {
+        const float k = (y >= span) ? 1.0f : (float)y / (float)span;
+        const uint32_t rgb = ((uint32_t)(r0 + (r1 - r0) * k + 0.5f) << 16) |
+                             ((uint32_t)(g0 + (g1 - g0) * k + 0.5f) << 8) |
+                             (uint32_t)(b0 + (b1 - b0) * k + 0.5f);
+        buf[2 * y]     = dither565(rgb, 0, y);
+        buf[2 * y + 1] = dither565(rgb, 1, y);
+    }
+    memset(dsc, 0, sizeof(*dsc));
+    dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
+    dsc->header.cf = LV_COLOR_FORMAT_RGB565;
+    dsc->header.w = 2;
+    dsc->header.h = (uint32_t)rows;
+    dsc->header.stride = 4;
+    dsc->data_size = (uint32_t)rows * 4u;
+    dsc->data = (const uint8_t *)buf;
+    /* No image cache to drop: this build runs with LV_CACHE_DEF_SIZE 0, so a
+     * raw RGB565 descriptor is read straight from here on every draw. */
+}
+
+/* Tile the strip across @p a (the strip is as tall as the area). */
+static void draw_strip(lv_layer_t *layer, const lv_image_dsc_t *dsc, const lv_area_t *a)
+{
+    lv_draw_image_dsc_t d;
+    lv_draw_image_dsc_init(&d);
+    d.src = dsc;
+    d.tile = 1;
+    lv_draw_image(layer, &d, a);
+}
+
 /* Dashes of @p dash px every @p dash + @p gap px along a run of connected
  * segments, the phase carried across joins so the pattern is even round the
  * arc. LVGL's own dash fields apply to horizontal and vertical lines only. */
@@ -1630,7 +1720,9 @@ static void draw_tri(const dctx_t *c, const int16_t *xs, const int16_t *ys,
 
 static void draw_cb(lv_event_t *e)
 {
-    const nina_sky_scene_t *s = (const nina_sky_scene_t *)lv_event_get_user_data(e);
+    /* The strips are the one thing the draw pass writes (their bake cache). */
+    nina_sky_scene_t *ms = (nina_sky_scene_t *)lv_event_get_user_data(e);
+    const nina_sky_scene_t *s = ms;
     lv_layer_t *layer = lv_event_get_layer(e);
     if (!s || !layer) {
         return;
@@ -1642,37 +1734,21 @@ static void draw_cb(lv_event_t *e)
     const uint32_t *P = s->pal;
     const int bottom = s->size;
 
-    /* 1 sky: deep blue, lightening down to the deepest dip of the outline */
+    /* 1 sky: deep blue, lightening down to the deepest dip of the outline,
+     * as a dithered strip tiled over the whole object */
     {
-        int gf = (bottom > 0) ? (int)dl->glow_y * 255 / bottom : 255;
-        if (gf < 1) {
-            gf = 1;
-        }
-        if (gf > 255) {
-            gf = 255;
-        }
-        lv_draw_rect_dsc_t d;
-        lv_draw_rect_dsc_init(&d);
-        d.bg_opa = LV_OPA_COVER;
-        d.bg_color = lv_color_hex(P[PAL_SKY_TOP]);
-        d.bg_grad.dir = LV_GRAD_DIR_VER;
-        d.bg_grad.stops_count = 2;
-        d.bg_grad.stops[0].color = lv_color_hex(P[PAL_SKY_TOP]);
-        d.bg_grad.stops[0].opa = LV_OPA_COVER;
-        d.bg_grad.stops[0].frac = 0;
-        d.bg_grad.stops[1].color = lv_color_hex(P[PAL_SKY_GLOW]);
-        d.bg_grad.stops[1].opa = LV_OPA_COVER;
-        d.bg_grad.stops[1].frac = (uint8_t)gf;
-        lv_draw_rect(layer, &d, &oa);
+        const int rows = (int)(oa.y2 - oa.y1 + 1);
+        strip_bake(ms->strip_sky, &ms->strip_sky_dsc, ms->strip_sky_key, rows,
+                   (int)dl->glow_y, P[PAL_SKY_TOP], P[PAL_SKY_GLOW]);
+        lv_area_t a = oa;
+        a.y2 = a.y1 + (int32_t)s->strip_sky_dsc.header.h - 1;
+        draw_strip(layer, &s->strip_sky_dsc, &a);
     }
 
-    /* 2 travelled path */
-    for (int i = 0; i < dl->n_trav; i++) {
-        const seg_px_t *g = &dl->trav[i];
-        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_AMBER], 3, OPA_PCT(35), true);
-    }
-    /* 3 path to come: a dashed line (not yet imaged) */
-    draw_dashes(&c, dl->fut, dl->n_fut, P[PAL_AMBER], 5, LV_OPA_COVER, 9.0f, 9.0f);
+    /* 2 travelled path: thick dashes (imaged) */
+    draw_dashes(&c, dl->trav, dl->n_trav, P[PAL_AMBER], 5, LV_OPA_COVER, 9.0f, 9.0f);
+    /* 3 path to come: thin dashes (not yet imaged) */
+    draw_dashes(&c, dl->fut, dl->n_fut, P[PAL_AMBER], 2, LV_OPA_COVER, 9.0f, 9.0f);
     /* 4 beads */
     for (int i = 0; i < dl->n_beads; i++) {
         draw_dot(&c, dl->beads[i].x, dl->beads[i].y, 4, dl->beads[i].color, LV_OPA_COVER);
@@ -1706,22 +1782,13 @@ static void draw_cb(lv_event_t *e)
     const bool band = s->opts.ground_band_top > 0 && s->opts.ground_band_top < bottom;
     const int floor_end = band ? s->opts.ground_band_top - 1 : bottom - 1;
     if (dl->floor_y <= floor_end) {
-        lv_draw_rect_dsc_t d;
-        lv_draw_rect_dsc_init(&d);
-        d.bg_opa = LV_OPA_COVER;
-        d.bg_color = lv_color_hex(P[PAL_FLOOR_FAR]);
-        d.bg_grad.dir = LV_GRAD_DIR_VER;
-        d.bg_grad.stops_count = 2;
-        d.bg_grad.stops[0].color = lv_color_hex(P[PAL_FLOOR_FAR]);
-        d.bg_grad.stops[0].opa = LV_OPA_COVER;
-        d.bg_grad.stops[0].frac = 0;
-        d.bg_grad.stops[1].color = lv_color_hex(P[PAL_FLOOR_NEAR]);
-        d.bg_grad.stops[1].opa = LV_OPA_COVER;
-        d.bg_grad.stops[1].frac = 255;
+        const int rows = floor_end - dl->floor_y + 1;
+        strip_bake(ms->strip_floor, &ms->strip_floor_dsc, ms->strip_floor_key, rows, rows - 1,
+                   P[PAL_FLOOR_FAR], P[PAL_FLOOR_NEAR]);
         lv_area_t a = oa;
         a.y1 = oa.y1 + dl->floor_y;
-        a.y2 = oa.y1 + floor_end;
-        lv_draw_rect(layer, &d, &a);
+        a.y2 = a.y1 + (int32_t)s->strip_floor_dsc.header.h - 1;
+        draw_strip(layer, &s->strip_floor_dsc, &a);
     }
     for (int i = 0; i < dl->n_cols; i++) {
         const col_px_t *k = &dl->cols[i];
