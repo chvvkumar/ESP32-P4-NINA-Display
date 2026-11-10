@@ -128,6 +128,14 @@ typedef struct {
     bool    target_coord_valid;
     float   target_ra_h;        // hours [0,24)
     float   target_dec_deg;     // degrees [-90,90]
+    // Primary source: the container's own Target.InputCoordinates from
+    // sequence/state, fetched once per container name and remembered here
+    // (nina_sequence.c). A non-empty container name with valid=false means
+    // that container was looked up and has no Target of its own.
+    bool    state_coord_valid;
+    char    state_coord_container[64];  // full name, "_Container" suffix included
+    float   state_coord_ra_h;
+    float   state_coord_dec_deg;
 
     // Horizon outline of the active profile (profile/horizon), fetched once
     // per connect in the static pass and resampled to NINA_HORIZON_N

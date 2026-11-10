@@ -323,6 +323,84 @@ static void test_path(void)
     }
 }
 
+/* M 81 from the user's localhost NINA profile (2026-11-09 18:30 CST): a
+ * jagged north outline splits the low pass into a 4-sample sliver and the
+ * main run. The working run is the sliver, so the camera must frame every up
+ * sample instead, and look at the highest one. */
+static void test_path_sliver(void)
+{
+    const float az[] = {0, 4, 12, 13, 16, 27, 34, 39, 41, 46, 80, 101, 125, 148, 175, 176, 194, 199,
+                        210, 229, 234, 263, 284, 294, 326, 343, 358, 360};
+    const float al[] = {27, 8, 25, 14, 22, 4, 7, 14, 26, 34, 50, 58, 61, 54, 42, 19, 14, 9, 9, 24,
+                        33, 32, 45, 50, 41, 27, 27, 27};
+    int8_t h[SKY_HORIZON_N];
+    check_true("sliver: horizon resampled", sky_horizon_resample(az, al, 28, h));
+    const float lat = 38.7582721f, dec = 69.0653f;
+    const float ha_now = sky_ha_deg(21.692f, 9.92588f);   /* 176.5: just before lower culmination */
+    sky_path_build(&s_path, dec, lat, ha_now, h, true);
+    /* Raw pattern 0011110111...1110000: the single dip at index 6 is bridged,
+     * so the run is 2..54 and the sliver 2..5 is part of it. */
+    check_true("sliver: up[6] bridged", s_path.up[6] == 1 && s_path.up[1] == 0 && s_path.up[55] == 0);
+    check_true("sliver: working run is 2..54", s_path.run_first == 2 && s_path.run_last == 54);
+    check_near("sliver: rise 19:09 kept", s_path.rise_ha_deg, -172.9f, 0.2f);
+    sky_v3_t dirs[SKY_PATH_N + 2];
+    check_true("sliver: work_dirs 53", sky_path_work_dirs(&s_path, dirs, SKY_PATH_N) == 53);
+    const int n = sky_path_up_dirs(&s_path, dirs, SKY_PATH_N);
+    check_true("sliver: up_dirs 53", n == 53);
+    check_near("sliver: up yaw = upper culmination (north)",
+               sky_wrap180(sky_cam_up_yaw(&s_path, dec, lat)), 0.0f, 0.5f);
+
+    /* The fit over the up samples sees the whole arc; over the sliver it zooms. */
+    sky_frame_t fr = {0};
+    fr.x0 = 24.0f; fr.y0 = 24.0f; fr.x1 = 696.0f; fr.y1 = 696.0f; fr.px = 360.0f; fr.py = 360.0f;
+    const sky_v3_t tgt = sky_hadec_to_vec(ha_now, dec, lat);
+    sky_pose_t pose = sky_mount_pose(lat, tgt, SKY_PIER_EAST, ha_now);
+    sky_v3_t pts[SKY_RIG_FIT_N];
+    const int np = sky_rig_fit_points(&pose, pts);
+    sky_cam_pose_t cam;
+    dirs[n] = tgt;
+    sky_cam_fit(&cam, sky_cam_up_yaw(&s_path, dec, lat), &fr, dirs, n + 1, pts, np, 75.0f, 0.0f);
+    check_true("sliver: up fit is wide (focal < 320)", cam.focal_px < 320.0f);
+    check_true("sliver: up fit pitch 10..18", cam.pitch_deg > 10.0f && cam.pitch_deg < 18.0f);
+    int m = sky_path_work_dirs(&s_path, dirs, SKY_PATH_N);
+    dirs[m] = tgt;
+    sky_cam_fit(&cam, sky_cam_work_yaw(&s_path, dec, lat), &fr, dirs, m + 1, pts, np, 75.0f, 0.0f);
+    check_true("sliver: run fit is wide too (focal < 320)", cam.focal_px < 320.0f);
+
+    /* Run selection on synthetic patterns (n = 12). */
+    {
+        int f = -1, l = -1;
+        /* now at 3 (down): the 2-sample sliver at 1..2 is behind, the next
+         * start forward is the 5-run at 7..11 -> that one. */
+        const uint8_t a[12] = {0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1};
+        sky_path_pick_run_(a, 12, 3, &f, &l);
+        check_true("pick: long run ahead", f == 7 && l == 11);
+        /* now at 0 (down): the sliver 1..2 comes first but is short, the
+         * 5-run further on qualifies -> 7..11, not 1..2. */
+        sky_path_pick_run_(a, 12, 0, &f, &l);
+        check_true("pick: skip the sliver", f == 7 && l == 11);
+        /* only slivers: the longest (3) wins over the nearer (2). */
+        const uint8_t b[12] = {0, 1, 1, 0, 0, 1, 1, 1, 0, 0, 0, 0};
+        sky_path_pick_run_(b, 12, 0, &f, &l);
+        check_true("pick: longest sliver", f == 5 && l == 7);
+        /* up now: the containing run, wrapping past the end. */
+        const uint8_t c[12] = {1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1};
+        sky_path_pick_run_(c, 12, 11, &f, &l);
+        check_true("pick: containing run wraps", f == 10 && l == 1);
+        /* bridge: one dip closes, two do not. */
+        uint8_t d[12] = {1, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 1};
+        sky_path_bridge_(d, 12);
+        check_true("bridge: single dip closed, double kept",
+                   d[2] == 1 && d[5] == 0 && d[6] == 0);
+    }
+
+    /* Nothing up: up_dirs 0 and the yaw falls back to the run rule. */
+    sky_path_build(&s_path, -60.0f, 41.9f, 0.0f, (const int8_t *)0, false);
+    check_true("never up: up_dirs 0", sky_path_up_dirs(&s_path, dirs, SKY_PATH_N) == 0);
+    check_near("never up: up yaw = work yaw", sky_cam_up_yaw(&s_path, -60.0f, 41.9f),
+               sky_cam_work_yaw(&s_path, -60.0f, 41.9f), 1e-6f);
+}
+
 static void test_mount(void)
 {
     const float lat = 41.9f;
@@ -394,10 +472,19 @@ static void test_mount(void)
         check_true(buf, ok_down);
     }
 
-    p = sky_mount_pose(lat, sky_pole(lat), SKY_PIER_EAST, 0.0f);
-    check_v3("degenerate tube = pole, EAST decl", p.decl, 1.0f, 0.0f, 0.0f, 1e-6f);
-    p = sky_mount_pose(lat, sky_pole(lat), SKY_PIER_WEST, 0.0f);
-    check_v3("degenerate tube = pole, WEST decl", p.decl, -1.0f, 0.0f, 0.0f, 1e-6f);
+    /* Tube on the pole (NINA home: Dec 90, Alt = lat, Az 0) is the rest pose,
+     * counterweight straight down, on either side of pier. */
+    {
+        const sky_pose_t rest = sky_mount_rest_pose(lat);
+        p = sky_mount_pose(lat, sky_pole(lat), SKY_PIER_EAST, 0.0f);
+        check_v3("degenerate tube = pole, EAST decl", p.decl, rest.decl.x, rest.decl.y, rest.decl.z, 1e-6f);
+        check_true("degenerate tube = pole, EAST weight down", p.weight.z < 0.0f);
+        p = sky_mount_pose(lat, sky_pole(lat), SKY_PIER_WEST, 0.0f);
+        check_v3("degenerate tube = pole, WEST decl", p.decl, rest.decl.x, rest.decl.y, rest.decl.z, 1e-6f);
+        /* NINA's own numbers at home: Alt = lat, Az 360. */
+        p = sky_mount_pose(38.758f, sky_altaz_to_vec(38.758f, 360.0f), SKY_PIER_EAST, 90.0f);
+        check_true("NINA home alt/az: weight down", p.weight.z < -0.7f && fabsf(p.weight.x) < 1e-3f);
+    }
 
     p = sky_mount_pose(-30.0f, sky_hadec_to_vec(90.0f, 0.0f, -30.0f), SKY_PIER_EAST, 90.0f);
     check_true("south HA +90 EAST weight.z < -0.5", p.weight.z < -0.5f);
@@ -410,26 +497,25 @@ static void test_rig(void)
 {
     sky_pose_t r = sky_mount_rest_pose(41.9f);
     sky_capsule_t c[SKY_RIG_CAPSULES];
-    check_true("rig_capsules returns 11", sky_rig_capsules(&r, c) == SKY_RIG_CAPSULES);
-    check_v3("leg 0 foot north", c[0].b, 0.0f, 0.55f, 0.0f, 1e-4f);
-    check_v3("leg 1 foot az 120", c[1].b, 0.55f * 0.8660254f, -0.275f, 0.0f, 1e-4f);
-    check_v3("leg 2 foot az 240", c[2].b, -0.55f * 0.8660254f, -0.275f, 0.0f, 1e-4f);
+    check_true("rig_capsules returns 8", sky_rig_capsules(&r, c) == SKY_RIG_CAPSULES);
+    check_v3("pier foot at the origin", c[0].a, 0.0f, 0.0f, 0.0f, 1e-6f);
+    check_v3("pier top under the polar housing", c[0].b, 0.0f, 0.0f, 1.00f, 1e-6f);
     const uint8_t parts[SKY_RIG_CAPSULES] = {
-        SKY_PART_LEG, SKY_PART_LEG, SKY_PART_LEG, SKY_PART_MOUNT, SKY_PART_MOUNT, SKY_PART_MOUNT,
+        SKY_PART_PIER, SKY_PART_MOUNT, SKY_PART_MOUNT,
         SKY_PART_SHAFT, SKY_PART_WEIGHT, SKY_PART_TUBE, SKY_PART_FRONT, SKY_PART_CAMERA,
     };
     int ok = 1;
     for (int i = 0; i < SKY_RIG_CAPSULES; i++) ok &= (c[i].part == parts[i]);
     check_true("part tags in documented order", ok);
-    check_v3("tube capsule front = tube_front", c[8].b, 0.0f, 0.3894f, 2.0337f, 1e-3f);
+    check_v3("tube capsule front = tube_front", c[5].b, 0.0f, 0.3894f, 2.0337f, 1e-3f);
 
     check_v3("tube_front(rest)", sky_rig_tube_front(&r), 0.0f, 0.3894f, 2.0337f, 1e-3f);
     sky_v3_t fp[SKY_RIG_FIT_N];
-    check_true("fit_points returns 7", sky_rig_fit_points(&r, fp) == SKY_RIG_FIT_N);
-    check_v3("fit point 6 (weight end)", fp[6], 0.0f, 0.5343f, 0.5246f, 1e-3f);
-    check_v3("fit point 3 (axis crossing)", fp[3], 0.0f, 0.0f, 1.12f, 1e-6f);
-    check_v3("fit point 0 = leg 0 foot", fp[0], 0.0f, 0.55f, 0.0f, 1e-4f);
-    check_v3("fit point 5 = camera capsule back", fp[5], c[10].b.x, c[10].b.y, c[10].b.z, 1e-5f);
+    check_true("fit_points returns 5", sky_rig_fit_points(&r, fp) == SKY_RIG_FIT_N);
+    check_v3("fit point 4 (weight end)", fp[4], 0.0f, 0.5343f, 0.5246f, 1e-3f);
+    check_v3("fit point 1 (axis crossing)", fp[1], 0.0f, 0.0f, 1.12f, 1e-6f);
+    check_v3("fit point 0 = pier foot", fp[0], 0.0f, 0.0f, 0.0f, 1e-6f);
+    check_v3("fit point 3 = camera capsule back", fp[3], c[7].b.x, c[7].b.y, c[7].b.z, 1e-5f);
 }
 
 static void test_camera(void)
@@ -504,8 +590,8 @@ static void test_camera(void)
         sky_rig_fit_points(&r, pts);
         sky_cam_fit(&out, sky_cam_home_yaw(41.9f), &fr, &pole, 1, pts, SKY_RIG_FIT_N, 75.0f, 0.0f);
         check_near("home fit yaw", out.yaw_deg, 0.0f, 1e-4f);
-        /* Midway between the pole (41.9) and the far feet (-33.99): 3.955. */
-        check_near("home fit pitch (mid of min and max elevation)", out.pitch_deg, 3.955f, 0.05f);
+        /* Midway between the pole (41.9) and the pier foot (atan(-1.6/2.6) = -31.61): 5.145. */
+        check_near("home fit pitch (mid of min and max elevation)", out.pitch_deg, 5.145f, 0.05f);
         check_true("home fit focal within limits", out.focal_px >= f_min - 0.01f && out.focal_px <= f_max + 0.01f);
         check_true("home fit: every input inside the frame less 27.5 px",
                    all_inside(&out, &fr, &pole, 1, pts, SKY_RIG_FIT_N, 27.5f));
@@ -646,11 +732,26 @@ static void test_words(void)
                sky_activity(false, false, false, false, false, false, false, 0, 0) == SKY_ACT_RESTING);
 }
 
+static void test_compass(void)
+{
+    char buf[16];
+    check_true("compass step wide (5.2 px/deg) = 30", sky_compass_step(5.2f, 96.0f) == 30);
+    check_true("compass step tight (12.2 px/deg) = 10", sky_compass_step(12.2f, 96.0f) == 10);
+    check_true("compass step very tight (25 px/deg) = 5", sky_compass_step(25.0f, 96.0f) == 5);
+    check_true("compass step widest (1 px/deg) = 90", sky_compass_step(1.0f, 96.0f) == 90);
+    check_true("compass text 0", strcmp(sky_compass_text(0, buf, sizeof buf), "0\xC2\xB0") == 0);
+    check_true("compass text 270", strcmp(sky_compass_text(270, buf, sizeof buf), "270\xC2\xB0") == 0);
+    check_true("compass text 30 deg", strcmp(sky_compass_text(30, buf, sizeof buf), "30\xC2\xB0") == 0);
+    check_true("compass text wraps 360", strcmp(sky_compass_text(360, buf, sizeof buf), "0\xC2\xB0") == 0);
+}
+
 int main(void)
 {
     test_directions_time();
+    test_compass();
     test_horizon();
     test_path();
+    test_path_sliver();
     test_mount();
     test_rig();
     test_camera();

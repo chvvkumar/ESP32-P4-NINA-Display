@@ -3,20 +3,20 @@
  * @brief Layout 9 ("In the sky"), BOTH panel families, one body.
  *
  * The shared sky scene (nina_sky_scene.h) fills the whole safe area, and this
- * file writes the words next to the objects they belong to: the target block
- * (name, picture count, filter and seconds) beside the target, the flip line
- * beside the flip mark, and the rig word ("resting", "moving", "flipping")
- * beside the telescope.
+ * file writes the words: the target name in the bottom-left corner (wrapping
+ * to more lines for a long name), the picture count with the filter and
+ * seconds in the bottom-right corner, the flip line beside the flip mark, and
+ * the rig word ("resting", "moving", "flipping") beside the telescope. On a
+ * round panel the two corners are those of the square inscribed in the safe
+ * disc, so both blocks sit on the glass.
  *
- * Placement (sw_place(), run from update() and from the scene's moved
- * callback while the view flies or the mount moves) tries two or three fixed
- * spots per label and scores each one: off the glass, over the telescope, over
- * a drawn mark, over a label already placed. The spot the label used last time
- * gets a bonus, so a label stays put unless that spot really went bad, and the
- * words never jump from one poll to the next. Every spot is checked against
- * the scene frame (nina_sky_scene_box_fits()), which on a round panel is the
- * safe circle, so a label that is shown always sits fully on the glass when
- * any of its spots allows it.
+ * Placement of the two moving labels (sw_place(), run from update() and from
+ * the scene's moved callback while the view flies or the mount moves) tries
+ * three fixed spots per label and scores each one: off the glass, over the
+ * telescope, over a drawn mark, over a label already placed (the two corner
+ * blocks included). The spot the label used last time gets a bonus, so a
+ * label stays put unless that spot really went bad, and the words never jump
+ * from one poll to the next.
  *
  * The seconds have ONE writer: p->alt.elapsed_cb (sw_elapsed_cb), the spine's
  * 200 ms tick, which also feeds the scene's exposure ring.
@@ -56,12 +56,11 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define SW_FONT_FLIP    (&lv_font_montserrat_24)
 #define SW_FONT_RIG     (&lv_font_montserrat_24)
 
-#define SW_NAME_MAX_W   300        /* longest target name box before dots */
-#define SW_FALLBACK_Y   120        /* target block top when there is no anchor */
+#define SW_CORNER_PAD   16         /* corner blocks: inset past the safe inset */
+#define SW_STATS_RESERVE 230       /* width kept free of the name for the bottom-right block */
+#define SW_NAME_MIN_W   160
 
 /* Spot offsets from the anchor. */
-#define SW_TGT_SIDE     40
-#define SW_TGT_BELOW    40
 #define SW_FLIP_ABOVE   24
 #define SW_FLIP_SIDE    24
 #define SW_RIG_SIDE     12
@@ -78,9 +77,6 @@ LV_FONT_DECLARE(lv_font_hanken_bold_28);
 #define SW_N_SPOTS      3
 
 enum { SW_L_TARGET = 0, SW_L_FLIP = 1, SW_L_RIG = 2, SW_L_N = 3 };
-
-/* Target block spots. */
-enum { SW_T_RIGHT = 0, SW_T_LEFT = 1, SW_T_BELOW = 2 };
 
 /* Per-instance state. */
 static uint8_t  s_sw_choice[MAX_NINA_INSTANCES][SW_L_N];
@@ -116,7 +112,8 @@ static int       sw_pick(const dashboard_page_t *p, const lv_point_t *spots, int
                          uint8_t prev, const lv_area_t *rig, const lv_area_t *placed,
                          int n_placed, int *score_out);
 static void      sw_move(lv_obj_t *obj, int x, int y);
-static void      sw_block_align(dashboard_page_t *p, int choice);
+static int       sw_corner_inset(void);
+static int       sw_name_width(void);
 static void      sw_place(dashboard_page_t *p);
 static void      sw_moved_cb(void *user);
 static void      sw_elapsed_cb(dashboard_page_t *p, int secs);
@@ -234,8 +231,8 @@ static lv_obj_t *sw_group(lv_obj_t *parent, lv_flex_flow_t flow)
     return g;
 }
 
-/* Target name, boxed to its own text width up to SW_NAME_MAX_W, then dots.
- * Only rewritten when the name changes. */
+/* Target name; the label is a fixed-width wrapping label (sw_name_width()),
+ * so a long name takes more lines. Only rewritten when the name changes. */
 static void sw_set_name(dashboard_page_t *p, const char *name)
 {
     lv_obj_t *l = p->alt.lbl_target;
@@ -248,19 +245,29 @@ static void sw_set_name(dashboard_page_t *p, const char *name)
     }
     strncpy(s_sw_name[inst], name, sizeof(s_sw_name[inst]) - 1);
     s_sw_name[inst][sizeof(s_sw_name[inst]) - 1] = '\0';
-
-    lv_point_t sz;
-    lv_text_get_size(&sz, name, SW_FONT_NAME, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
-    const int max_w = sw_sc(SW_NAME_MAX_W);
-    int w = (int)sz.x + 1;
-    if (w > max_w) {
-        w = max_w;
-    }
-    if (w < 1) {
-        w = 1;
-    }
-    lv_obj_set_size(l, w, lv_font_get_line_height(SW_FONT_NAME));
     ui_label_set_text(l, name);
+}
+
+/* Inset of the two bottom corners from the panel edge: the safe inset plus a
+ * pad on a square panel; on a round one the inset of the square inscribed in
+ * the safe disc, so a block growing inward from the corner stays on the glass. */
+static int sw_corner_inset(void)
+{
+    if (SCREEN_ROUND) {
+        const int r = screen_safe_radius();
+        return screen_center() - (int)((float)r * 0.7071f) + sw_sc(8);
+    }
+    return screen_safe_inset() + sw_sc(SW_CORNER_PAD);
+}
+
+/* Wrap width of the name: what the bottom-right block leaves free. */
+static int sw_name_width(void)
+{
+    int w = screen_size() - 2 * sw_corner_inset() - sw_sc(SW_STATS_RESERVE);
+    if (w < sw_sc(SW_NAME_MIN_W)) {
+        w = sw_sc(SW_NAME_MIN_W);
+    }
+    return w;
 }
 
 static void sw_box(lv_area_t *a, int x, int y, int w, int h)
@@ -325,26 +332,6 @@ static void sw_move(lv_obj_t *obj, int x, int y)
     lv_obj_set_pos(obj, x, y);
 }
 
-/* Text alignment follows the side: right of the anchor reads left aligned,
- * left of it right aligned, below it centred. */
-static void sw_block_align(dashboard_page_t *p, int choice)
-{
-    lv_flex_align_t cross;
-    switch (choice) {
-        case SW_T_LEFT:
-            cross = LV_FLEX_ALIGN_END;
-            break;
-        case SW_T_BELOW:
-            cross = LV_FLEX_ALIGN_CENTER;
-            break;
-        case SW_T_RIGHT:
-        default:
-            cross = LV_FLEX_ALIGN_START;
-            break;
-    }
-    lv_obj_set_flex_align(p->alt.grp_mid, LV_FLEX_ALIGN_START, cross, cross);
-}
-
 /* ---- placement ---------------------------------------------------------- */
 
 static void sw_place(dashboard_page_t *p)
@@ -355,9 +342,7 @@ static void sw_place(dashboard_page_t *p)
     const int inst = sw_inst(p);
     nina_sky_scene_t *sky = p->alt.sky;
 
-    lv_obj_update_layout(p->alt.grp_mid);
-
-    lv_area_t placed[SW_L_N] = { { 0, 0, 0, 0 } };
+    lv_area_t placed[SW_L_N + 1] = { { 0, 0, 0, 0 } };
     int n_placed = 0;
 
     /* The telescope box, grown, for the two labels that must not cover it. */
@@ -376,39 +361,38 @@ static void sw_place(dashboard_page_t *p)
         rig_grown.y2 = rig_box.y2 + SW_RIG_GROW;
     }
 
-    /* 1: the target block, always shown. */
+    /* 1: the target name in the bottom-left corner, the count and the
+     * filter/seconds row in the bottom-right corner. Both are obstacles for
+     * the flip line and the rig word. */
     {
-        lv_obj_t *blk = p->alt.grp_mid;
-        const int w = (int)lv_obj_get_width(blk);
-        const int h = (int)lv_obj_get_height(blk);
-        nina_sky_anchor_t a;
-        int x;
-        int y;
-        if (sky && nina_sky_scene_anchor(sky, NINA_SKY_ANCHOR_TARGET, &a)) {
-            const int side  = sw_sc(SW_TGT_SIDE);
-            const int below = sw_sc(SW_TGT_BELOW);
-            const lv_point_t spots[SW_N_SPOTS] = {
-                { (int32_t)(a.x + side),         (int32_t)(a.y - h / 2) },
-                { (int32_t)(a.x - side - w),     (int32_t)(a.y - h / 2) },
-                { (int32_t)(a.x - w / 2),        (int32_t)(a.y + below) },
-            };
-            int score;
-            const int pick = sw_pick(p, spots, w, h, s_sw_choice[inst][SW_L_TARGET],
-                                     have_rig ? &rig_grown : NULL, placed, n_placed,
-                                     &score);
-            if (pick != (int)s_sw_choice[inst][SW_L_TARGET]) {
-                s_sw_choice[inst][SW_L_TARGET] = (uint8_t)pick;
-                sw_block_align(p, pick);
-            }
-            x = (int)spots[pick].x;
-            y = (int)spots[pick].y;
-        } else {
-            x = screen_center() - w / 2;
-            y = sw_sc(SW_FALLBACK_Y);
-        }
-        sw_move(blk, x, y);
-        sw_show(blk, true);
+        const int inset = sw_corner_inset();
+        const int S = screen_size();
+
+        lv_obj_t *name = p->alt.grp_mid;
+        lv_obj_update_layout(name);
+        int w = (int)lv_obj_get_width(name);
+        int h = (int)lv_obj_get_height(name);
+        int x = inset;
+        int y = S - inset - h;
+        sw_move(name, x, y);
+        sw_show(name, true);
         sw_box(&placed[n_placed++], x, y, w, h);
+
+        lv_obj_t *st = p->alt.grp_bottom;
+        if (st) {
+            lv_obj_update_layout(st);
+            const bool any = (p->alt.lbl_count && !lv_obj_has_flag(p->alt.lbl_count, LV_OBJ_FLAG_HIDDEN)) ||
+                             (p->alt.grp_top && !lv_obj_has_flag(p->alt.grp_top, LV_OBJ_FLAG_HIDDEN));
+            w = (int)lv_obj_get_width(st);
+            h = (int)lv_obj_get_height(st);
+            x = S - inset - w;
+            y = S - inset - h;
+            sw_move(st, x, y);
+            sw_show(st, any);
+            if (any) {
+                sw_box(&placed[n_placed++], x, y, w, h);
+            }
+        }
     }
 
     /* 2: the flip line, hidden when every spot covers something. */
@@ -562,20 +546,27 @@ void nina_layout_skywords_create(dashboard_page_t *p, lv_obj_t *parent, int page
         p->alt.sky = nina_sky_scene_create(parent, &opts, page_index);
     }
 
-    /* Target block: name, count, then filter and seconds on one row. */
+    /* Target name, bottom-left: a fixed-width label that wraps a long name. */
     p->alt.grp_mid = sw_group(parent, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_gap(p->alt.grp_mid, sw_sc(2), 0);
     nina_dashboard_bind_tap(p->alt.grp_mid, NINA_TAP_SEQUENCE);
 
     p->alt.lbl_target = sw_label(p->alt.grp_mid, SW_FONT_NAME, "");
-    lv_label_set_long_mode(p->alt.lbl_target, LV_LABEL_LONG_DOT);
+    lv_label_set_long_mode(p->alt.lbl_target, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(p->alt.lbl_target, sw_name_width());
     sw_set_name(p, "----");
 
-    p->alt.lbl_count = sw_label(p->alt.grp_mid, SW_FONT_COUNT, "");
+    /* Count, then filter and seconds on one row, bottom-right, right aligned. */
+    p->alt.grp_bottom = sw_group(parent, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(p->alt.grp_bottom, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_END,
+                          LV_FLEX_ALIGN_END);
+    lv_obj_set_style_pad_gap(p->alt.grp_bottom, sw_sc(2), 0);
+    nina_dashboard_bind_tap(p->alt.grp_bottom, NINA_TAP_SEQUENCE);
+
+    p->alt.lbl_count = sw_label(p->alt.grp_bottom, SW_FONT_COUNT, "");
     lv_obj_set_style_text_opa(p->alt.lbl_count, SW_COUNT_OPA, 0);
     sw_show(p->alt.lbl_count, false);
 
-    p->alt.grp_top = sw_group(p->alt.grp_mid, LV_FLEX_FLOW_ROW);
+    p->alt.grp_top = sw_group(p->alt.grp_bottom, LV_FLEX_FLOW_ROW);
     lv_obj_set_flex_align(p->alt.grp_top, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_set_style_pad_gap(p->alt.grp_top, sw_sc(10), 0);

@@ -17,7 +17,7 @@
  *   World:   x east, y north, z up. Sky directions are unit vectors in this
  *            frame (the sky is at infinity: only the camera ROTATION applies
  *            to them). Telescope model points are metres in the same frame,
- *            the tripod standing on the ground at the origin.
+ *            the pier standing on the ground at the origin.
  *   Angles:  degrees in every signature. Azimuth 0 = north, 90 = east,
  *            clockwise, range [0, 360). Altitude 0 = horizon, 90 = zenith.
  *            Hour angle (HA) is positive WEST of the meridian, range
@@ -35,6 +35,7 @@
  */
 
 #include <math.h>
+#include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -55,12 +56,13 @@
  * so index 36 is the meridian (HA 0) and index 72 repeats index 0. */
 #define SKY_PATH_N           73
 #define SKY_PATH_STEP_DEG    5.0f
+#define SKY_PATH_MIN_RUN     4            /* samples (80 min): a shorter up run is a sliver */
 
 /* Telescope model, metres. The axes cross at SKY_RIG_PIVOT_Z above the
  * ground on the vertical through the origin. */
 #define SKY_RIG_PIVOT_Z      1.12f
-#define SKY_RIG_CAPSULES     11           /* sky_rig_capsules() always fills this many */
-#define SKY_RIG_FIT_N        7            /* sky_rig_fit_points() always fills this many */
+#define SKY_RIG_CAPSULES     8            /* sky_rig_capsules() always fills this many */
+#define SKY_RIG_FIT_N        5            /* sky_rig_fit_points() always fills this many */
 
 /* Camera rig: the viewer stands SKY_CAM_DIST metres behind the telescope
  * (opposite the look direction) with the eye SKY_CAM_HEIGHT above the ground. */
@@ -376,10 +378,15 @@ typedef struct {
  * changes, and located by linear interpolation of (alt - horizon_alt) in HA
  * (accurate to about 0.05 degrees at 5 degree steps).
  *
+ * A single down sample between two up samples is bridged (up) first: a
+ * jagged outline hides a low target behind one tree for 20 minutes, and that
+ * must not cut the night's run in two (sky_path_bridge_()).
+ *
  * WORKING RUN: the contiguous run of up samples (wrapping past HA 180) that
- * contains ha_now_deg when the target is up now; otherwise the next run that
- * starts after ha_now_deg going forward in HA. rise/set are that run's
- * crossings, mid_ha_deg = wrap180(rise + wrap360(set - rise) / 2).
+ * contains ha_now_deg when the target is up now; otherwise, going forward in
+ * HA from ha_now_deg, the first run of at least SKY_PATH_MIN_RUN samples, or
+ * the longest run when none is that long (sky_path_pick_run_()). rise/set are
+ * that run's crossings, mid_ha_deg = wrap180(rise + wrap360(set - rise) / 2).
  *
  * Special cases: always_up -> has_rise = has_set = false, run 0..72,
  * mid_ha_deg = 0 (upper culmination). never_up -> run_first = run_last = -1,
@@ -407,6 +414,50 @@ static inline float sky_path_cross_(const sky_path_t *p, int i, const int8_t *al
     return sky_wrap180(-180.0f + SKY_PATH_STEP_DEG * ((float)i + k));
 }
 
+/* Helper for sky_path_build(): set every single down sample that sits between
+ * two up samples (on the wrapped circle of @p n) to up. */
+static inline void sky_path_bridge_(uint8_t *up, int n)
+{
+    uint8_t raw[SKY_PATH_N];
+    for (int i = 0; i < n; i++) raw[i] = up[i];
+    for (int i = 0; i < n; i++) {
+        if (!raw[i] && raw[(i + n - 1) % n] && raw[(i + 1) % n]) up[i] = 1;
+    }
+}
+
+/* Helper for sky_path_build(): the working run on the wrapped circle of @p n
+ * samples for the sample index @p j of now. Requires at least one up and one
+ * down sample. Writes the run's first and last sample index. */
+static inline void sky_path_pick_run_(const uint8_t *up, int n, int j, int *first, int *last)
+{
+    if (up[j]) {
+        int f = j, l = j;
+        while (up[(f + n - 1) % n]) f = (f + n - 1) % n;
+        while (up[(l + 1) % n]) l = (l + 1) % n;
+        *first = f;
+        *last = l;
+        return;
+    }
+    int best_start = -1, best_len = 0;
+    for (int k = 1; k <= n; k++) {
+        const int idx = (j + k) % n;
+        if (!up[idx] || up[(idx + n - 1) % n]) continue;   /* not the start of a run */
+        int len = 1;
+        while (len < n && up[(idx + len) % n]) len++;
+        if (len >= SKY_PATH_MIN_RUN) {
+            best_start = idx;
+            best_len = len;
+            break;
+        }
+        if (len > best_len) {
+            best_start = idx;
+            best_len = len;
+        }
+    }
+    *first = best_start;
+    *last = (best_start + best_len - 1) % n;
+}
+
 static inline void sky_path_build(sky_path_t *out, float dec_deg, float lat_deg, float ha_now_deg,
                                   const int8_t *alt72, bool horizon_valid)
 {
@@ -416,6 +467,7 @@ static inline void sky_path_build(sky_path_t *out, float dec_deg, float lat_deg,
         out->dir[i] = sky_hadec_to_vec(-180.0f + SKY_PATH_STEP_DEG * (float)i, dec_deg, lat_deg);
         out->up[i] = (sky_path_margin_(out->dir[i], alt72, horizon_valid) > 0.0f) ? 1 : 0;
     }
+    sky_path_bridge_(out->up, n);
     out->up[n] = out->up[0];
     for (int i = 0; i < n; i++) n_up += out->up[i];
 
@@ -439,10 +491,8 @@ static inline void sky_path_build(sky_path_t *out, float dec_deg, float lat_deg,
     int j = (int)floorf((sky_wrap180(ha_now_deg) + 180.0f) / SKY_PATH_STEP_DEG);
     if (j < 0) j = 0;
     if (j >= n) j = 0;
-    while (!out->up[j]) j = (j + 1) % n;   /* terminates: at least one sample is up */
-    int first = j, last = j;
-    while (out->up[(first + n - 1) % n]) first = (first + n - 1) % n;
-    while (out->up[(last + 1) % n]) last = (last + 1) % n;
+    int first = 0, last = 0;
+    sky_path_pick_run_(out->up, n, j, &first, &last);
 
     out->run_first = first;
     out->run_last = last;
@@ -472,6 +522,24 @@ static inline int sky_path_work_dirs(const sky_path_t *p, sky_v3_t *out, int max
     return cnt;
 }
 
+/**
+ * Every sample of the path above the horizon outline (p->up[i], i in 0..71),
+ * in index order, into @p out (at most @p max). This is what the camera
+ * frames: a jagged outline splits a low pass into several short up runs, and
+ * the working run alone can be a sliver of a few samples (the user's north
+ * horizon: 27, 8, 25, 14, 22, 4 degrees inside 27 degrees of azimuth). Returns
+ * the count, 0 when never up.
+ */
+static inline int sky_path_up_dirs(const sky_path_t *p, sky_v3_t *out, int max)
+{
+    if (!p || !out || max <= 0 || p->never_up) return 0;
+    int cnt = 0;
+    for (int i = 0; i < SKY_PATH_N - 1 && cnt < max; i++) {
+        if (p->up[i]) out[cnt++] = p->dir[i];
+    }
+    return cnt;
+}
+
 /* ---- the mount -------------------------------------------------------------- */
 
 /** NINA SideOfPier. Values are stored as-is in nina_client_t.mount_pier_side. */
@@ -496,13 +564,18 @@ typedef struct {
  *   N    = (0, cos lat, sin lat)    (always the north pole vector, BOTH hemispheres)
  *   decl = +norm(N x tube) for SKY_PIER_EAST, -norm(N x tube) for SKY_PIER_WEST
  *   SKY_PIER_UNKNOWN uses EAST when @p ha_deg >= 0, else WEST.
- * Degenerate (|N x tube| < 1e-4, tube along the pole): decl = (+1,0,0) for
- * EAST, (-1,0,0) for WEST. weight = -decl. polar = sky_pole(lat).
+ * Degenerate (|N x tube| < 1e-4, tube along the pole, which is what NINA
+ * reports for a mount at home: Dec 90, Alt = lat, Az 0): the hour-angle
+ * rotation is not recoverable from alt/az, so the pose is the rest pose,
+ * counterweight straight down, on either side. weight = -decl. polar =
+ * sky_pole(lat).
  *
  * Physics check (lat 41.9, dec 0): HA +90 on EAST and HA -90 on WEST both give
  * weight = (0, 0.6678, -0.7443), the shaft hanging down. Southern sites
  * (lat -30, HA +90, EAST) also give weight.z < 0.
  */
+static inline sky_pose_t sky_mount_rest_pose(float lat_deg);
+
 static inline sky_pose_t sky_mount_pose(float lat_deg, sky_v3_t tube_dir, sky_pier_t side, float ha_deg)
 {
     const float lat = lat_deg * SKY_DEG2RAD;
@@ -520,14 +593,15 @@ static inline sky_pose_t sky_mount_pose(float lat_deg, sky_v3_t tube_dir, sky_pi
         east = (ha_deg >= 0.0f);
         break;
     }
+    if (sky_v3_len(c) < 1e-4f) {
+        sky_pose_t home = sky_mount_rest_pose(lat_deg);
+        home.tube = tube_dir;
+        return home;
+    }
     sky_pose_t p;
     p.polar = sky_pole(lat_deg);
     p.tube = tube_dir;
-    if (sky_v3_len(c) < 1e-4f) {
-        p.decl = sky_v3(1.0f, 0.0f, 0.0f);
-    } else {
-        p.decl = sky_v3_norm(c);
-    }
+    p.decl = sky_v3_norm(c);
     if (!east) p.decl = sky_v3_scale(p.decl, -1.0f);
     p.weight = sky_v3_scale(p.decl, -1.0f);
     return p;
@@ -553,8 +627,8 @@ static inline sky_pose_t sky_mount_rest_pose(float lat_deg)
 
 /** What a capsule is, so the renderer can colour it. */
 typedef enum {
-    SKY_PART_LEG = 0,
-    SKY_PART_MOUNT,    /* pier, polar housing, declination housing */
+    SKY_PART_PIER = 0, /* the pier column */
+    SKY_PART_MOUNT,    /* polar housing, declination housing */
     SKY_PART_SHAFT,
     SKY_PART_WEIGHT,
     SKY_PART_TUBE,
@@ -572,61 +646,52 @@ typedef struct {
 /**
  * The telescope as SKY_RIG_CAPSULES capsules, in this order (O = (0,0,
  * SKY_RIG_PIVOT_Z), S = O + decl*0.42, P/D/T/W = polar/decl/tube/weight):
- *   0..2  legs     (0,0,0.84) -> feet at radius 0.55, azimuth 0/120/240, z 0, r 0.04
- *   3     pier     (0,0,0.84) -> (0,0,1.00), r 0.09                MOUNT
- *   4     polar    O - P*0.30 -> O + P*0.13, r 0.085               MOUNT
- *   5     decl     O - D*0.06 -> O + D*0.25, r 0.075               MOUNT
- *   6     shaft    O -> O + W*0.80, r 0.022                        SHAFT
- *   7     weight   O + W*0.50 -> O + W*0.65, r 0.12                WEIGHT
- *   8     tube     S - T*0.50 -> S + T*0.90, r 0.13                TUBE
- *   9     front    S + T*0.85 -> S + T*0.90, r 0.14                FRONT
- *   10    camera   S - T*0.50 -> S - T*0.66, r 0.07                CAMERA
+ *   0     pier     (0,0,0) -> (0,0,1.00), r 0.11                   PIER
+ *   1     polar    O - P*0.30 -> O + P*0.13, r 0.085               MOUNT
+ *   2     decl     O - D*0.06 -> O + D*0.25, r 0.075               MOUNT
+ *   3     shaft    O -> O + W*0.80, r 0.022                        SHAFT
+ *   4     weight   O + W*0.52 -> O + W*0.64, r 0.15                WEIGHT (drawn with flat ends: a disc on the shaft)
+ *   5     tube     S - T*0.50 -> S + T*0.90, r 0.13                TUBE
+ *   6     front    S + T*0.85 -> S + T*0.90, r 0.14                FRONT
+ *   7     camera   S - T*0.50 -> S - T*0.66, r 0.07                CAMERA
  * Returns SKY_RIG_CAPSULES.
  */
 static inline int sky_rig_capsules(const sky_pose_t *pose, sky_capsule_t out[SKY_RIG_CAPSULES])
 {
     const sky_v3_t o = sky_v3(0.0f, 0.0f, SKY_RIG_PIVOT_Z);
     const sky_v3_t s = sky_v3_add(o, sky_v3_scale(pose->decl, 0.42f));
-    const sky_v3_t hip = sky_v3(0.0f, 0.0f, 0.84f);
-    for (int i = 0; i < 3; i++) {
-        const float az = 120.0f * (float)i * SKY_DEG2RAD;
-        out[i].a = hip;
-        out[i].b = sky_v3(0.55f * sinf(az), 0.55f * cosf(az), 0.0f);
-        out[i].r = 0.04f;
-        out[i].part = SKY_PART_LEG;
-    }
-    out[3].a = hip;
-    out[3].b = sky_v3(0.0f, 0.0f, 1.00f);
-    out[3].r = 0.09f;
-    out[3].part = SKY_PART_MOUNT;
-    out[4].a = sky_v3_sub(o, sky_v3_scale(pose->polar, 0.30f));
-    out[4].b = sky_v3_add(o, sky_v3_scale(pose->polar, 0.13f));
-    out[4].r = 0.085f;
-    out[4].part = SKY_PART_MOUNT;
-    out[5].a = sky_v3_sub(o, sky_v3_scale(pose->decl, 0.06f));
-    out[5].b = sky_v3_add(o, sky_v3_scale(pose->decl, 0.25f));
-    out[5].r = 0.075f;
-    out[5].part = SKY_PART_MOUNT;
-    out[6].a = o;
-    out[6].b = sky_v3_add(o, sky_v3_scale(pose->weight, 0.80f));
-    out[6].r = 0.022f;
-    out[6].part = SKY_PART_SHAFT;
-    out[7].a = sky_v3_add(o, sky_v3_scale(pose->weight, 0.50f));
-    out[7].b = sky_v3_add(o, sky_v3_scale(pose->weight, 0.65f));
-    out[7].r = 0.12f;
-    out[7].part = SKY_PART_WEIGHT;
-    out[8].a = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.50f));
-    out[8].b = sky_v3_add(s, sky_v3_scale(pose->tube, 0.90f));
-    out[8].r = 0.13f;
-    out[8].part = SKY_PART_TUBE;
-    out[9].a = sky_v3_add(s, sky_v3_scale(pose->tube, 0.85f));
-    out[9].b = sky_v3_add(s, sky_v3_scale(pose->tube, 0.90f));
-    out[9].r = 0.14f;
-    out[9].part = SKY_PART_FRONT;
-    out[10].a = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.50f));
-    out[10].b = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.66f));
-    out[10].r = 0.07f;
-    out[10].part = SKY_PART_CAMERA;
+    out[0].a = sky_v3(0.0f, 0.0f, 0.0f);
+    out[0].b = sky_v3(0.0f, 0.0f, 1.00f);
+    out[0].r = 0.11f;
+    out[0].part = SKY_PART_PIER;
+    out[1].a = sky_v3_sub(o, sky_v3_scale(pose->polar, 0.30f));
+    out[1].b = sky_v3_add(o, sky_v3_scale(pose->polar, 0.13f));
+    out[1].r = 0.085f;
+    out[1].part = SKY_PART_MOUNT;
+    out[2].a = sky_v3_sub(o, sky_v3_scale(pose->decl, 0.06f));
+    out[2].b = sky_v3_add(o, sky_v3_scale(pose->decl, 0.25f));
+    out[2].r = 0.075f;
+    out[2].part = SKY_PART_MOUNT;
+    out[3].a = o;
+    out[3].b = sky_v3_add(o, sky_v3_scale(pose->weight, 0.80f));
+    out[3].r = 0.022f;
+    out[3].part = SKY_PART_SHAFT;
+    out[4].a = sky_v3_add(o, sky_v3_scale(pose->weight, 0.52f));
+    out[4].b = sky_v3_add(o, sky_v3_scale(pose->weight, 0.64f));
+    out[4].r = 0.15f;
+    out[4].part = SKY_PART_WEIGHT;
+    out[5].a = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.50f));
+    out[5].b = sky_v3_add(s, sky_v3_scale(pose->tube, 0.90f));
+    out[5].r = 0.13f;
+    out[5].part = SKY_PART_TUBE;
+    out[6].a = sky_v3_add(s, sky_v3_scale(pose->tube, 0.85f));
+    out[6].b = sky_v3_add(s, sky_v3_scale(pose->tube, 0.90f));
+    out[6].r = 0.14f;
+    out[6].part = SKY_PART_FRONT;
+    out[7].a = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.50f));
+    out[7].b = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.66f));
+    out[7].r = 0.07f;
+    out[7].part = SKY_PART_CAMERA;
     return SKY_RIG_CAPSULES;
 }
 
@@ -640,22 +705,19 @@ static inline sky_v3_t sky_rig_tube_front(const sky_pose_t *pose)
 }
 
 /**
- * The SKY_RIG_FIT_N points the camera fit holds in view: the three feet, O,
- * the tube front (S + T*0.90), the camera back (S - T*0.66) and the weight
- * end (O + W*0.80), in that order. Returns SKY_RIG_FIT_N.
+ * The SKY_RIG_FIT_N points the camera fit holds in view: the pier foot
+ * (the origin), O, the tube front (S + T*0.90), the camera back (S - T*0.66)
+ * and the weight end (O + W*0.80), in that order. Returns SKY_RIG_FIT_N.
  */
 static inline int sky_rig_fit_points(const sky_pose_t *pose, sky_v3_t out[SKY_RIG_FIT_N])
 {
     const sky_v3_t o = sky_v3(0.0f, 0.0f, SKY_RIG_PIVOT_Z);
     const sky_v3_t s = sky_v3_add(o, sky_v3_scale(pose->decl, 0.42f));
-    for (int i = 0; i < 3; i++) {
-        const float az = 120.0f * (float)i * SKY_DEG2RAD;
-        out[i] = sky_v3(0.55f * sinf(az), 0.55f * cosf(az), 0.0f);
-    }
-    out[3] = o;
-    out[4] = sky_rig_tube_front(pose);
-    out[5] = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.66f));
-    out[6] = sky_v3_add(o, sky_v3_scale(pose->weight, 0.80f));
+    out[0] = sky_v3(0.0f, 0.0f, 0.0f);
+    out[1] = o;
+    out[2] = sky_rig_tube_front(pose);
+    out[3] = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.66f));
+    out[4] = sky_v3_add(o, sky_v3_scale(pose->weight, 0.80f));
     return SKY_RIG_FIT_N;
 }
 
@@ -924,6 +986,33 @@ static inline void sky_cam_fit(sky_cam_pose_t *out, float yaw_deg, const sky_fra
     out->focal_px = f;
 }
 
+/* ---- compass marks along the level horizon --------------------------------- */
+
+/**
+ * Azimuth step (degrees) for the compass labels: the smallest of 5, 10, 15,
+ * 30, 45 and 90 that puts neighbouring labels at least @p min_px apart at
+ * @p px_per_deg (the camera's focal_px * tan(1 degree) at the frame centre),
+ * else 90. A wide view therefore labels every 30 or 45 degrees, a tight one
+ * every 5 or 10.
+ */
+static inline int sky_compass_step(float px_per_deg, float min_px)
+{
+    static const int steps[6] = { 5, 10, 15, 30, 45, 90 };
+    for (int i = 0; i < 6; i++) {
+        if ((float)steps[i] * px_per_deg >= min_px) return steps[i];
+    }
+    return 90;
+}
+
+/** Label for azimuth @p az_deg: the degrees, wrapped to 0..359, with a degree
+ *  sign, into @p buf (at least 8 bytes). Returns @p buf. */
+static inline const char *sky_compass_text(int az_deg, char *buf, size_t n)
+{
+    az_deg = ((az_deg % 360) + 360) % 360;
+    snprintf(buf, n, "%d\xC2\xB0", az_deg);
+    return buf;
+}
+
 /** Home yaw: 0 (facing north) for lat >= 0, 180 for lat < 0. */
 static inline float sky_cam_home_yaw(float lat_deg)
 {
@@ -938,6 +1027,28 @@ static inline float sky_cam_work_yaw(const sky_path_t *p, float dec_deg, float l
     float az = 0.0f;
     sky_vec_to_altaz(sky_hadec_to_vec(p->mid_ha_deg, dec_deg, lat_deg), (float *)0, &az);
     return az;
+}
+
+/** Yaw for the work view over every up sample (sky_path_up_dirs): the
+ *  azimuth of the highest sample above the outline, which is the transit for
+ *  a southern target and the upper culmination for a circumpolar one, so the
+ *  frame is centred on the arc's middle no matter which short run comes
+ *  next. Falls back to sky_cam_work_yaw() when nothing is up. */
+static inline float sky_cam_up_yaw(const sky_path_t *p, float dec_deg, float lat_deg)
+{
+    float best_alt = -1e9f, best_az = 0.0f;
+    bool any = false;
+    for (int i = 0; i < SKY_PATH_N - 1; i++) {
+        if (!p->up[i]) continue;
+        float alt = 0.0f, az = 0.0f;
+        sky_vec_to_altaz(p->dir[i], &alt, &az);
+        if (alt > best_alt) {
+            best_alt = alt;
+            best_az = az;
+        }
+        any = true;
+    }
+    return any ? best_az : sky_cam_work_yaw(p, dec_deg, lat_deg);
 }
 
 /**

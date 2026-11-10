@@ -14,6 +14,7 @@
 #include "cJSON.h"
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 static const char *TAG = "nina_seq";
 
@@ -170,6 +171,78 @@ static bool find_target_coords(cJSON *container, float *ra_h, float *dec_deg) {
         }
     }
     return false;
+}
+
+bool nina_seq_state_target_coords(const cJSON *response, const char *container_name,
+                                  float *ra_h, float *dec_deg) {
+    if (!cJSON_IsArray(response) || !container_name || container_name[0] == '\0') {
+        return false;
+    }
+    const cJSON *top = NULL;
+    cJSON_ArrayForEach(top, response) {
+        const cJSON *name = cJSON_GetObjectItem(top, "Name");
+        if (!cJSON_IsString(name) || strcmp(name->valuestring, "Targets_Container") != 0) {
+            continue;
+        }
+        const cJSON *tc = NULL;
+        cJSON_ArrayForEach(tc, cJSON_GetObjectItem(top, "Items")) {
+            const cJSON *tn = cJSON_GetObjectItem(tc, "Name");
+            if (!cJSON_IsString(tn) || strcmp(tn->valuestring, container_name) != 0) {
+                continue;
+            }
+            const cJSON *target = cJSON_GetObjectItem(tc, "Target");
+            const cJSON *ic = cJSON_IsObject(target) ? cJSON_GetObjectItem(target, "InputCoordinates")
+                                                     : NULL;
+            if (!cJSON_IsObject(ic)) {
+                return false;
+            }
+            const cJSON *rh = cJSON_GetObjectItem(ic, "RAHours");
+            const cJSON *rm = cJSON_GetObjectItem(ic, "RAMinutes");
+            const cJSON *rs = cJSON_GetObjectItem(ic, "RASeconds");
+            const cJSON *dd = cJSON_GetObjectItem(ic, "DecDegrees");
+            const cJSON *dm = cJSON_GetObjectItem(ic, "DecMinutes");
+            const cJSON *ds = cJSON_GetObjectItem(ic, "DecSeconds");
+            if (!cJSON_IsNumber(rh) || !cJSON_IsNumber(dd)) {
+                return false;
+            }
+            float ra = (float)rh->valuedouble;
+            if (cJSON_IsNumber(rm)) {
+                ra += (float)rm->valuedouble / 60.0f;
+            }
+            if (cJSON_IsNumber(rs)) {
+                ra += (float)rs->valuedouble / 3600.0f;
+            }
+            float mag = fabsf((float)dd->valuedouble);
+            if (cJSON_IsNumber(dm)) {
+                mag += (float)dm->valuedouble / 60.0f;
+            }
+            if (cJSON_IsNumber(ds)) {
+                mag += (float)ds->valuedouble / 3600.0f;
+            }
+            const bool neg = cJSON_IsTrue(cJSON_GetObjectItem(ic, "NegativeDec")) ||
+                             dd->valuedouble < 0.0;
+            *ra_h = ra;
+            *dec_deg = neg ? -mag : mag;
+            return true;
+        }
+    }
+    return false;
+}
+
+// GET sequence/state and read the named container's own target coordinates.
+// 1 = found, 0 = fetched but that container has no Target, -1 = unreachable.
+static int fetch_state_target_coords(const char *base_url, const char *container_name,
+                                     float *ra_h, float *dec_deg) {
+    char url[256];
+    snprintf(url, sizeof(url), "%ssequence/state", base_url);
+    cJSON *json = http_get_json(url);
+    if (!json) {
+        return -1;
+    }
+    const bool ok = nina_seq_state_target_coords(cJSON_GetObjectItem(json, "Response"),
+                                                 container_name, ra_h, dec_deg);
+    cJSON_Delete(json);
+    return ok ? 1 : 0;
 }
 
 // Find the active target container (RUNNING preferred, otherwise last FINISHED)
@@ -501,10 +574,46 @@ void fetch_sequence_counts_optional(const char *base_url, nina_client_t *data) {
                     }
                 }
 
-                // Target coordinates (sky scene layouts).
+                // Target coordinates (sky scene layouts). The container's own
+                // Target.InputCoordinates from sequence/state is the target;
+                // fetched once per container name and remembered, including a
+                // "looked up, no Target" result. sequence/json's slew item or
+                // centering trigger is the fallback for a container with no
+                // Target of its own (plain Sequential container, older ninaAPI).
+                // ponytail: a coordinate edit on the SAME running container is
+                // not seen until the container changes.
                 float tc_ra = 0.0f;
                 float tc_dec = 0.0f;
-                data->target_coord_valid = find_target_coords(target_container, &tc_ra, &tc_dec);
+                data->target_coord_valid = false;
+                if (cJSON_IsString(target_name_json) && target_name_json->valuestring[0] != '\0') {
+                    const char *full = target_name_json->valuestring;
+                    const bool same = strncmp(full, data->state_coord_container,
+                                              sizeof(data->state_coord_container) - 1) == 0;
+                    if (!same) {
+                        float sra = 0.0f;
+                        float sdec = 0.0f;
+                        const int got = fetch_state_target_coords(base_url, full, &sra, &sdec);
+                        if (got >= 0) {
+                            strlcpy(data->state_coord_container, full,
+                                    sizeof(data->state_coord_container));
+                        }
+                        data->state_coord_valid = (got == 1);
+                        if (got == 1) {
+                            data->state_coord_ra_h = sra;
+                            data->state_coord_dec_deg = sdec;
+                            ESP_LOGI(TAG, "Target coords from sequence/state: %s RA %.4fh Dec %.3f",
+                                     full, sra, sdec);
+                        }
+                    }
+                    if (data->state_coord_valid) {
+                        tc_ra = data->state_coord_ra_h;
+                        tc_dec = data->state_coord_dec_deg;
+                        data->target_coord_valid = true;
+                    }
+                }
+                if (!data->target_coord_valid) {
+                    data->target_coord_valid = find_target_coords(target_container, &tc_ra, &tc_dec);
+                }
                 if (data->target_coord_valid) {
                     if (tc_dec > 90.0f) {
                         tc_dec = 90.0f;

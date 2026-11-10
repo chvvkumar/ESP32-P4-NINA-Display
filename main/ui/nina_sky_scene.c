@@ -45,16 +45,17 @@
 
 #define SCN_BEADS_MAX   256
 #define SCN_SEG_MAX     76     /* one arc of the path: at most 74 points */
-#define SCN_HZ_PTS      91     /* smooth horizon outline: yaw -90..+90 every 2 degrees */
+#define SCN_HZ_PTS      181    /* smooth horizon outline: yaw -180..+180 every 2 degrees
+                                * (a camera pitched up with the wide lens sees hills more
+                                * than 90 degrees off its yaw; points behind it fail to project) */
 #define SCN_HZ_STEP_DEG 2.0f
-#define SCN_HZ_MAX      92     /* outline edge segments kept (on screen only) */
+#define SCN_HZ_MAX      182    /* outline edge segments kept (on screen only) */
+#define SCN_COMPASS_MAX 24     /* compass labels along the level horizon */
+#define SCN_COMPASS_MIN_PX 96.0f /* least centre-to-centre spacing of two labels */
 #define SCN_COL_W       6      /* land column width, px */
 #define SCN_COL_MAX     136    /* column runs: ceil(800 / SCN_COL_W) = 134 at most */
 #define SCN_COL_MERGE   2      /* px: neighbour columns this close share one rectangle */
 #define SCN_EDGE_W      7      /* land-coloured line along the outline, px */
-#define SCN_GRING_N     32     /* ground ring round the tripod: segments */
-#define SCN_GRING_MAX   34
-#define SCN_GRING_R     0.78f  /* ground ring radius, metres (feet stand at 0.55) */
 #define SCN_BEAM_MAX    6
 #define SCN_CLIP_PAD    256.0f /* segments are clipped to the panel grown by this */
 #define SCN_TICK_MS     33
@@ -64,6 +65,9 @@
 #define SCN_ARROW_LEN   26.0f
 #define SCN_ARROW_HALF  10.0f
 #define SCN_FLIP_HALF   14.0f
+#define SCN_GRASS_N     140    /* grass blades at fixed world spots round the pier */
+#define SCN_GRASS_R     7.0f   /* metres: blades scattered inside this radius */
+#define SCN_GRASS_R0    0.35f  /* metres: none under the pier base */
 
 #define OPA_PCT(p) ((lv_opa_t)((p) * 255 / 100))
 
@@ -78,13 +82,13 @@ enum {
     PAL_LAND,          /* obstructions: trees and roofs against the sky */
     PAL_FLOOR_FAR,     /* yard floor at the level horizon */
     PAL_FLOOR_NEAR,    /* yard floor at the panel bottom, and the readout band */
-    PAL_FLOOR_RING,    /* ring on the ground round the tripod feet */
+    PAL_GRASS,         /* grass blades on the floor */
     PAL_CYAN,
     PAL_TUBE,
     PAL_TUBE_HI,
     PAL_MOUNT,
     PAL_WEIGHT,
-    PAL_LEG,
+    PAL_PIER,
     PAL_CAMERA,
     PAL_EDGE,          /* thin dark edge round every telescope part */
     PAL_N,
@@ -92,7 +96,7 @@ enum {
 
 static const uint32_t PAL_RAW[PAL_N] = {
     0x05091a, 0x1d3458, 0xf4b860, 0x0b1019, 0xe9e6dc,
-    0xfff3dc, 0x030507, 0x111a25, 0x090d13, 0x223041,
+    0xfff3dc, 0x030507, 0x0e1a13, 0x070d09, 0x1c3324,
     0x6fd3e0, 0xc4cad3, 0xe4e8ee, 0x8a919b, 0x7a818b,
     0x4b525c, 0x3a4049, 0x05070a,
 };
@@ -104,17 +108,20 @@ typedef struct { int16_t x, y; uint32_t color; } bead_px_t;
 typedef struct { int16_t x1, y1, x2, y2, w; uint8_t part, pad; } cap_px_t;
 typedef struct { int16_t x[3], y[3]; } tri_px_t;
 typedef struct { int16_t x1, x2, y; } col_px_t;   /* land rectangle x1..x2, y..floor_y-1 */
+typedef struct { int16_t x1, y1, x2, y2; uint8_t w, pad; } grass_px_t;
+typedef struct { int16_t x; uint16_t az; } compass_px_t;   /* label centre x on the horizon row */
 
 /* Built from scratch (memset 0, then field writes) on every projection, so the
  * hash over its bytes is deterministic. Panel coordinates relative to the
  * scene object, which sits at (0,0) of the page root. */
 typedef struct {
-    uint16_t  n_trav, n_fut, n_hz, n_beads, n_caps, n_beam, n_cols, n_gring;
+    uint16_t  n_trav, n_fut, n_hz, n_beads, n_caps, n_beam, n_cols, n_grass, n_compass;
     seg_px_t  trav[SCN_SEG_MAX];
     seg_px_t  fut[SCN_SEG_MAX];
     seg_px_t  hz[SCN_HZ_MAX];
     col_px_t  cols[SCN_COL_MAX];
-    seg_px_t  gring[SCN_GRING_MAX];
+    grass_px_t grass[SCN_GRASS_N];
+    compass_px_t compass[SCN_COMPASS_MAX];
     int16_t   floor_y;            /* first row of the yard floor (level horizon), 0..size */
     int16_t   glow_y;             /* row where the sky reaches its glow colour */
     seg_px_t  beam[SCN_BEAM_MAX];
@@ -253,6 +260,8 @@ static void draw_dot(const dctx_t *c, int cx, int cy, int r, uint32_t color, lv_
 static void draw_fill(const dctx_t *c, int x1, int y1, int x2, int y2, uint32_t color);
 static void draw_tri(const dctx_t *c, const int16_t *xs, const int16_t *ys,
                      uint32_t color, lv_opa_t opa);
+static void draw_dashes(const dctx_t *c, const seg_px_t *segs, int n, uint32_t color, int width,
+                        lv_opa_t opa, float dash, float gap);
 
 /* ---- small helpers ---------------------------------------------------------- */
 
@@ -687,8 +696,11 @@ static void goal_compute(nina_sky_scene_t *s, bool want_work)
     } else {
         const float gbt = (float)s->opts.ground_band_top;
         if (want_work) {
-            const float yaw = sky_cam_work_yaw(&s->path, s->dec_deg, s->lat);
-            int n = sky_path_work_dirs(&s->path, s->fit_dirs, SKY_PATH_N);
+            /* Frame every sample above the outline, not just the working run:
+             * a jagged horizon can make that run a sliver of a few low samples
+             * and the view would zoom onto it. */
+            const float yaw = sky_cam_up_yaw(&s->path, s->dec_deg, s->lat);
+            int n = sky_path_up_dirs(&s->path, s->fit_dirs, SKY_PATH_N);
             if (n < 0) {
                 n = 0;
             }
@@ -952,7 +964,7 @@ static void project(nina_sky_scene_t *s)
             s->col_top[c] = 1e9f;
         }
         for (int i = 0; i < SCN_HZ_PTS; i++) {
-            const float az = yaw - 90.0f + SCN_HZ_STEP_DEG * (float)i;
+            const float az = yaw - 180.0f + SCN_HZ_STEP_DEG * (float)i;
             float alt = sky_horizon_alt_smooth(s->horizon, s->horizon_valid, az);
             if (alt < 0.0f) {
                 alt = 0.0f;
@@ -1064,6 +1076,73 @@ static void project(nina_sky_scene_t *s)
             in_run = true;
         }
         dl->glow_y = (int16_t)((deep > 0) ? deep : dl->floor_y);
+
+        /* Compass marks on the level horizon row (a straight horizontal line
+         * for a camera with no roll): the step follows the zoom so labels
+         * never crowd, the labels are drawn above floor_y. */
+        {
+            const int step = sky_compass_step(cam.focal_px * tanf(SKY_DEG2RAD), SCN_COMPASS_MIN_PX);
+            for (int a = 0; a < 360 && dl->n_compass < SCN_COMPASS_MAX; a += step) {
+                float mx = 0.0f, my = 0.0f;
+                if (!proj_dir(&cam, sky_altaz_to_vec(0.0f, (float)a), &mx, &my)) {
+                    continue;
+                }
+                if (mx < 0.0f || mx > sz) {
+                    continue;
+                }
+                compass_px_t *m = &dl->compass[dl->n_compass++];
+                m->x = to_px(mx);
+                m->az = (uint16_t)a;
+            }
+        }
+    }
+
+    /* Grass: SCN_GRASS_N blades at fixed pseudo-random spots on the ground
+     * (LCG, constant seed), projected like the telescope so they stay put
+     * while the camera flies. Wider and taller when near.
+     * ponytail: drawn before the telescope, so a blade in front of the pier
+     * base is painted over by it; add a z-sort if it ever shows. */
+    {
+        uint32_t rnd = 0x9e3779b9u;
+        const float inv24 = 1.0f / 16777216.0f;
+        for (int i = 0; i < SCN_GRASS_N; i++) {
+            rnd = rnd * 1664525u + 1013904223u;
+            const float u = (float)(rnd >> 8) * inv24;
+            rnd = rnd * 1664525u + 1013904223u;
+            const float v = (float)(rnd >> 8) * inv24;
+            rnd = rnd * 1664525u + 1013904223u;
+            const float t = (float)(rnd >> 8) * inv24;
+            const float rad = SCN_GRASS_R0 + (SCN_GRASS_R - SCN_GRASS_R0) * sqrtf(u);
+            const float ang = v * 360.0f * SKY_DEG2RAD;
+            const float bx = rad * sinf(ang), by = rad * cosf(ang);
+            const float h = 0.06f + 0.10f * t;
+            const float lean = 0.06f * (t - 0.5f);
+            const sky_v3_t ca = sky_cam_point(&cam, sky_v3(bx, by, 0.0f));
+            const sky_v3_t cb = sky_cam_point(&cam, sky_v3(bx + lean, by, h));
+            float ax = 0.0f, ay = 0.0f, tx = 0.0f, ty = 0.0f;
+            if (!sky_cam_screen(&cam, ca, &ax, &ay) || !sky_cam_screen(&cam, cb, &tx, &ty)) {
+                continue;
+            }
+            if (ay < (float)dl->floor_y) {
+                continue;
+            }
+            if (!clip_seg(&ax, &ay, &tx, &ty, 0.0f, (float)s->size)) {
+                continue;
+            }
+            float w = 0.025f * cam.focal_px / ca.z;
+            if (w < 1.0f) {
+                w = 1.0f;
+            }
+            if (w > 3.0f) {
+                w = 3.0f;
+            }
+            grass_px_t *g = &dl->grass[dl->n_grass++];
+            g->x1 = to_px(ax);
+            g->y1 = to_px(ay);
+            g->x2 = to_px(tx);
+            g->y2 = to_px(ty);
+            g->w = (uint8_t)w;
+        }
     }
 
     /* Telescope and beam (needs a site for its latitude). */
@@ -1145,22 +1224,6 @@ static void project(nina_sky_scene_t *s)
         }
         dl->n_caps = (uint16_t)nk;
 
-        /* A true circle on the ground round the feet, so the tripod stands on something. */
-        {
-            float gx = 0.0f, gy = 0.0f, lgx = 0.0f, lgy = 0.0f;
-            bool lg = false;
-            for (int i = 0; i <= SCN_GRING_N; i++) {
-                const float ga = (float)i * (360.0f / (float)SCN_GRING_N) * SKY_DEG2RAD;
-                const sky_v3_t gp = sky_v3(SCN_GRING_R * sinf(ga), SCN_GRING_R * cosf(ga), 0.0f);
-                const bool ok = sky_cam_screen(&cam, sky_cam_point(&cam, gp), &gx, &gy);
-                if (ok && lg) {
-                    (void)add_seg(s, dl->gring, &dl->n_gring, SCN_GRING_MAX, lgx, lgy, gx, gy);
-                }
-                lgx = gx;
-                lgy = gy;
-                lg = ok;
-            }
-        }
         if (nk > 0) {
             s->rig_box.x1 = bx1;
             s->rig_box.y1 = by1;
@@ -1464,6 +1527,43 @@ static void draw_line(const dctx_t *c, int x1, int y1, int x2, int y2,
     lv_draw_line(c->layer, &d);
 }
 
+/* Dashes of @p dash px every @p dash + @p gap px along a run of connected
+ * segments, the phase carried across joins so the pattern is even round the
+ * arc. LVGL's own dash fields apply to horizontal and vertical lines only. */
+static void draw_dashes(const dctx_t *c, const seg_px_t *segs, int n, uint32_t color, int width,
+                        lv_opa_t opa, float dash, float gap)
+{
+    const float period = dash + gap;
+    float p = 0.0f;   /* position inside the period at the current point */
+    for (int i = 0; i < n; i++) {
+        const float x1 = (float)segs[i].x1, y1 = (float)segs[i].y1;
+        const float dx = (float)segs[i].x2 - x1, dy = (float)segs[i].y2 - y1;
+        const float len = sqrtf(dx * dx + dy * dy);
+        if (len < 0.5f) {
+            continue;
+        }
+        const float ux = dx / len, uy = dy / len;
+        float t = 0.0f;
+        while (t < len) {
+            const bool on = p < dash;
+            float step = (on ? dash : period) - p;
+            if (step > len - t) {
+                step = len - t;
+            }
+            if (on) {
+                draw_line(c, (int)lroundf(x1 + ux * t), (int)lroundf(y1 + uy * t),
+                          (int)lroundf(x1 + ux * (t + step)), (int)lroundf(y1 + uy * (t + step)),
+                          color, width, opa, true);
+            }
+            t += step;
+            p += step;
+            if (p >= period) {
+                p -= period;
+            }
+        }
+    }
+}
+
 static void draw_ring(const dctx_t *c, int cx, int cy, int r, uint32_t color, int width,
                       lv_opa_t opa, int start, int end, bool rounded)
 {
@@ -1571,15 +1671,8 @@ static void draw_cb(lv_event_t *e)
         const seg_px_t *g = &dl->trav[i];
         draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_AMBER], 3, OPA_PCT(35), true);
     }
-    /* 3 path to come: glow, then core */
-    for (int i = 0; i < dl->n_fut; i++) {
-        const seg_px_t *g = &dl->fut[i];
-        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_AMBER], 14, OPA_PCT(13), true);
-    }
-    for (int i = 0; i < dl->n_fut; i++) {
-        const seg_px_t *g = &dl->fut[i];
-        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_AMBER], 5, LV_OPA_COVER, true);
-    }
+    /* 3 path to come: a dashed line (not yet imaged) */
+    draw_dashes(&c, dl->fut, dl->n_fut, P[PAL_AMBER], 5, LV_OPA_COVER, 9.0f, 9.0f);
     /* 4 beads */
     for (int i = 0; i < dl->n_beads; i++) {
         draw_dot(&c, dl->beads[i].x, dl->beads[i].y, 4, dl->beads[i].color, LV_OPA_COVER);
@@ -1604,13 +1697,12 @@ static void draw_cb(lv_event_t *e)
     }
     /* 7 target */
     if (dl->target_in) {
-        draw_dot(&c, dl->target_x, dl->target_y, 20, P[PAL_AMBER], OPA_PCT(22));
-        draw_dot(&c, dl->target_x, dl->target_y, 10, P[PAL_AMBER], LV_OPA_COVER);
-        draw_dot(&c, dl->target_x, dl->target_y, 4, P[PAL_TARGET_C], LV_OPA_COVER);
+        draw_dot(&c, dl->target_x, dl->target_y, 6, P[PAL_AMBER], LV_OPA_COVER);
+        draw_dot(&c, dl->target_x, dl->target_y, 2, P[PAL_TARGET_C], LV_OPA_COVER);
     }
     /* 8 land: the yard floor below the level horizon row, the obstructions
-     * above it as column rectangles, their smoothed edge, the ring round the
-     * feet, then the readout band (the floor's near colour, so it continues) */
+     * above it as column rectangles, their smoothed edge, the grass, then the
+     * readout band (the floor's near colour, so it continues) */
     const bool band = s->opts.ground_band_top > 0 && s->opts.ground_band_top < bottom;
     const int floor_end = band ? s->opts.ground_band_top - 1 : bottom - 1;
     if (dl->floor_y <= floor_end) {
@@ -1639,12 +1731,51 @@ static void draw_cb(lv_event_t *e)
         const seg_px_t *g = &dl->hz[i];
         draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_LAND], SCN_EDGE_W, LV_OPA_COVER, true);
     }
-    for (int i = 0; i < dl->n_gring; i++) {
-        const seg_px_t *g = &dl->gring[i];
-        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_FLOOR_RING], 2, LV_OPA_COVER, true);
+    for (int i = 0; i < dl->n_grass; i++) {
+        const grass_px_t *g = &dl->grass[i];
+        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_GRASS], g->w, LV_OPA_COVER, true);
     }
     if (band) {
         draw_fill(&c, 0, s->opts.ground_band_top, bottom - 1, bottom - 1, P[PAL_FLOOR_NEAR]);
+    }
+    /* 8b compass labels just above the ground row, with a short tick on it.
+     * Same face as the layouts' picture count (Montserrat 24). A label whose
+     * box would leave the panel is dropped. */
+    if (dl->n_compass > 0) {
+        const lv_font_t *font = &lv_font_montserrat_24;
+        const int lh = lv_font_get_line_height(font);
+        const int ty = dl->floor_y - lh - 8;
+        if (ty >= 0 && dl->floor_y - 1 <= floor_end) {
+            lv_draw_label_dsc_t ld;
+            lv_draw_label_dsc_init(&ld);
+            ld.font = font;
+            ld.color = lv_color_hex(P[PAL_FLIP_LIGHT]);
+            ld.opa = OPA_PCT(60);
+            ld.align = LV_TEXT_ALIGN_CENTER;
+            /* The draw task runs after this call returns, so the text must be
+             * copied: buf below is a stack local. */
+            ld.text_local = 1;
+            for (int i = 0; i < dl->n_compass; i++) {
+                char buf[16];
+                const char *txt = sky_compass_text(dl->compass[i].az, buf, sizeof(buf));
+                lv_point_t tsz;
+                lv_text_get_size(&tsz, txt, font, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+                const int w = (int)tsz.x + 4;
+                const int x = dl->compass[i].x;
+                if (x - w / 2 < 0 || x + w / 2 > s->size) {
+                    continue;
+                }
+                lv_area_t ta;
+                ta.x1 = c.ox + x - w / 2;
+                ta.x2 = c.ox + x + w / 2;
+                ta.y1 = c.oy + ty;
+                ta.y2 = c.oy + ty + lh;
+                ld.text = txt;
+                lv_draw_label(layer, &ld, &ta);
+                draw_line(&c, x, dl->floor_y - 6, x, dl->floor_y - 1, P[PAL_FLIP_LIGHT], 2,
+                          OPA_PCT(60), false);
+            }
+        }
     }
     /* 9 telescope, far to near: a thin dark edge, the part's grey, and a
      * highlight down the tube; cyan only on the ring at the tube's front */
@@ -1652,8 +1783,8 @@ static void draw_cb(lv_event_t *e)
         const cap_px_t *k = &dl->caps[i];
         uint32_t body;
         switch (k->part) {
-        case SKY_PART_LEG:
-            body = P[PAL_LEG];
+        case SKY_PART_PIER:
+            body = P[PAL_PIER];
             break;
         case SKY_PART_MOUNT:
         case SKY_PART_SHAFT:
@@ -1666,14 +1797,21 @@ static void draw_cb(lv_event_t *e)
             body = P[PAL_TUBE];
             break;
         case SKY_PART_FRONT:
-            body = P[PAL_CYAN];
+            body = P[PAL_TUBE];   /* grey cell with a cyan rim, see below */
             break;
         default:
             body = P[PAL_CAMERA];
             break;
         }
-        draw_line(&c, k->x1, k->y1, k->x2, k->y2, P[PAL_EDGE], k->w + 3, LV_OPA_COVER, true);
-        draw_line(&c, k->x1, k->y1, k->x2, k->y2, body, k->w, LV_OPA_COVER, true);
+        /* Round ends everywhere but the counterweight, which is a short fat
+         * cylinder on the shaft: flat ends read as a disc, round ends as a pill. */
+        const bool rnd = (k->part != SKY_PART_WEIGHT);
+        /* The tube front keeps the cyan as its outline only: seen end-on the
+         * short capsule fills into a disc, and a solid cyan disc read as a blob. */
+        const bool front = (k->part == SKY_PART_FRONT);
+        draw_line(&c, k->x1, k->y1, k->x2, k->y2, front ? P[PAL_CYAN] : P[PAL_EDGE],
+                  k->w + (front ? 5 : 3), LV_OPA_COVER, rnd);
+        draw_line(&c, k->x1, k->y1, k->x2, k->y2, body, k->w, LV_OPA_COVER, rnd);
         if (k->part == SKY_PART_TUBE && k->w >= 8) {
             int hw = k->w / 4;
             if (hw < 2) {
@@ -1685,11 +1823,11 @@ static void draw_cb(lv_event_t *e)
     /* 10 beam */
     for (int i = 0; i < dl->n_beam; i++) {
         const seg_px_t *g = &dl->beam[i];
-        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_CYAN], 12, OPA_PCT(16), true);
+        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_CYAN], 7, OPA_PCT(14), true);
     }
     for (int i = 0; i < dl->n_beam; i++) {
         const seg_px_t *g = &dl->beam[i];
-        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_CYAN], 3, OPA_PCT(85), true);
+        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_CYAN], 2, OPA_PCT(85), true);
     }
     /* 11 exposure ring (LVGL angles: 270 = twelve o'clock, clockwise) */
     if (dl->ring_in) {
