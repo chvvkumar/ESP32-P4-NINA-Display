@@ -719,15 +719,18 @@ static void create_page_overlays(dashboard_page_t *p, int page_index);
  *
  * Layouts 2 to 4 exist only in the round build, so the square build resolves
  * them to the Dashboard HERE, at page-build time, and never rewrites the stored
- * value: a board moved back to a round panel gets the user's choice again. */
+ * value: a board moved back to a round panel gets the user's choice again.
+ * Layouts 8 and 9 draw on both families. */
 static uint8_t layout_for_family(uint8_t stored) {
 #if CONFIG_NINA_FAMILY_ROUND
-    /* Round draws 0, 2, 4, 5 and 7. Image-forward (1) is a square board and
-     * 3 and 6 are retired ids, so all three fall back to the Dashboard here. */
-    return (stored == 2 || stored == 4 || stored == 5 || stored == 7) ? stored : 0;
+    /* Round draws 0, 2, 4, 5, 7, 8 and 9. Image-forward (1) is a square board
+     * and 3 and 6 are retired ids, so all three fall back to the Dashboard here. */
+    return (stored == 2 || stored == 4 || stored == 5 || stored == 7 ||
+            stored == 8 || stored == 9) ? stored : 0;
 #else
-    /* Square draws 0, 1, 5 and 7. */
-    return (stored == 1 || stored == 5 || stored == 7) ? stored : 0;
+    /* Square draws 0, 1, 5, 7, 8 and 9. */
+    return (stored == 1 || stored == 5 || stored == 7 ||
+            stored == 8 || stored == 9) ? stored : 0;
 #endif
 }
 
@@ -806,6 +809,8 @@ static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int pag
 #endif
             case 5: nina_layout_rail_create(p, p->page, page_index); break;
             case 7: nina_layout_rings_create(p, p->page, page_index); break;
+            case 8: nina_layout_ground_create(p, p->page, page_index); break;
+            case 9: nina_layout_skywords_create(p, p->page, page_index); break;
             default: break;   /* layout_for_family() cannot produce this */
         }
 
@@ -1558,6 +1563,8 @@ void nina_layout_alt_apply_theme(dashboard_page_t *p) {
 #endif
         case 5: nina_layout_rail_apply_theme(p); break;
         case 7: nina_layout_rings_apply_theme(p); break;
+        case 8: nina_layout_ground_apply_theme(p); break;
+        case 9: nina_layout_skywords_apply_theme(p); break;
         default: break;
     }
 #if CONFIG_NINA_FAMILY_ROUND
