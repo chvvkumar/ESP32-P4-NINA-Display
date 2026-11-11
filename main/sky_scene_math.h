@@ -899,7 +899,51 @@ static inline bool sky_fit_input_(int i, sky_v3_t pos, float yaw_deg,
     float az = 0.0f;
     *w = (i < n_dirs) ? dirs[i] : sky_v3_norm(sky_v3_sub(pts[i - n_dirs], pos));
     sky_vec_to_altaz(*w, elev, &az);
-    return fabsf(sky_wrap180(az - yaw_deg)) <= SKY_FIT_SIDE_DEG;
+    /* Keep the input when a camera at this yaw, pitched to the input's own
+     * elevation (clamped to the pitch range), has it within SKY_FIT_SIDE_DEG
+     * of its axis. At the horizon that is the plain |az - yaw| test; overhead
+     * the azimuth means nothing (a target two degrees from the zenith sits at
+     * any azimuth), and a bare azimuth test threw a zenith transit out of the
+     * fit, so the camera zoomed in on the rest and the target left the frame. */
+    float p = *elev;
+    if (p < SKY_PITCH_MIN_DEG) p = SKY_PITCH_MIN_DEG;
+    if (p > SKY_PITCH_MAX_DEG) p = SKY_PITCH_MAX_DEG;
+    const float e = *elev * SKY_DEG2RAD, pr = p * SKY_DEG2RAD;
+    const float d = sky_wrap180(az - yaw_deg) * SKY_DEG2RAD;
+    const float cos_off = cosf(e) * cosf(d) * cosf(pr) + sinf(e) * sinf(pr);
+    return cos_off >= cosf(SKY_FIT_SIDE_DEG * SKY_DEG2RAD);
+}
+
+/* Helper for sky_cam_fit(): pixels from the principal point up to the frame's
+ * top edge (the disc's top for a round frame). */
+static inline float sky_fit_top_(const sky_frame_t *fr)
+{
+    return fr->py - (fr->round ? fr->cy - fr->r : fr->y0);
+}
+
+/* Helper for sky_cam_fit(): step 3b, the pitch that puts the highest kept
+ * input on the top margin at focal @p f. For an input at elevation e and
+ * azimuth offset d that pitch is atan2(sin e, cos e cos d) - atan(top / f),
+ * top being the principal point's distance to the top margin. Returns a very
+ * negative value when nothing is kept. */
+static inline float sky_fit_pitch_need_(float yaw_deg, float f, const sky_frame_t *fr,
+                                        const sky_v3_t *dirs, int n_dirs,
+                                        const sky_v3_t *pts, int n_pts)
+{
+    const sky_v3_t pos = sky_cam_pos(yaw_deg);
+    const float top = sky_fit_top_(fr) - SKY_FIT_MARGIN_PX;
+    const float half_up = atanf(top / f) * SKY_RAD2DEG;
+    float need = -1e9f;
+    for (int i = 0; i < n_dirs + n_pts; i++) {
+        sky_v3_t w;
+        float elev, az = 0.0f;
+        if (!sky_fit_input_(i, pos, yaw_deg, dirs, n_dirs, pts, &w, &elev)) continue;
+        sky_vec_to_altaz(w, &elev, &az);
+        const float e = elev * SKY_DEG2RAD, d = sky_wrap180(az - yaw_deg) * SKY_DEG2RAD;
+        const float inplane = atan2f(sinf(e), cosf(e) * cosf(d)) * SKY_RAD2DEG;
+        if (inplane - half_up > need) need = inplane - half_up;
+    }
+    return need;
 }
 
 /* Helper for sky_cam_fit(): step 3, the clamped focal length at this pitch. */
@@ -937,12 +981,19 @@ static inline float sky_fit_focal_(float yaw_deg, float pitch_deg, const sky_fra
  * points sit inside @p fr (shrunk by SKY_FIT_MARGIN_PX), as tightly as
  * allowed. Deterministic, no allocation:
  *   1. pos = sky_cam_pos(yaw). Each input becomes a world direction from pos
- *      (dirs as given, points as norm(pt - pos)). An input whose azimuth is
- *      more than SKY_FIT_SIDE_DEG off the yaw is skipped.
+ *      (dirs as given, points as norm(pt - pos)). An input more than
+ *      SKY_FIT_SIDE_DEG off the axis of a camera at this yaw pitched to the
+ *      input's own (clamped) elevation is skipped: the azimuth test at the
+ *      horizon, and nothing overhead is ever skipped.
  *   2. pitch = clamp((min elev + max elev) / 2, SKY_PITCH_MIN_DEG,
  *      @p pitch_max_deg) over the kept inputs; SKY_PITCH_DEFAULT when none.
  *   3. f = clamp(min over kept inputs of sky_focal_limit(), f_min, f_max)
  *      (see sky_frame_half()).
+ *   3b. The sky outranks the tripod foot: when that f still leaves the
+ *      highest kept input above the top margin (a zenith transit against a
+ *      foot at -30 degrees spans more than SKY_FOV_WIDE_DEG), pitch is raised
+ *      to sky_fit_pitch_need_() (at most @p pitch_max_deg) and step 3 is
+ *      repeated; twice, since the new f moves the top margin's angle.
  *   4. When @p horizon_max_y > 0 and py + f*tan(pitch) > horizon_max_y (the
  *      flat horizon at the yaw would fall below that row), pitch =
  *      atan((horizon_max_y - py) / f), step 3 is repeated once, and pitch is
@@ -974,6 +1025,12 @@ static inline void sky_cam_fit(sky_cam_pose_t *out, float yaw_deg, const sky_fra
     if (pitch > pitch_max_deg) pitch = pitch_max_deg;
 
     float f = sky_fit_focal_(yaw, pitch, fr, dirs, n_dirs, pts, n_pts);
+    for (int pass = 0; pass < 2; pass++) {
+        const float need = sky_fit_pitch_need_(yaw, f, fr, dirs, n_dirs, pts, n_pts);
+        if (need <= pitch) break;
+        pitch = (need < pitch_max_deg) ? need : pitch_max_deg;
+        f = sky_fit_focal_(yaw, pitch, fr, dirs, n_dirs, pts, n_pts);
+    }
     if (horizon_max_y > 0.0f && fr->py + f * tanf(pitch * SKY_DEG2RAD) > horizon_max_y) {
         pitch = atanf((horizon_max_y - fr->py) / f) * SKY_RAD2DEG;
         f = sky_fit_focal_(yaw, pitch, fr, dirs, n_dirs, pts, n_pts);
