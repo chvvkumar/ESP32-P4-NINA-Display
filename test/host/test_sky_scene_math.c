@@ -640,6 +640,42 @@ static void test_camera(void)
         check_true("near overhead: inside", all_inside(&out, &fr, &d, 1, (const sky_v3_t *)0, 0, 27.5f));
     }
 
+    /* Zenith transit (Caldwell 23, dec 42.3 from lat 41.9): the up yaw is
+     * north, the samples either side of culmination sit at az 90/270 at alt
+     * 85+, and the target itself at HA +3 is at az ~ 270. A bare azimuth test
+     * dropped all of them from the fit and the camera zoomed onto the rest. */
+    {
+        const float lat = 41.9f, dec = 42.3f, ha_now = 3.0f;
+        sky_path_build(&s_path, dec, lat, ha_now, (const int8_t *)0, false);
+        sky_v3_t zd[SKY_PATH_N + 1];
+        const int zn = sky_path_up_dirs(&s_path, zd, SKY_PATH_N);
+        const sky_v3_t ztgt = sky_hadec_to_vec(ha_now, dec, lat);
+        float talt = 0.0f, taz = 0.0f;
+        sky_vec_to_altaz(ztgt, &talt, &taz);
+        check_true("zenith: target alt > 85 and az far off yaw 0", talt > 85.0f && fabsf(sky_wrap180(taz)) > 70.0f);
+        zd[zn] = ztgt;
+        sky_pose_t zpose = sky_mount_pose(lat, ztgt, SKY_PIER_EAST, ha_now);
+        sky_v3_t zpts[SKY_RIG_FIT_N];
+        const int znp = sky_rig_fit_points(&zpose, zpts);
+        const sky_frame_t zf = rect_frame(24, 24, 696, 456, 360, 240);
+        sky_cam_pose_t out;
+        sky_cam_fit(&out, sky_cam_up_yaw(&s_path, dec, lat), &zf, zd, zn + 1, zpts, znp, 75.0f, 456.0f);
+        check_true("zenith: target inside the frame", all_inside(&out, &zf, &ztgt, 1, (const sky_v3_t *)0, 0, 27.5f));
+        /* The zenith and the pier foot span more than the 110 degree cap: the
+         * sky wins, the pivot and the tube front stay in view, the foot, the
+         * camera back (hanging under the pivot with the tube at the zenith)
+         * and the weight end may hide behind the readout band. */
+        check_true("zenith: pivot and tube front inside",
+                   all_inside(&out, &zf, (const sky_v3_t *)0, 0, zpts + 1, 2, 27.5f));
+        check_true("zenith: widest view", out.focal_px < 152.0f);
+        check_true("zenith: horizon row at or above the band",
+                   zf.py + out.focal_px * tanf(out.pitch_deg * SKY_DEG2RAD) <= 456.5f);
+        /* The next two hours of path (HA now .. now + 30) are in view too. */
+        sky_v3_t near[7];
+        for (int i = 0; i < 7; i++) near[i] = sky_hadec_to_vec(ha_now + 5.0f * (float)i, dec, lat);
+        check_true("zenith: next 30 degrees of path inside", all_inside(&out, &zf, near, 7, (const sky_v3_t *)0, 0, 27.5f));
+    }
+
     /* Work yaw. */
     {
         sky_path_build(&s_path, -5.39f, 41.9f, 0.0f, (const int8_t *)0, false);

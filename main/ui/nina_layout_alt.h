@@ -11,8 +11,8 @@
  *   4 = Orbit       (round family only, nina_layout_orbit_round.c)
  *   5 = Night rail  (both families: nina_layout_rail.c / nina_layout_rail_round.c)
  *   7 = Two rings   (both families: nina_layout_rings.c / nina_layout_rings_round.c)
- *   8 = Readout on the ground (both families, ONE body: nina_layout_ground.c)
- *   9 = In the sky            (both families, ONE body: nina_layout_skywords.c)
+ *   8 = Horizon           (both families, ONE body: nina_layout_ground.c)
+ *   9 = Horizon (Minimal) (both families, ONE body: nina_layout_skywords.c)
  *
  * Ids 8 and 9 are NOT picture layouts on either family: no capture, no shared
  * round overlay, no view cycle (see the section for them below).

@@ -116,7 +116,7 @@ typedef struct dashboard_page_s {
     /* Page layout for this instance, from app_config_t::nina_layout[i]:
      * 0 = arc dashboard (every field below the `alt` block applies),
      * 1 = Image-forward, 2 = Halo, 4 = Orbit, 5 = Night rail,
-     * 7 = Two rings, 8 = Readout on the ground, 9 = In the sky
+     * 7 = Two rings, 8 = Horizon, 9 = Horizon (Minimal)
      * (nina_layout_alt.h; 2 and 4 are round family only, 5, 7, 8 and 9 draw
      * on both; 3 and 6 are retired and validate_config resets them to 0).
      * On any non-zero layout the arc-path widgets are never created and the
