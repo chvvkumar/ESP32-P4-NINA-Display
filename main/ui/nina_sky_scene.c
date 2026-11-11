@@ -671,6 +671,14 @@ void nina_sky_scene_update(nina_sky_scene_t *s, const nina_client_t *d, int inst
     in->on_target = s->pointing_valid && s->tracking && !s->slewing && s->have_target &&
                     sky_sep_deg(s->aim_target, s->target_vec) <= SKY_ON_TARGET_DEG;
     in->flip_known = d->flip_valid && d->flip_minutes < 720.0f;
+    /* A flip that would happen with the target under the horizon never
+     * happens: drop the mark and the flip words on both layouts. */
+    if (in->flip_known && s->have_target &&
+        sky_path_margin_(sky_hadec_to_vec(sky_ha_after_minutes(s->ha_now, d->flip_minutes),
+                                          s->dec_deg, s->lat),
+                         s->horizon, s->horizon_valid) <= 0.0f) {
+        in->flip_known = false;
+    }
     in->minutes_to_flip = in->flip_known ? d->flip_minutes : 0.0f;
     in->rise_known = s->have_target && !in->target_up && s->path.has_rise;
     in->hours_to_rise = in->rise_known ? sky_hours_until_ha(s->ha_now, s->path.rise_ha_deg) : 0.0f;
