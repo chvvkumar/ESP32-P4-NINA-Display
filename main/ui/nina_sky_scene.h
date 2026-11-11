@@ -2,8 +2,8 @@
 
 /**
  * @file nina_sky_scene.h
- * @brief The sky scene renderer shared by NINA page layouts 8 ("Readout on
- *        the ground", nina_layout_ground.c) and 9 ("In the sky",
+ * @brief The sky scene renderer shared by NINA page layouts 8 ("Horizon",
+ *        nina_layout_ground.c) and 9 ("Horizon (Minimal)",
  *        nina_layout_skywords.c). Compiled into BOTH panel families.
  *
  * One full-panel LVGL object with one LV_EVENT_DRAW_MAIN_END callback that

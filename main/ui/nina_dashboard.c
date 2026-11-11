@@ -279,6 +279,7 @@ static nina_page_change_cb_t page_change_cb = NULL;
 void nina_dashboard_invalidate_disconnect_gate(int instance);
 
 static void update_indicators(void);
+static void fade_anim_cb(void *obj, int32_t v);
 static bool layout_uses_round_overlay(uint8_t layout);
 static void rms_click_cb(lv_event_t *e);
 static void hfr_click_cb(lv_event_t *e);
@@ -1817,6 +1818,9 @@ void nina_dashboard_rebuild_slot(int instance) {
     if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
     bool want = slot_is_available_cfg(instance);
     bool have = nina_slot_available[instance];
+    /* Layout change on the page being shown: rebuild in place and fade the new
+     * layout in, with no detour through the Summary page. */
+    bool swap_in_place = false;
 
     /* A nina_layout change keeps the slot available but replaces the whole
      * widget tree, so it has to tear down and rebuild rather than no-op.
@@ -1826,10 +1830,7 @@ void nina_dashboard_rebuild_slot(int instance) {
         uint8_t want_layout = layout_for_family(lcfg ? lcfg->nina_layout[instance] : 0);
         if (want_layout == pages[instance].layout) return;   /* nothing to do */
         have = false;
-        if (active_page == NINA_PAGE_OFFSET + instance) {
-            /* Pre-move off the dying page; the arbiter re-resolves next tick. */
-            nina_dashboard_show_page(PAGE_IDX_SUMMARY, total_page_count);
-        }
+        swap_in_place = (active_page == NINA_PAGE_OFFSET + instance);
         if (nina_layout_uses_capture(pages[instance].layout)) {
             nina_layout_image_release_capture(instance);
         }
@@ -1853,12 +1854,26 @@ void nina_dashboard_rebuild_slot(int instance) {
          * defaults, so force the next poll to repaint the offline layout. */
         nina_dashboard_invalidate_disconnect_gate(instance);
         create_dashboard_page(&pages[instance], main_cont, instance);
-        lv_obj_add_flag(pages[instance].page, LV_OBJ_FLAG_HIDDEN);
         pages[instance].arc_timer =
             lv_timer_create(arc_interp_timer_cb, ARC_TIMER_MS, &pages[instance]);
-        /* Runs only while the page is visible; show_page_at() resumes it. */
-        if (active_page != NINA_PAGE_OFFSET + instance)
-            lv_timer_pause(pages[instance].arc_timer);
+        if (swap_in_place) {
+            /* Same frame as the old tree's delete, so nothing else is ever
+             * drawn in between: the new layout fades in from black. */
+            lv_obj_set_style_opa(pages[instance].page, LV_OPA_TRANSP, 0);
+            lv_timer_ready(pages[instance].arc_timer);
+            lv_anim_t a;
+            lv_anim_init(&a);
+            lv_anim_set_exec_cb(&a, fade_anim_cb);
+            lv_anim_set_var(&a, pages[instance].page);
+            lv_anim_set_values(&a, LV_OPA_TRANSP, LV_OPA_COVER);
+            lv_anim_set_duration(&a, 300);
+            lv_anim_start(&a);
+        } else {
+            lv_obj_add_flag(pages[instance].page, LV_OBJ_FLAG_HIDDEN);
+            /* Runs only while the page is visible; show_page_at() resumes it. */
+            if (active_page != NINA_PAGE_OFFSET + instance)
+                lv_timer_pause(pages[instance].arc_timer);
+        }
         if (pages[instance].header_box) {
             lv_obj_add_flag(pages[instance].header_box, LV_OBJ_FLAG_CLICKABLE);
             lv_obj_add_event_cb(pages[instance].header_box,

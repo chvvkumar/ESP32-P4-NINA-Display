@@ -197,6 +197,7 @@ struct nina_sky_scene_s {
     bool    prev_want_work;
     bool    prev_horizon_valid;
     bool    prev_have_site;
+    bool    prev_ha_east;        /* ha_now >= 0 at the last update: the pose mirrors on a change */
     float   goal_lat;
     sky_v3_t fit_dirs[SKY_PATH_N + 2];
     sky_v3_t fit_pts[SKY_RIG_FIT_N];
@@ -670,6 +671,14 @@ void nina_sky_scene_update(nina_sky_scene_t *s, const nina_client_t *d, int inst
     in->on_target = s->pointing_valid && s->tracking && !s->slewing && s->have_target &&
                     sky_sep_deg(s->aim_target, s->target_vec) <= SKY_ON_TARGET_DEG;
     in->flip_known = d->flip_valid && d->flip_minutes < 720.0f;
+    /* A flip that would happen with the target under the horizon never
+     * happens: drop the mark and the flip words on both layouts. */
+    if (in->flip_known && s->have_target &&
+        sky_path_margin_(sky_hadec_to_vec(sky_ha_after_minutes(s->ha_now, d->flip_minutes),
+                                          s->dec_deg, s->lat),
+                         s->horizon, s->horizon_valid) <= 0.0f) {
+        in->flip_known = false;
+    }
     in->minutes_to_flip = in->flip_known ? d->flip_minutes : 0.0f;
     in->rise_known = s->have_target && !in->target_up && s->path.has_rise;
     in->hours_to_rise = in->rise_known ? sky_hours_until_ha(s->ha_now, s->path.rise_ha_deg) : 0.0f;
@@ -685,6 +694,21 @@ void nina_sky_scene_update(nina_sky_scene_t *s, const nina_client_t *d, int inst
         (s->have_site && fabsf(s->lat - s->goal_lat) > 0.1f)) {
         s->goal_pending = true;
     }
+    /* A fit goes stale over a session: the target climbs out of a frame fitted
+     * hours ago, and the mount pose mirrors when the hour angle crosses zero.
+     * Re-fit at rest (never mid-fly, or the fly would restart every tick). */
+    const bool ha_east = s->ha_now >= 0.0f;
+    if (want_work && s->have_site && !s->flying && s->cam_mode == CAM_MODE_WORK) {
+        sky_cam_t gc;
+        float gx = 0.0f, gy = 0.0f;
+        sky_cam_setup(&gc, &s->cam_goal, &s->frame);
+        if (ha_east != s->prev_ha_east ||
+            !proj_dir(&gc, s->target_vec, &gx, &gy) ||
+            !sky_frame_contains(&s->frame, gx, gy, SKY_FIT_MARGIN_PX)) {
+            s->goal_pending = true;
+        }
+    }
+    s->prev_ha_east = ha_east;
     s->prev_want_work = want_work;
     s->prev_horizon_valid = s->horizon_valid;
     s->prev_have_site = s->have_site;
