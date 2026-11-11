@@ -1,6 +1,6 @@
 /**
  * @file nina_layout_skywords.c
- * @brief Layout 9 ("In the sky"), BOTH panel families, one body.
+ * @brief Layout 9 ("Horizon (Minimal)"), BOTH panel families, one body.
  *
  * The shared sky scene (nina_sky_scene.h) fills the whole safe area, and this
  * file writes the words: the target name in the bottom-left corner (wrapping

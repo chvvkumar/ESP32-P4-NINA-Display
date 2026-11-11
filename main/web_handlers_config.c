@@ -1474,8 +1474,8 @@ static app_config_t *parse_config_from_json(cJSON *root, unsigned *skipped_nodes
     JSON_TO_BOOL(root, "instance_enabled_3", cfg->instance_enabled[2]);
 
     /* Per-instance NINA page layout (0 Dashboard, 1 Image-forward, 2 Halo,
-     * 4 Orbit, 5 Night rail, 7 Two rings, 8 Readout on the ground, 9 In the
-     * sky; 3 and 6 are retired; 8 and 9 draw on both shapes; 1 draws
+     * 4 Orbit, 5 Night rail, 7 Two rings, 8 Horizon, 9 Horizon (Minimal);
+     * 3 and 6 are retired; 8 and 9 draw on both shapes; 1 draws
      * only on a square panel, 2 and 4 only on a round one). Array field, so
      * keyed 1-indexed per instance like instance_enabled_N above rather than as
      * a SETTINGS_TABLE row. Out of range resets to the Dashboard, matching

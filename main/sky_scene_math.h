@@ -3,7 +3,7 @@
 /**
  * @file sky_scene_math.h
  * @brief Pure geometry and camera logic for the sky scene (NINA page layouts
- *        8 "Readout on the ground" and 9 "In the sky").
+ *        8 "Horizon" and 9 "Horizon (Minimal)").
  *
  * Header-only, C99, `static inline`, float only. No ESP-IDF, FreeRTOS or LVGL
  * include: compiles unchanged on the device and on a host compiler, and is

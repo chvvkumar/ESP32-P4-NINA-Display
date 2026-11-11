@@ -1,6 +1,6 @@
 /**
  * @file nina_layout_ground.c
- * @brief Layout 8 ("Readout on the ground"), BOTH panel families, one body.
+ * @brief Layout 8 ("Horizon"), BOTH panel families, one body.
  *
  * The shared sky scene (nina_sky_scene.h) fills the panel; its frame stops at
  * the ground band, and this file writes one calm readout on that band, in the
