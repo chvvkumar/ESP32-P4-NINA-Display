@@ -48,6 +48,9 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 
+#include "core/lv_obj_event_private.h"   /* lv_cover_check_info_t */
+#include "misc/lv_area_private.h"        /* lv_area_is_in */
+
 #include "app_config.h"
 #include "display_defs.h"
 #include "moon_ephemeris.h"
@@ -71,6 +74,9 @@ static const char *TAG = "sky_scene";
 #define SCN_HZ_MAX      182    /* outline edge segments kept (on screen only) */
 #define SCN_COMPASS_MAX 24     /* compass labels along the level horizon */
 #define SCN_STRIP_MAX   800    /* rows of a dithered gradient strip (largest panel) */
+#define SCN_STRIP_W     16     /* px, even: strip width. At 2 px the sky was 360 tiles per row,
+                                * about 260k tiny copies a frame; 16 px is 45. Costs
+                                * SCN_STRIP_W * 1600 bytes of PSRAM per strip. */
 #define SCN_COMPASS_MIN_PX 96.0f /* least centre-to-centre spacing of two labels */
 #define SCN_COL_W       6      /* land column width, px */
 #define SCN_COL_MAX     136    /* column runs: ceil(800 / SCN_COL_W) = 134 at most */
@@ -88,7 +94,8 @@ static const char *TAG = "sky_scene";
 #define SCN_GRASS_N     140    /* grass blades at fixed world spots round the pier */
 #define SCN_GRASS_R     7.0f   /* metres: blades scattered inside this radius */
 #define SCN_GRASS_R0    0.35f  /* metres: none under the pier base */
-#define SCN_FLY_LITE    0      /* 1: project() drops the costly sky decor while the camera flies */
+#define SCN_FLY_LITE    1      /* 1: while the camera flies, drop the costly sky decor, the beam's
+                                * soft glow and the telescope's outline and fine round ends */
 #define SCN_BODIES_S    60     /* seconds between two Sun and Moon position refreshes */
 #define SCN_RMS_HIST    8      /* guiding RMS readings kept for the ring shape */
 #define SCN_SKY_LEVELS  24     /* sky strips, one per step of distance from the Sun's column */
@@ -112,7 +119,7 @@ static const char *TAG = "sky_scene";
                                 * and the Moon with sidereal time: 0.125 degrees of sky, at most
                                 * 2.7 px (720 panel) or 3.2 px (800) at the tightest zoom */
 #define SCN_SKY_JUMP_DEG 0.05f /* a sidereal clock this far from the expected one turns at once */
-#define SCN_HAZE_MERGE  4      /* px: haze runs merge more freely than land, the haze is soft */
+#define SCN_HAZE_MERGE  8      /* px: haze runs merge more freely than land, the haze is soft */
 #define SCN_FLY_SPAN_Q  8      /* px: sky gradient span step while the camera flies */
 #define SCN_SWEEP_MAX_DEG 350.0f /* the sweep never closes on itself */
 #define SCN_STALE_TICKS 150    /* tick_cb() runs with no update() before motion flags are dropped */
@@ -300,7 +307,8 @@ typedef struct {
     col_px_t  cols_mid[SCN_COL_MAX];
     col_px_t  cols_near[SCN_COL_MAX];
     col_px_t  cols_cap[SCN_COL_MAX];   /* land above the skyline behind the camera: row 0 down to y */
-    uint16_t  n_cols_cap, pad_cap;
+    uint16_t  n_cols_cap;
+    uint8_t   lite, pad_cap;   /* lite: this frame is a glide frame drawn thin (SCN_FLY_LITE) */
     /* path, target, pictures (features 11 to 16) */
     uint16_t  n_left;
     uint8_t   left_tick_in, guide_in;
@@ -450,6 +458,8 @@ struct nina_sky_scene_s {
     bool    hz_ok[SCN_HZ_PTS];
     float   col_top[SCN_COL_MAX];
     float   col_az[SCN_COL_MAX];   /* azimuth of each column top */
+    int16_t span_hold;             /* sky gradient span held for the glide, 0 = none */
+    int16_t span_last;             /* span of the last frame drawn with the camera still */
     float   col_cap[SCN_COL_MAX];  /* size - y of the skyline behind the camera, 1e9 = none */
     float   col_lay[SCN_COL_MAX];  /* tops of the hill layer being merged */
 
@@ -457,16 +467,16 @@ struct nina_sky_scene_s {
     float    exp_frac;
     uint32_t exp_color;
 
-    /* Sky and floor gradients as 2 px wide RGB565 strips with a 2x2 ordered
+    /* Sky and floor gradients as SCN_STRIP_W px wide RGB565 strips with a 2x2 ordered
      * dither, tiled across the panel by lv_draw_image: the 16-bit panel shows
      * a plain dark gradient as 40 px bands and LVGL 9 has no dither of its own.
      * Re-baked only when their key changes. The sky has SCN_SKY_LEVELS strips,
      * one per step of horizontal distance from the Sun's column (the warm glow
      * at twilight); at full night only level 0 is baked and drawn. */
-    uint16_t sky_strips[SCN_SKY_LEVELS][2 * SCN_STRIP_MAX];
+    uint16_t sky_strips[SCN_SKY_LEVELS][SCN_STRIP_W * SCN_STRIP_MAX];
     lv_image_dsc_t sky_dsc[SCN_SKY_LEVELS];
     uint32_t sky_key[8];
-    uint16_t strip_floor[2 * SCN_STRIP_MAX];
+    uint16_t strip_floor[SCN_STRIP_W * SCN_STRIP_MAX];
     lv_image_dsc_t strip_floor_dsc;
     uint32_t strip_floor_key[6];
 
@@ -493,6 +503,7 @@ struct nina_sky_scene_s {
 
 static void     draw_cb(lv_event_t *e);
 static void     delete_cb(lv_event_t *e);
+static void     cover_cb(lv_event_t *e);
 static void     tick_cb(lv_timer_t *t);
 static void     frame_init(nina_sky_scene_t *s);
 static void     palette_build(nina_sky_scene_t *s);
@@ -562,6 +573,7 @@ static void draw_box(const dctx_t *c, int x1, int y1, int x2, int y2, uint32_t c
 static void draw_tri3(const dctx_t *c, const int16_t *p0, const int16_t *p1, const int16_t *p2,
                       uint32_t color);
 static uint16_t dither565(uint32_t rgb, int x, int y);
+static void strip_row_put(uint16_t *buf, int y, uint32_t rgb);
 static void strip_dsc_set(lv_image_dsc_t *dsc, const uint16_t *buf, int rows);
 static void strip_bake(uint16_t *buf, lv_image_dsc_t *dsc, uint32_t *key, int rows, int span,
                        uint32_t c0, uint32_t c1, uint32_t tint, int tint_rows);
@@ -829,6 +841,7 @@ nina_sky_scene_t *nina_sky_scene_create(lv_obj_t *parent, const nina_sky_scene_o
     lv_obj_remove_flag(s->obj, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(s->obj, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_event_cb(s->obj, draw_cb, LV_EVENT_DRAW_MAIN_END, s);
+    lv_obj_add_event_cb(s->obj, cover_cb, LV_EVENT_COVER_CHECK, s);
     lv_obj_add_event_cb(s->obj, delete_cb, LV_EVENT_DELETE, s);
 
     /* Render probe: removed in delete_cb() before the block is freed. */
@@ -847,6 +860,24 @@ nina_sky_scene_t *nina_sky_scene_create(lv_obj_t *parent, const nina_sky_scene_o
     s->dl_hash = fnv1a(&s->dl, sizeof(s->dl));
     anchors_build(s, s->anch);
     return s;
+}
+
+/* The sky strips paint every pixel of the object on every draw, so nothing
+ * behind it can show: saying so lets LVGL skip the page and screen fills
+ * under the scene. The object has no style of its own, so the base class
+ * answers "does not cover" first; a masked answer is left alone. */
+static void cover_cb(lv_event_t *e)
+{
+    lv_cover_check_info_t *info = (lv_cover_check_info_t *)lv_event_get_param(e);
+    const nina_sky_scene_t *s = (const nina_sky_scene_t *)lv_event_get_user_data(e);
+    if (!info || !s || !s->obj || info->res == LV_COVER_RES_MASKED) {
+        return;
+    }
+    lv_area_t oa;
+    lv_obj_get_coords(s->obj, &oa);
+    if (lv_area_is_in(info->area, &oa, 0)) {
+        info->res = LV_COVER_RES_COVER;
+    }
 }
 
 static void delete_cb(lv_event_t *e)
@@ -1540,6 +1571,7 @@ static void project(nina_sky_scene_t *s)
     sky_cam_setup(&cam, &s->cam_now, fr);
     float x = 0.0f, y = 0.0f;
     const int64_t now_us = esp_timer_get_time();
+    dl->lite = (SCN_FLY_LITE && s->flying) ? 1 : 0;
 
     /* Sky: twilight and Moon light in coarse steps (each step is one strip
      * re-bake), and the column the Sun's glow is centred on: the Sun's
@@ -1782,8 +1814,18 @@ static void project(nina_sky_scene_t *s)
          * strip, so it moves in steps while flying; the frame after the glide
          * carries the exact span (one re-bake, a change of under a level). */
         dl->sky_span = (int16_t)((dl->glow_y > 1) ? dl->glow_y : 1);
+        /* A new span re-bakes every strip (24 at twilight, 10 to 25 ms), and
+         * the glow row moves on most glide frames: hold the span the glide
+         * started with and let the first still frame carry the exact one. */
         if (s->flying) {
-            dl->sky_span = (int16_t)(((dl->sky_span + SCN_FLY_SPAN_Q - 1) / SCN_FLY_SPAN_Q) * SCN_FLY_SPAN_Q);
+            if (s->span_hold == 0) {
+                s->span_hold = (s->span_last > 0) ? s->span_last
+                    : (int16_t)(((dl->sky_span + SCN_FLY_SPAN_Q - 1) / SCN_FLY_SPAN_Q) * SCN_FLY_SPAN_Q);
+            }
+            dl->sky_span = s->span_hold;
+        } else {
+            s->span_hold = 0;
+            s->span_last = dl->sky_span;
         }
         project_haze(s, ncol);
 
@@ -2170,8 +2212,8 @@ static void project_rig(nina_sky_scene_t *s, const sky_cam_t *cam, const sky_pos
     dl_t *dl = &s->dl;
     float box[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
     const int np = sky_rig_parts(pose, SKY_RIG_SCALE, s->parts);
-    int n = sky_rig_tessellate(s->parts, np, pose, SKY_RIG_SCALE, cam, parked, s->prims,
-                               SKY_RIG_PRIM_MAX, box);
+    int n = sky_rig_tessellate_lod(s->parts, np, pose, SKY_RIG_SCALE, cam, parked,
+                                   SCN_FLY_LITE && s->flying, s->prims, SKY_RIG_PRIM_MAX, box);
     if (n > SKY_RIG_PRIM_MAX) {
         n = SKY_RIG_PRIM_MAX;
     }
@@ -3011,7 +3053,7 @@ static uint16_t dither565(uint32_t rgb, int x, int y)
     return (uint16_t)((r << 11) | (g << 5) | b);
 }
 
-/* A 2 x @p rows strip whose row i is c0 blended toward c1 by min(i, span) /
+/* A SCN_STRIP_W x @p rows strip whose row i is c0 blended toward c1 by min(i, span) /
  * span, then tinted toward @p tint by 8 percent on row 0 falling to nothing
  * at @p tint_rows (the haze glow on the floor; the colours are already
  * mapped, and both mapping steps are linear, so mixing them here matches
@@ -3051,13 +3093,24 @@ static void strip_bake(uint16_t *buf, lv_image_dsc_t *dsc, uint32_t *key, int ro
         if (y < tint_rows) {
             rgb = sky_rgb_mix(rgb, tint, 0.08f * (float)(tint_rows - y) / (float)tint_rows);
         }
-        buf[2 * y]     = dither565(rgb, 0, y);
-        buf[2 * y + 1] = dither565(rgb, 1, y);
+        strip_row_put(buf, y, rgb);
     }
     strip_dsc_set(dsc, buf, rows);
 }
 
-/* Descriptor of a 2 x @p rows RGB565 strip.
+/* Row @p y of a strip: the two dither phases of @p rgb, repeated across the
+ * strip's width (even, so every tile starts on phase 0). */
+static void strip_row_put(uint16_t *buf, int y, uint32_t rgb)
+{
+    const uint16_t v0 = dither565(rgb, 0, y), v1 = dither565(rgb, 1, y);
+    uint16_t *row = &buf[SCN_STRIP_W * y];
+    for (int x = 0; x < SCN_STRIP_W; x += 2) {
+        row[x] = v0;
+        row[x + 1] = v1;
+    }
+}
+
+/* Descriptor of a SCN_STRIP_W x @p rows RGB565 strip.
  * No image cache to drop: this build runs with LV_CACHE_DEF_SIZE 0, so a
  * raw RGB565 descriptor is read straight from here on every draw. */
 static void strip_dsc_set(lv_image_dsc_t *dsc, const uint16_t *buf, int rows)
@@ -3065,10 +3118,10 @@ static void strip_dsc_set(lv_image_dsc_t *dsc, const uint16_t *buf, int rows)
     memset(dsc, 0, sizeof(*dsc));
     dsc->header.magic = LV_IMAGE_HEADER_MAGIC;
     dsc->header.cf = LV_COLOR_FORMAT_RGB565;
-    dsc->header.w = 2;
+    dsc->header.w = SCN_STRIP_W;
     dsc->header.h = (uint32_t)rows;
-    dsc->header.stride = 4;
-    dsc->data_size = (uint32_t)rows * 4u;
+    dsc->header.stride = SCN_STRIP_W * 2;
+    dsc->data_size = (uint32_t)rows * (SCN_STRIP_W * 2u);
     dsc->data = (const uint8_t *)buf;
 }
 
@@ -3142,8 +3195,7 @@ static void sky_strips_bake(nina_sky_scene_t *s, int rows, const dl_t *dl)
                 }
                 rgb = app_config_apply_brightness(rgb, s->gb);
             }
-            buf[2 * y]     = dither565(rgb, 0, y);
-            buf[2 * y + 1] = dither565(rgb, 1, y);
+            strip_row_put(buf, y, rgb);
         }
         strip_dsc_set(&s->sky_dsc[lv], buf, rows);
     }
@@ -3199,7 +3251,7 @@ static void draw_strip(lv_layer_t *layer, const lv_image_dsc_t *dsc, const lv_ar
 }
 
 /* The sky over the whole object. Full night: strip 0 tiled once. Twilight:
- * the columns are walked in pairs (a strip is 2 px wide, so every run starts
+ * the columns are walked in pairs (a strip's width is even, so every run starts
  * on the dither's own phase), each pair takes the strip of its distance from
  * the Sun's column, and each run of equal level is one tiled image. The runs
  * abut and the last one ends on the object's right edge, so the drawn width
@@ -3274,8 +3326,9 @@ static void draw_dashes(const dctx_t *c, const seg_px_t *segs, int n, uint32_t c
             if (on) {
                 const int dy1 = (int)lroundf(y1 + uy * t), dy2 = (int)lroundf(y1 + uy * (t + step));
                 if (dy1 - width <= ymax || dy2 - width <= ymax) {
+                    /* A round end is two more fills per dash and shows only on a wide one. */
                     draw_line(c, (int)lroundf(x1 + ux * t), dy1, (int)lroundf(x1 + ux * (t + step)), dy2,
-                              color, width, opa, true);
+                              color, width, opa, width > 2);
                 }
             }
             t += step;
@@ -3730,7 +3783,7 @@ static void draw_cb(lv_event_t *e)
     draw_land(s, &c);
     for (int i = 0; i < dl->n_grass; i++) {
         const grass_px_t *g = &dl->grass[i];
-        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_GRASS], g->w, LV_OPA_COVER, true);
+        draw_line(&c, g->x1, g->y1, g->x2, g->y2, P[PAL_GRASS], g->w, LV_OPA_COVER, g->w > 2);
     }
     if (band) {
         draw_fill(&c, 0, s->opts.ground_band_top, bottom - 1, bottom - 1, P[PAL_FLOOR_NEAR]);
@@ -3749,13 +3802,15 @@ static void draw_cb(lv_event_t *e)
         const trail_px_t *t = &dl->trail[i];
         draw_line(&c, t->x1, t->y1, t->x2, t->y2, dl->accent, t->w, t->a, false);
     }
-    for (int i = 0; i < dl->n_beam; i++) {
+    /* The soft glow is a 7 px blended diagonal over the beam's whole box:
+     * left out on a thin glide frame. */
+    for (int i = 0; i < dl->n_beam && !dl->lite; i++) {
         const seg_px_t *g = &dl->beam[i];
         draw_line(&c, g->x1, g->y1, g->x2, g->y2, dl->accent, 7, OPA_PCT(12), true);
     }
     for (int i = 0; i < dl->n_beam; i++) {
         const seg_px_t *g = &dl->beam[i];
-        draw_line(&c, g->x1, g->y1, g->x2, g->y2, dl->accent, 2, OPA_PCT(72), true);
+        draw_line(&c, g->x1, g->y1, g->x2, g->y2, dl->accent, 2, OPA_PCT(72), false);
     }
     /* 10b finish pulse: a soft point running down the beam, then a ring
      * opening at the tube mouth */

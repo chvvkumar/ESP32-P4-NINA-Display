@@ -75,6 +75,7 @@ typedef struct {
     int             lod;    /* 0 = full detail, 1 and 2 = fewer points per round end */
     bool            full;   /* a primitive was dropped for want of room */
     float           box[4];
+    bool            no_edge; /* skip the outline underlay (a moving camera) */
 } sky_rig_sink_t_;
 
 /* How many points a round end of screen radius @p rpx is cut into. */
@@ -243,7 +244,7 @@ static inline int sky_rig_tone_of(sky_v3_t normal, sky_v3_t light)
 static inline int sky_rig_fan(const float *xs, const float *ys, int n, float cx, float cy, uint8_t tone,
                               sky_rig_prim_t *out, int max)
 {
-    sky_rig_sink_t_ s = { out, max, 0, 0, false, { 0.0f, 0.0f, 0.0f, 0.0f } };
+    sky_rig_sink_t_ s = { out, max, 0, 0, false, { 0.0f, 0.0f, 0.0f, 0.0f }, false };
     sky_rig_fan_(&s, xs, ys, n, cx, cy, tone);
     return s.n;
 }
@@ -541,7 +542,7 @@ static inline void sky_rig_pass_(sky_rig_sink_t_ *s, const sky_rig_part_t *parts
         const int over = (parts[i].over == SKY_RIG_NO_WRAP) ? -1 : sky_rig_find_(parts, n, parts[i].over);
         depth[i] = 0.5f * (az + bz);
         root[i] = (uint8_t)((over >= 0) ? over : i);
-        if (!va || !vb) continue;
+        if (!va || !vb || s->no_edge) continue;
         const float w = (parts[i].r0 / az + parts[i].r1 / bz) * cam->focal_px;
         if (w < 2.0f) continue;
         sky_rig_line_(s, ax, ay, bx, by, w + 3.0f, SKY_TONE_EDGE, 0);
@@ -586,19 +587,24 @@ static inline void sky_rig_pass_(sky_rig_sink_t_ *s, const sky_rig_part_t *parts
  * @param box      x0, y0, x1, y1 over every emitted point, grown by half the
  *                 line width (the radius for a dot); all 0 when nothing was
  *                 emitted
+ * @param coarse   a cheaper telescope for frames where the camera is moving:
+ *                 starts at the fewest points per round end and leaves out
+ *                 the outline underlay (each outline is a wide skewed line,
+ *                 about half of the model's fill work)
  * @return how many primitives were written, 0..max. Every value is finite and
  *         every coordinate within +- SKY_RIG_XY_LIMIT.
  */
-static inline int sky_rig_tessellate(const sky_rig_part_t *parts, int n, const sky_pose_t *pose, float scale,
-                                     const sky_cam_t *cam, bool parked, sky_rig_prim_t *out, int max, float box[4])
+static inline int sky_rig_tessellate_lod(const sky_rig_part_t *parts, int n, const sky_pose_t *pose, float scale,
+                                         const sky_cam_t *cam, bool parked, bool coarse, sky_rig_prim_t *out,
+                                         int max, float box[4])
 {
-    sky_rig_sink_t_ s = { out, max, 0, 0, false, { 0.0f, 0.0f, 0.0f, 0.0f } };
+    sky_rig_sink_t_ s = { out, max, 0, 0, false, { 0.0f, 0.0f, 0.0f, 0.0f }, coarse };
     if (n > SKY_RIG_PART_N) n = SKY_RIG_PART_N;
     if (parts && pose && cam && out && max > 0 && n > 0) {
         /* Full detail first; when that does not fit, again with fewer points
          * per round end, so the nearest parts (drawn last) are never the ones
          * dropped. */
-        for (int lod = 0; lod < 3; lod++) {
+        for (int lod = coarse ? 2 : 0; lod < 3; lod++) {
             s.n = 0;
             s.lod = lod;
             s.full = false;
@@ -610,4 +616,11 @@ static inline int sky_rig_tessellate(const sky_rig_part_t *parts, int n, const s
         for (int i = 0; i < 4; i++) box[i] = (s.n > 0) ? s.box[i] : 0.0f;
     }
     return s.n;
+}
+
+/** sky_rig_tessellate_lod() at full detail. */
+static inline int sky_rig_tessellate(const sky_rig_part_t *parts, int n, const sky_pose_t *pose, float scale,
+                                     const sky_cam_t *cam, bool parked, sky_rig_prim_t *out, int max, float box[4])
+{
+    return sky_rig_tessellate_lod(parts, n, pose, scale, cam, parked, false, out, max, box);
 }
