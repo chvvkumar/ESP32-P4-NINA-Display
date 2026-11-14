@@ -37,7 +37,44 @@ static void check_wax(const char*label,time_t t,bool expect){
     if(s.waxing!=expect) fails++;
 }
 
+#define D2R (M_PI/180.0)
+static double sep_deg(const moon_state_t *s){
+    double c = sin(s->dec_deg*D2R)*sin(s->sun_dec_deg*D2R)
+             + cos(s->dec_deg*D2R)*cos(s->sun_dec_deg*D2R)*cos((s->ra_deg-s->sun_ra_deg)*D2R);
+    if (c > 1.0) c = 1.0;
+    if (c < -1.0) c = -1.0;
+    return acos(c)/D2R;
+}
+static void expect(const char*label,int ok){
+    printf("%-26s %s\n",label,ok?"OK":"FAIL");
+    if(!ok) fails++;
+}
+static void test_sky_coords(void){
+    moon_state_t s;
+    /* Unset location must still fill the coordinates. */
+    moon_compute(1710903960, 0.0, 0.0, &s);
+    expect("sun equinox", fabs(s.sun_dec_deg) < 0.3 &&
+           (s.sun_ra_deg < 0.5 || s.sun_ra_deg > 359.5));
+    moon_compute(1718916660, 40.0, -74.0, &s);
+    expect("sun solstice", fabs(s.sun_dec_deg-23.44) < 0.2 && fabs(s.sun_ra_deg-90.0) < 0.7);
+    moon_compute(1712600280, 40.0, -74.0, &s);
+    printf("  eclipse separation %.2f deg\n", sep_deg(&s));
+    expect("eclipse 2024", sep_deg(&s) < 1.2);
+    moon_compute(1706205240, 40.0, -74.0, &s);
+    printf("  full moon separation %.2f deg\n", sep_deg(&s));
+    expect("full moon 2024", sep_deg(&s) > 170.0 && s.illum > 0.98f);
+    int ok = 1;
+    for (int i = 0; i < 10; i++){
+        moon_compute(1706205240 + (time_t)i*86400, 40.0, -74.0, &s);
+        double e = (1.0 - cos(sep_deg(&s)*D2R))/2.0;
+        if (fabs(s.illum - e) > 0.03) ok = 0;
+        if (s.ra_deg < 0.0f || s.ra_deg >= 360.0f || s.sun_ra_deg < 0.0f || s.sun_ra_deg >= 360.0f) ok = 0;
+    }
+    expect("illum vs separation", ok);
+}
+
 int main(void){
+    test_sky_coords();
     /* Reference instants (UTC) from published almanac (timeanddate.com). */
     /* 2024-01-11 11:57 UTC: New Moon -> illum ~0 */
     check_illum("2024 New Moon",      mkutc(2024,1,11,11,57), 0.00, 0.04);

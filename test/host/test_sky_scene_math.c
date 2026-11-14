@@ -207,6 +207,9 @@ static void test_horizon(void)
     check_near("horizon_alt(357.5) wraps 355->0", sky_horizon_alt(s_h1, true, 357.5f), 0.5f, 1e-4f);
     check_near("horizon_alt(-2.5) wraps", sky_horizon_alt(s_h1, true, -2.5f), 0.5f, 1e-4f);
     check_near("horizon_alt(360) = out[0]", sky_horizon_alt(s_h1, true, 360.0f), 0.0f, 1e-4f);
+    check_true("horizon_alt(NaN) is finite", isfinite(sky_horizon_alt(s_h1, true, NAN)));
+    check_true("horizon_alt(inf) is finite", isfinite(sky_horizon_alt(s_h1, true, INFINITY)));
+    check_true("horizon_alt_smooth(NaN) is finite", isfinite(sky_horizon_alt_smooth(s_h1, true, NAN)));
 
     /* Smooth outline over a real 18-point NINA profile (walls to 49, a gap to 3). */
     const float az_r[18] = { 0, 3.76f, 19.35f, 21.71f, 33.83f, 38.65f, 42.58f, 72.01f, 156.07f,
@@ -360,12 +363,12 @@ static void test_path_sliver(void)
     sky_cam_pose_t cam;
     dirs[n] = tgt;
     sky_cam_fit(&cam, sky_cam_up_yaw(&s_path, dec, lat), &fr, dirs, n + 1, pts, np, 75.0f, 0.0f);
-    check_true("sliver: up fit is wide (focal < 320)", cam.focal_px < 320.0f);
-    check_true("sliver: up fit pitch 10..18", cam.pitch_deg > 10.0f && cam.pitch_deg < 18.0f);
+    check_true("sliver: up fit is wide (focal < 450)", cam.focal_px < 450.0f);
+    check_true("sliver: up fit pitch 20..26", cam.pitch_deg > 20.0f && cam.pitch_deg < 26.0f);
     int m = sky_path_work_dirs(&s_path, dirs, SKY_PATH_N);
     dirs[m] = tgt;
     sky_cam_fit(&cam, sky_cam_work_yaw(&s_path, dec, lat), &fr, dirs, m + 1, pts, np, 75.0f, 0.0f);
-    check_true("sliver: run fit is wide too (focal < 320)", cam.focal_px < 320.0f);
+    check_true("sliver: run fit is wide too (focal < 450)", cam.focal_px < 450.0f);
 
     /* Run selection on synthetic patterns (n = 12). */
     {
@@ -496,26 +499,12 @@ static void test_mount(void)
 static void test_rig(void)
 {
     sky_pose_t r = sky_mount_rest_pose(41.9f);
-    sky_capsule_t c[SKY_RIG_CAPSULES];
-    check_true("rig_capsules returns 8", sky_rig_capsules(&r, c) == SKY_RIG_CAPSULES);
-    check_v3("pier foot at the origin", c[0].a, 0.0f, 0.0f, 0.0f, 1e-6f);
-    check_v3("pier top under the polar housing", c[0].b, 0.0f, 0.0f, 1.00f, 1e-6f);
-    const uint8_t parts[SKY_RIG_CAPSULES] = {
-        SKY_PART_PIER, SKY_PART_MOUNT, SKY_PART_MOUNT,
-        SKY_PART_SHAFT, SKY_PART_WEIGHT, SKY_PART_TUBE, SKY_PART_FRONT, SKY_PART_CAMERA,
-    };
-    int ok = 1;
-    for (int i = 0; i < SKY_RIG_CAPSULES; i++) ok &= (c[i].part == parts[i]);
-    check_true("part tags in documented order", ok);
-    check_v3("tube capsule front = tube_front", c[5].b, 0.0f, 0.3894f, 2.0337f, 1e-3f);
-
-    check_v3("tube_front(rest)", sky_rig_tube_front(&r), 0.0f, 0.3894f, 2.0337f, 1e-3f);
     sky_v3_t fp[SKY_RIG_FIT_N];
     check_true("fit_points returns 5", sky_rig_fit_points(&r, fp) == SKY_RIG_FIT_N);
     check_v3("fit point 4 (weight end)", fp[4], 0.0f, 0.5343f, 0.5246f, 1e-3f);
     check_v3("fit point 1 (axis crossing)", fp[1], 0.0f, 0.0f, 1.12f, 1e-6f);
     check_v3("fit point 0 = pier foot", fp[0], 0.0f, 0.0f, 0.0f, 1e-6f);
-    check_v3("fit point 3 = camera capsule back", fp[3], c[7].b.x, c[7].b.y, c[7].b.z, 1e-5f);
+    check_v3("fit point 2 (tube front)", fp[2], 0.0f, 0.3894f, 2.0337f, 1e-3f);
 }
 
 static void test_camera(void)
@@ -523,7 +512,7 @@ static void test_camera(void)
     const sky_frame_t fr = rect_frame(24, 24, 696, 696, 360, 360);
     float sx, sy;
 
-    check_v3("cam_pos(0)", sky_cam_pos(0.0f), 0.0f, -2.6f, 1.6f, 1e-5f);
+    check_v3("cam_pos(0)", sky_cam_pos(0.0f), 0.0f, -5.0f, 1.2f, 1e-5f);
 
     sky_cam_t c = make_cam(0.0f, 0.0f, 300.0f, &fr);
     check_true("y0p0: north projects", sky_cam_screen(&c, sky_cam_dir(&c, sky_v3(0, 1, 0)), &sx, &sy));
@@ -538,7 +527,7 @@ static void test_camera(void)
     check_true("y0p0: east does not project", !sky_cam_screen(&c, sky_cam_dir(&c, sky_v3(1, 0, 0)), &sx, &sy));
     sky_cam_screen(&c, sky_cam_point(&c, sky_v3(0, 0, 1.12f)), &sx, &sy);
     check_near("y0p0: point O sx", sx, 360.0f, 0.05f);
-    check_near("y0p0: point O sy", sy, 415.38f, 0.05f);
+    check_near("y0p0: point O sy", sy, 364.8f, 0.05f);
 
     c = make_cam(0.0f, 30.0f, 300.0f, &fr);
     sky_cam_screen(&c, sky_cam_dir(&c, sky_altaz_to_vec(30.0f, 0.0f)), &sx, &sy);
@@ -590,8 +579,8 @@ static void test_camera(void)
         sky_rig_fit_points(&r, pts);
         sky_cam_fit(&out, sky_cam_home_yaw(41.9f), &fr, &pole, 1, pts, SKY_RIG_FIT_N, 75.0f, 0.0f);
         check_near("home fit yaw", out.yaw_deg, 0.0f, 1e-4f);
-        /* Midway between the pole (41.9) and the pier foot (atan(-1.6/2.6) = -31.61): 5.145. */
-        check_near("home fit pitch (mid of min and max elevation)", out.pitch_deg, 5.145f, 0.05f);
+        /* Midway between the pole (41.9) and the pier foot (atan(-1.2/5.0) = -13.50): 14.202. */
+        check_near("home fit pitch (mid of min and max elevation)", out.pitch_deg, 14.202f, 0.05f);
         check_true("home fit focal within limits", out.focal_px >= f_min - 0.01f && out.focal_px <= f_max + 0.01f);
         check_true("home fit: every input inside the frame less 27.5 px",
                    all_inside(&out, &fr, &pole, 1, pts, SKY_RIG_FIT_N, 27.5f));
@@ -770,15 +759,10 @@ static void test_words(void)
 
 static void test_compass(void)
 {
-    char buf[16];
     check_true("compass step wide (5.2 px/deg) = 30", sky_compass_step(5.2f, 96.0f) == 30);
     check_true("compass step tight (12.2 px/deg) = 10", sky_compass_step(12.2f, 96.0f) == 10);
     check_true("compass step very tight (25 px/deg) = 5", sky_compass_step(25.0f, 96.0f) == 5);
     check_true("compass step widest (1 px/deg) = 90", sky_compass_step(1.0f, 96.0f) == 90);
-    check_true("compass text 0", strcmp(sky_compass_text(0, buf, sizeof buf), "0\xC2\xB0") == 0);
-    check_true("compass text 270", strcmp(sky_compass_text(270, buf, sizeof buf), "270\xC2\xB0") == 0);
-    check_true("compass text 30 deg", strcmp(sky_compass_text(30, buf, sizeof buf), "30\xC2\xB0") == 0);
-    check_true("compass text wraps 360", strcmp(sky_compass_text(360, buf, sizeof buf), "0\xC2\xB0") == 0);
 }
 
 int main(void)

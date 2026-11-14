@@ -115,6 +115,11 @@ void moon_compute(time_t utc, double lat, double lon, moon_state_t *out)
     double RA_m  = rev(atan2(ye, xe) * RAD);
     double Dec_m = atan2(ze, sqrt(xe*xe + ye*ye)) * RAD;
 
+    out->ra_deg      = (float)RA_m;
+    out->dec_deg     = (float)Dec_m;
+    out->sun_ra_deg  = (float)rev(RA_s);
+    out->sun_dec_deg = (float)Dec_s;
+
     /* ---- Phase ---- */
     double elong = acos(cos((slon - mlon)*DEG) * cos(mlat*DEG)) * RAD; /* 0..180 */
     double FV = 180.0 - elong;                 /* phase angle */

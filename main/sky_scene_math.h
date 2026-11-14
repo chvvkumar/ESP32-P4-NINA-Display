@@ -61,13 +61,16 @@
 /* Telescope model, metres. The axes cross at SKY_RIG_PIVOT_Z above the
  * ground on the vertical through the origin. */
 #define SKY_RIG_PIVOT_Z      1.12f
-#define SKY_RIG_CAPSULES     8            /* sky_rig_capsules() always fills this many */
 #define SKY_RIG_FIT_N        5            /* sky_rig_fit_points() always fills this many */
 
 /* Camera rig: the viewer stands SKY_CAM_DIST metres behind the telescope
- * (opposite the look direction) with the eye SKY_CAM_HEIGHT above the ground. */
-#define SKY_CAM_DIST         2.6f
-#define SKY_CAM_HEIGHT       1.6f
+ * (opposite the look direction) with the eye SKY_CAM_HEIGHT above the ground.
+ * Far and low on purpose: the pier foot sits atan(HEIGHT/DIST) = 13.5 degrees
+ * below the horizon, so foot to zenith (103.5) fits inside SKY_FOV_WIDE_DEG.
+ * At 2.6 / 1.6 the foot was 31.6 degrees down, a high target pushed the
+ * telescope to the frame edge and the wide view stretched it into a funnel. */
+#define SKY_CAM_DIST         5.0f
+#define SKY_CAM_HEIGHT       1.2f
 #define SKY_NEAR_Z           0.02f        /* camera-space z below this is not projected */
 
 /* Camera fit. */
@@ -306,7 +309,9 @@ static inline bool sky_horizon_resample(const float *az_deg, const float *alt_de
 static inline float sky_horizon_alt(const int8_t *alt72, bool valid, float az_deg)
 {
     if (!alt72 || !valid) return 0.0f;
-    const float a = sky_wrap360(az_deg) / SKY_HORIZON_STEP_DEG;
+    float a = sky_wrap360(az_deg) / SKY_HORIZON_STEP_DEG;
+    if (!(a >= 0.0f)) a = 0.0f;               /* below zero, or not a number */
+    if (a > (float)SKY_HORIZON_N) a = (float)SKY_HORIZON_N;
     int i0 = (int)a;
     if (i0 >= SKY_HORIZON_N) i0 = SKY_HORIZON_N - 1;
     const int i1 = (i0 + 1) % SKY_HORIZON_N;
@@ -329,7 +334,9 @@ static inline float sky_horizon_alt(const int8_t *alt72, bool valid, float az_de
 static inline float sky_horizon_alt_smooth(const int8_t *alt72, bool valid, float az_deg)
 {
     if (!alt72 || !valid) return 0.0f;
-    const float a = sky_wrap360(az_deg) / SKY_HORIZON_STEP_DEG;
+    float a = sky_wrap360(az_deg) / SKY_HORIZON_STEP_DEG;
+    if (!(a >= 0.0f)) a = 0.0f;               /* below zero, or not a number */
+    if (a > (float)SKY_HORIZON_N) a = (float)SKY_HORIZON_N;
     int i1 = (int)a;
     if (i1 >= SKY_HORIZON_N) i1 = SKY_HORIZON_N - 1;
     const float t = a - (float)i1;
@@ -623,91 +630,15 @@ static inline sky_pose_t sky_mount_rest_pose(float lat_deg)
     return r;
 }
 
-/* ---- the telescope model ---------------------------------------------------- */
-
-/** What a capsule is, so the renderer can colour it. */
-typedef enum {
-    SKY_PART_PIER = 0, /* the pier column */
-    SKY_PART_MOUNT,    /* polar housing, declination housing */
-    SKY_PART_SHAFT,
-    SKY_PART_WEIGHT,
-    SKY_PART_TUBE,
-    SKY_PART_FRONT,    /* ring at the front of the tube (cyan accent) */
-    SKY_PART_CAMERA,
-} sky_part_t;
-
-/** A rod from @p a to @p b of radius @p r metres. */
-typedef struct {
-    sky_v3_t a, b;
-    float    r;
-    uint8_t  part;     /* sky_part_t */
-} sky_capsule_t;
+/* ---- the telescope fit points ----------------------------------------------- */
 
 /**
- * The telescope as SKY_RIG_CAPSULES capsules, in this order (O = (0,0,
- * SKY_RIG_PIVOT_Z), S = O + decl*0.42, P/D/T/W = polar/decl/tube/weight):
- *   0     pier     (0,0,0) -> (0,0,1.00), r 0.11                   PIER
- *   1     polar    O - P*0.30 -> O + P*0.13, r 0.085               MOUNT
- *   2     decl     O - D*0.06 -> O + D*0.25, r 0.075               MOUNT
- *   3     shaft    O -> O + W*0.80, r 0.022                        SHAFT
- *   4     weight   O + W*0.52 -> O + W*0.64, r 0.15                WEIGHT (drawn with flat ends: a disc on the shaft)
- *   5     tube     S - T*0.50 -> S + T*0.90, r 0.13                TUBE
- *   6     front    S + T*0.85 -> S + T*0.90, r 0.14                FRONT
- *   7     camera   S - T*0.50 -> S - T*0.66, r 0.07                CAMERA
- * Returns SKY_RIG_CAPSULES.
- */
-static inline int sky_rig_capsules(const sky_pose_t *pose, sky_capsule_t out[SKY_RIG_CAPSULES])
-{
-    const sky_v3_t o = sky_v3(0.0f, 0.0f, SKY_RIG_PIVOT_Z);
-    const sky_v3_t s = sky_v3_add(o, sky_v3_scale(pose->decl, 0.42f));
-    out[0].a = sky_v3(0.0f, 0.0f, 0.0f);
-    out[0].b = sky_v3(0.0f, 0.0f, 1.00f);
-    out[0].r = 0.11f;
-    out[0].part = SKY_PART_PIER;
-    out[1].a = sky_v3_sub(o, sky_v3_scale(pose->polar, 0.30f));
-    out[1].b = sky_v3_add(o, sky_v3_scale(pose->polar, 0.13f));
-    out[1].r = 0.085f;
-    out[1].part = SKY_PART_MOUNT;
-    out[2].a = sky_v3_sub(o, sky_v3_scale(pose->decl, 0.06f));
-    out[2].b = sky_v3_add(o, sky_v3_scale(pose->decl, 0.25f));
-    out[2].r = 0.075f;
-    out[2].part = SKY_PART_MOUNT;
-    out[3].a = o;
-    out[3].b = sky_v3_add(o, sky_v3_scale(pose->weight, 0.80f));
-    out[3].r = 0.022f;
-    out[3].part = SKY_PART_SHAFT;
-    out[4].a = sky_v3_add(o, sky_v3_scale(pose->weight, 0.52f));
-    out[4].b = sky_v3_add(o, sky_v3_scale(pose->weight, 0.64f));
-    out[4].r = 0.15f;
-    out[4].part = SKY_PART_WEIGHT;
-    out[5].a = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.50f));
-    out[5].b = sky_v3_add(s, sky_v3_scale(pose->tube, 0.90f));
-    out[5].r = 0.13f;
-    out[5].part = SKY_PART_TUBE;
-    out[6].a = sky_v3_add(s, sky_v3_scale(pose->tube, 0.85f));
-    out[6].b = sky_v3_add(s, sky_v3_scale(pose->tube, 0.90f));
-    out[6].r = 0.14f;
-    out[6].part = SKY_PART_FRONT;
-    out[7].a = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.50f));
-    out[7].b = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.66f));
-    out[7].r = 0.07f;
-    out[7].part = SKY_PART_CAMERA;
-    return SKY_RIG_CAPSULES;
-}
-
-/** The front of the tube, S + T*0.90, where the beam starts.
- *  Rest pose at lat 41.9 -> (0, 0.3894, 2.0337). */
-static inline sky_v3_t sky_rig_tube_front(const sky_pose_t *pose)
-{
-    const sky_v3_t o = sky_v3(0.0f, 0.0f, SKY_RIG_PIVOT_Z);
-    const sky_v3_t s = sky_v3_add(o, sky_v3_scale(pose->decl, 0.42f));
-    return sky_v3_add(s, sky_v3_scale(pose->tube, 0.90f));
-}
-
-/**
- * The SKY_RIG_FIT_N points the camera fit holds in view: the pier foot
- * (the origin), O, the tube front (S + T*0.90), the camera back (S - T*0.66)
- * and the weight end (O + W*0.80), in that order. Returns SKY_RIG_FIT_N.
+ * A fixed set of SKY_RIG_FIT_N points for a pose (O = (0,0,SKY_RIG_PIVOT_Z),
+ * S = O + decl*0.42): the pier foot (the origin), O, S + T*0.90, S - T*0.66
+ * and O + W*0.80, in that order. Returns SKY_RIG_FIT_N.
+ * Only the camera fit host tests use it, as a fixed point set. The drawn
+ * telescope and its fit points are in sky_rig_model.h
+ * (sky_rig_model_fit_points()).
  */
 static inline int sky_rig_fit_points(const sky_pose_t *pose, sky_v3_t out[SKY_RIG_FIT_N])
 {
@@ -715,7 +646,7 @@ static inline int sky_rig_fit_points(const sky_pose_t *pose, sky_v3_t out[SKY_RI
     const sky_v3_t s = sky_v3_add(o, sky_v3_scale(pose->decl, 0.42f));
     out[0] = sky_v3(0.0f, 0.0f, 0.0f);
     out[1] = o;
-    out[2] = sky_rig_tube_front(pose);
+    out[2] = sky_v3_add(s, sky_v3_scale(pose->tube, 0.90f));
     out[3] = sky_v3_sub(s, sky_v3_scale(pose->tube, 0.66f));
     out[4] = sky_v3_add(o, sky_v3_scale(pose->weight, 0.80f));
     return SKY_RIG_FIT_N;
@@ -778,7 +709,7 @@ typedef struct {
 
 /** Eye position for yaw @p yaw_deg: SKY_CAM_DIST behind the axis crossing,
  *  opposite the yaw, at SKY_CAM_HEIGHT: (-sin y * DIST, -cos y * DIST, HEIGHT).
- *  Independent of pitch. Yaw 0 -> (0, -2.6, 1.6). */
+ *  Independent of pitch. Yaw 0 -> (0, -5.0, 1.2). */
 static inline sky_v3_t sky_cam_pos(float yaw_deg)
 {
     const float y = yaw_deg * SKY_DEG2RAD;
@@ -991,7 +922,7 @@ static inline float sky_fit_focal_(float yaw_deg, float pitch_deg, const sky_fra
  *      (see sky_frame_half()).
  *   3b. The sky outranks the tripod foot: when that f still leaves the
  *      highest kept input above the top margin (a zenith transit against a
- *      foot at -30 degrees spans more than SKY_FOV_WIDE_DEG), pitch is raised
+ *      foot well below the horizon can span more than SKY_FOV_WIDE_DEG), pitch is raised
  *      to sky_fit_pitch_need_() (at most @p pitch_max_deg) and step 3 is
  *      repeated; twice, since the new f moves the top margin's angle.
  *   4. When @p horizon_max_y > 0 and py + f*tan(pitch) > horizon_max_y (the
@@ -1059,15 +990,6 @@ static inline int sky_compass_step(float px_per_deg, float min_px)
         if ((float)steps[i] * px_per_deg >= min_px) return steps[i];
     }
     return 90;
-}
-
-/** Label for azimuth @p az_deg: the degrees, wrapped to 0..359, with a degree
- *  sign, into @p buf (at least 8 bytes). Returns @p buf. */
-static inline const char *sky_compass_text(int az_deg, char *buf, size_t n)
-{
-    az_deg = ((az_deg % 360) + 360) % 360;
-    snprintf(buf, n, "%d\xC2\xB0", az_deg);
-    return buf;
 }
 
 /** Home yaw: 0 (facing north) for lat >= 0, 180 for lat < 0. */
