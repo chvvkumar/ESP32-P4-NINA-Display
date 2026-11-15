@@ -46,6 +46,9 @@ CONFIG_LV_USE_CLIB_SPRINTF=y
 CONFIG_LV_DEF_REFR_PERIOD=25
 CONFIG_LV_OS_FREERTOS=y
 CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+# Radius masks kept between draws. The sky scene uses many radii per frame
+# (line caps, stars, beads, discs); 4 entries were recomputed constantly.
+CONFIG_LV_DRAW_SW_CIRCLE_CACHE_SIZE=16
 # CONFIG_LV_ATTRIBUTE_FAST_MEM_USE_IRAM is not set
 CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_14=y
