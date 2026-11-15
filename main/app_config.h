@@ -12,6 +12,8 @@ extern "C" {
 
 // Maximum number of NINA instances supported
 #define MAX_NINA_INSTANCES 3
+#define NINA_LAYOUT_LIST_MAX   8     // v82: layouts per instance cycle list
+#define NINA_LAYOUT_LIST_EMPTY 0xFF  // v82: empty slot marker in the list
 
 /* Auto-rotate slideshow stop indices (auto_rotate_order2[] entries).
  * Each value names a distinct slideshow stop. Indices 0-7 match the legacy
@@ -83,7 +85,7 @@ extern "C" {
 #define ARP_ORDER_CAPACITY_RETIRED 16
 
 // Current config struct version — bump on every layout change.
-#define APP_CONFIG_VERSION 81
+#define APP_CONFIG_VERSION 82
 
 /* Tiles-config blobs no longer live inside app_config_t (v52 split them out to
  * dedicated NVS string keys "json_tiles"/"ha_tiles"). These bound the value
@@ -604,6 +606,17 @@ typedef struct {
                                        // 4 The Weather Channel,
                                        // 6 NEXRAD Level III (default),
                                        // 8 Dark Sky. Any other value resets to 6.
+
+    // Added after v81 (NINA layout cycle) -- must stay at end to preserve NVS binary compatibility
+    uint8_t  nina_layout_list[MAX_NINA_INSTANCES][NINA_LAYOUT_LIST_MAX];
+                                       // v82: ordered layout ids each instance
+                                       // cycles through, 0xFF = empty slot,
+                                       // entries compacted to the front. The
+                                       // list is authoritative; nina_layout[i]
+                                       // mirrors entry 0.
+    uint16_t nina_layout_cycle_s[MAX_NINA_INSTANCES];
+                                       // v82: seconds each listed layout stays
+                                       // on screen, 15..3600 (default 60).
 } app_config_t;
 
 /* ── Version 43 config struct — used only for NVS migration to v44 ────── */
@@ -6014,6 +6027,10 @@ _Static_assert(offsetof(app_config_t, radar_palette) ==
                    offsetof(app_config_t, radar_zoom) +
                        sizeof(((app_config_t *)0)->radar_zoom),
                "radar_palette must directly follow radar_zoom (v81 append rule)");
+_Static_assert(offsetof(app_config_t, nina_layout_list) ==
+                   offsetof(app_config_t, radar_palette) +
+                       sizeof(((app_config_t *)0)->radar_palette),
+               "nina_layout_list must directly follow radar_palette (v82 append rule)");
 
 
 

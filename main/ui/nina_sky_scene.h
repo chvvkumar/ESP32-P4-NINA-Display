@@ -17,7 +17,7 @@
  * one strip at full night), haze, stars, star patterns near the target and
  * the pole marker, the Moon (glow, disc, lit part), the target's path (travelled
  * part quiet, part to come bright amber, a solid stretch for the time left),
- * finished-picture beads, the rise, set and flip marks, the target marker, three
+ * the rise, set and flip marks, the target marker, three
  * hill layers over the horizon outline (plus layout 8's ground band), compass
  * letters and ticks, the sweep arc of a pier-side change, the telescope (contact
  * shadow, then the solid rig model of sky_rig_draw.h replayed as primitives), the
@@ -41,7 +41,7 @@
  * every field it needs out of @p d. The scene's own lv_timer runs in the LVGL
  * task and NEVER touches nina_client_t, so it can never invert that order.
  *
- * MEMORY. The scene state (path, bead log, draw list, sky strips, Moon glow picture, star vectors, about 170 KB)
+ * MEMORY. The scene state (path, draw list, sky strips, Moon glow picture, star vectors, about 170 KB)
  * is one heap_caps_calloc(MALLOC_CAP_SPIRAM) block, freed from the object's
  * LV_EVENT_DELETE together with the timer. Deleting the page root (any slot
  * rebuild) therefore frees everything; there is no destroy call.
@@ -85,7 +85,7 @@ lv_obj_t *nina_sky_scene_obj(const nina_sky_scene_t *s);
 /**
  * Push one poll's data. Copies target coordinates, site, sidereal time,
  * mount pose inputs, flip minutes, horizon, plan counts, filter and exposure
- * state out of @p d; rebuilds the path; logs a bead when the done count went
+ * state out of @p d; rebuilds the path; starts the finish pulse when the done count went
  * up; re-decides the camera goal; re-projects; invalidates ONLY when a
  * projected coordinate or colour actually changed (the panel is full refresh:
  * every invalidate repaints the whole screen); starts the animation timer
