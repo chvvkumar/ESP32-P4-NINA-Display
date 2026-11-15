@@ -409,3 +409,23 @@ add_nina_host_test(test_sky_scene_math
     SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/test_sky_scene_math.c
 )
+
+add_nina_host_test(test_sky_stars
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_sky_stars.c
+)
+
+add_nina_host_test(test_sky_rig_model
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_sky_rig_model.c
+)
+
+add_nina_host_test(test_sky_rig_draw
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_sky_rig_draw.c
+)
+
+add_nina_host_test(test_sky_night_math
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/test_sky_night_math.c
+)

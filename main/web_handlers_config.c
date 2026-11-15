@@ -359,6 +359,23 @@ static cJSON *serialize_config_to_json(const app_config_t *cfg)
     cJSON_AddNumberToObject(obj, "nina_layout_1", cfg->nina_layout[0]);
     cJSON_AddNumberToObject(obj, "nina_layout_2", cfg->nina_layout[1]);
     cJSON_AddNumberToObject(obj, "nina_layout_3", cfg->nina_layout[2]);
+    {
+        static const char *const k_list_keys[] = {
+            "nina_layout_list_1", "nina_layout_list_2", "nina_layout_list_3"
+        };
+        static const char *const k_cycle_keys[] = {
+            "nina_layout_cycle_s_1", "nina_layout_cycle_s_2", "nina_layout_cycle_s_3"
+        };
+        for (int li = 0; li < MAX_NINA_INSTANCES; li++) {
+            cJSON *arr = cJSON_AddArrayToObject(obj, k_list_keys[li]);
+            for (int k = 0; arr && k < NINA_LAYOUT_LIST_MAX; k++) {
+                uint8_t v = cfg->nina_layout_list[li][k];
+                if (v == NINA_LAYOUT_LIST_EMPTY) break;
+                cJSON_AddItemToArray(arr, cJSON_CreateNumber(v));
+            }
+            cJSON_AddNumberToObject(obj, k_cycle_keys[li], cfg->nina_layout_cycle_s[li]);
+        }
+    }
     cJSON_AddStringToObject(obj, "allsky_field_config", cfg->allsky_field_config);
     cJSON_AddStringToObject(obj, "allsky_thresholds", cfg->allsky_thresholds);
     cJSON_AddStringToObject(obj, "spotify_client_id", cfg->spotify_client_id);
@@ -1492,6 +1509,37 @@ static app_config_t *parse_config_from_json(cJSON *root, unsigned *skipped_nodes
         if (cJSON_IsNumber(jlayout)) {
             int v = jlayout->valueint;
             cfg->nina_layout[li] = (v >= 0 && v <= 9 && v != 3 && v != 6) ? (uint8_t)v : 0;
+            /* A lone layout (older clients) becomes a one entry list. */
+            memset(cfg->nina_layout_list[li], NINA_LAYOUT_LIST_EMPTY, NINA_LAYOUT_LIST_MAX);
+            cfg->nina_layout_list[li][0] = cfg->nina_layout[li];
+        }
+    }
+    /* v82 cycle list: an array wins over the lone nina_layout_N above.
+     * validate_config() drops bad ids and duplicates and mirrors entry 0. */
+    static const char *const k_nina_list_keys[] = {
+        "nina_layout_list_1", "nina_layout_list_2", "nina_layout_list_3"
+    };
+    static const char *const k_nina_cycle_keys[] = {
+        "nina_layout_cycle_s_1", "nina_layout_cycle_s_2", "nina_layout_cycle_s_3"
+    };
+    for (int li = 0; li < MAX_NINA_INSTANCES; li++) {
+        cJSON *jlist = cJSON_GetObjectItem(root, k_nina_list_keys[li]);
+        if (cJSON_IsArray(jlist)) {
+            memset(cfg->nina_layout_list[li], NINA_LAYOUT_LIST_EMPTY, NINA_LAYOUT_LIST_MAX);
+            int n = 0;
+            cJSON *je;
+            cJSON_ArrayForEach(je, jlist) {
+                if (n >= NINA_LAYOUT_LIST_MAX) break;
+                if (!cJSON_IsNumber(je)) continue;
+                int v = je->valueint;
+                cfg->nina_layout_list[li][n++] =
+                    (v >= 0 && v <= 9) ? (uint8_t)v : NINA_LAYOUT_LIST_EMPTY;
+            }
+        }
+        cJSON *jcyc = cJSON_GetObjectItem(root, k_nina_cycle_keys[li]);
+        if (cJSON_IsNumber(jcyc)) {
+            int v = jcyc->valueint;
+            cfg->nina_layout_cycle_s[li] = (v >= 15 && v <= 3600) ? (uint16_t)v : 60;
         }
     }
 

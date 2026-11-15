@@ -933,6 +933,8 @@
 
     /* === RESPONSIVE === */
     @media (max-width: 768px) {
+      /* Every size here is rem, so this one knob scales all text on phones. */
+      html { font-size: 112.5%; }
       /* Sections wrap onto their own row as a 4-part segmented control;
          row 2 becomes a horizontally scrollable pill row (hidden scrollbar).
          Same DOM as desktop. */
@@ -1363,19 +1365,15 @@
             '<p>Night rail and Two rings are readings-only designs available on every screen shape (on a round screen they still show the picture behind them, the same way Halo and Orbit do): Night rail puts the exposure on one horizontal rail with the subs lined up under it, and Two rings draws the exposure as an outer ring with the subs as a ring inside it.</p>'+
             '<p>Horizon and Horizon (Minimal) draw your telescope in the back yard, aimed where it really points, with the target\'s path across tonight\'s sky, on every screen shape. Horizon keeps the readings together on the ground at the bottom; Horizon (Minimal) writes only a few words, next to the target and the telescope.</p>'+
             '<p>On a round screen, tapping the picture steps through four views, picture with all the readings, picture with just the rim progress, picture on its own, and readings on their own, then back to the start. Holding your finger on the picture opens the full, uncropped image full screen.</p>'+
+            '<p>Tick one layout to always show it. Tick two or more and the screen switches between them in the order listed, after the time you set.</p>'+
             '<p>Only the designs your screen can draw are offered here; the others are not shown, and a choice you made on another screen shape is kept for when you go back to it.</p>'+
             '</div>'+
-            '<div class="field"><label class="field-label">Page layout</label>'+
-            '<select class="input" id="nina_layout_'+i+'" onchange="checkDirty()">'+
-            '<option value="0">Dashboard</option>'+
-            '<option value="1">Image-forward</option>'+
-            '<option value="2">Halo</option>'+
-            '<option value="4">Orbit</option>'+
-            '<option value="5">Night rail</option>'+
-            '<option value="7">Two rings</option>'+
-            '<option value="8">Horizon</option>'+
-            '<option value="9">Horizon (Minimal)</option>'+
-            '</select>'+
+            '<div class="field"><label class="field-label">Page layouts</label>'+
+            '<div class="pg-list" id="nina_layout_list_'+i+'" style="grid-template-columns:1fr" data-cfg-key="nina_layout_list_'+(i+1)+' nina_layout_'+(i+1)+'" role="group" aria-label="Page layouts"></div>'+
+            '<div class="field-hint">Tick one layout to always show it. Tick two or more and the screen shows each in turn; drag to set the order.</div>'+
+            '</div>'+
+            '<div class="field" id="nina_layout_cycle_wrap_'+i+'" style="display:none"><label class="field-label">Time on each layout (seconds)</label>'+
+            '<input type="number" class="input" id="nina_layout_cycle_s_'+i+'" min="15" max="3600" step="1" value="60" data-cfg-key="nina_layout_cycle_s_'+(i+1)+'">'+
             '</div>'+
             '</div>'+
             '<div class="subsection">'+
@@ -1505,7 +1503,7 @@
         col.forEach(function(cat){
           var rows=pages.filter(function(p){return (p.category||'')===cat;});
           if(!rows.length) return;
-          html+='<div class="pg-group"><div class="pg-group-title">'+escHtml(cat)+'</div>';
+          html+='<div class="pg-group">'+(opts.titles===false?'':'<div class="pg-group-title">'+escHtml(cat)+'</div>');
           rows.forEach(function(p){
             var pos=check?order.indexOf(p.id):-1;
             var on=check&&pos>=0;
@@ -1518,7 +1516,7 @@
                 (on?' checked':'')+'>'+
               '<span class="pg-label">'+escHtml(p.label)+'</span>'+
               (check?'<span class="pg-num">'+(on?pos+1:'')+'</span>':'<span class="pg-star" aria-hidden="true">&#9733;</span>')+
-              chipHtml(p)+
+              (opts.chips===false?'':chipHtml(p))+
             '</label>';
           });
           html+='</div>';
@@ -1549,7 +1547,7 @@
       if(!c) return;
       renderPageList(c,ROTATION_PAGES,{mode:'check',order:_arpOrder});
       if(c.dataset.wired!=='1'){
-        initPillDragReorder(c);
+        initPillDragReorder(c,_arpOrder,renumberArp);
         /* Tick/untick: append/remove the id in the cycle order, then renumber.
            checkDirty/markTouched run via the .content change delegate. */
         c.addEventListener('change',function(e){
@@ -1594,12 +1592,93 @@
       });
     }
 
+    /* === Per-node page layout lists ===
+       _lay[i].all = every stored id in order (what is posted); .vis = the ones
+       this screen shape can draw, ticked, in order (stable array, mutated in
+       place because the drag handler holds it). Ids the shape cannot draw stay
+       in .all after the visible ones once the user edits, so a panel swap
+       restores them. */
+    var _layShape='';
+    var _lay=[{all:[0],vis:[],cycle:60},{all:[0],vis:[],cycle:60},{all:[0],vis:[],cycle:60}];
+    var LAYOUT_PAGES=[
+      {id:0,label:'Dashboard',category:'NINA'},{id:1,label:'Image-forward',category:'NINA'},
+      {id:2,label:'Halo',category:'NINA'},{id:4,label:'Orbit',category:'NINA'},
+      {id:5,label:'Night rail',category:'NINA'},{id:7,label:'Two rings',category:'NINA'},
+      {id:8,label:'Horizon',category:'NINA'},{id:9,label:'Horizon (Minimal)',category:'NINA'}
+    ];
+    function layoutValid(id){
+      if(_layShape==='round') return id!==1;
+      if(_layShape==='square') return id!==2&&id!==4;
+      return true;
+    }
+    function layoutPostList(i){
+      var a=_lay[i].all;
+      return a.length?a.slice():[0];
+    }
+    function layoutCycleValue(i){
+      var el=$('nina_layout_cycle_s_'+i), n=el?parseInt(el.value):NaN;
+      if(isNaN(n)) n=_lay[i].cycle;
+      return Math.max(15,Math.min(3600,n));
+    }
+    function layoutRefresh(i){
+      var c=$('nina_layout_list_'+i);
+      if(!c) return;
+      var vis=_lay[i].vis;
+      c.querySelectorAll('.pg-row').forEach(function(row){
+        var pos=vis.indexOf(parseInt(row.getAttribute('data-arp-idx')));
+        row.classList.toggle('pg-on',pos>=0);
+        if(pos>=0) row.setAttribute('draggable','true'); else row.removeAttribute('draggable');
+        row.querySelector('.pg-num').textContent=pos>=0?pos+1:'';
+        row.querySelector('input').checked=pos>=0;
+      });
+      var w=$('nina_layout_cycle_wrap_'+i);
+      if(w) w.style.display=vis.length>=2?'':'none';
+    }
+    /* After a user edit of .vis: fold it back into .all. */
+    function layoutSync(i){
+      var L=_lay[i];
+      L.all=L.vis.concat(L.all.filter(function(id){return !layoutValid(id);}));
+      layoutRefresh(i);
+    }
+    function layoutRender(i){
+      var c=$('nina_layout_list_'+i);
+      if(!c) return;
+      var L=_lay[i];
+      renderPageList(c,LAYOUT_PAGES.filter(function(p){return layoutValid(p.id);}),
+        {mode:'check',order:L.vis,chips:false,titles:false});
+      if(c.dataset.wired!=='1'){
+        initPillDragReorder(c,L.vis,function(){layoutRefresh(i);},function(){
+          layoutSync(i);
+          c.dispatchEvent(new Event('change',{bubbles:true}));
+        });
+        c.addEventListener('change',function(e){
+          var row=e.target.closest('.pg-row');
+          if(!row) return;
+          var id=parseInt(row.getAttribute('data-arp-idx')), k=L.vis.indexOf(id);
+          if(e.target.checked&&k<0) L.vis.push(id);
+          else if(!e.target.checked&&k>=0) L.vis.splice(k,1);
+          if(!L.vis.length) L.vis.push(0);  /* at least one stays ticked */
+          layoutSync(i);
+        });
+        c.dataset.wired='1';
+      }
+      layoutRefresh(i);
+    }
+    function layoutSplitAll(){
+      for(var i=0;i<3;i++){
+        var L=_lay[i];
+        L.vis.length=0;
+        L.all.forEach(function(id){ if(layoutValid(id)&&L.vis.indexOf(id)<0) L.vis.push(id); });
+        layoutRender(i);
+      }
+    }
+
     /* === Rotation Drag-to-Reorder ===
        Only ticked rows (draggable="true") can be dragged or dropped on. A
        drop moves the dragged id before/after the target id in _arpOrder
        (by the pointer's Y against the target row's midline) and renumbers;
        DOM rows never move. */
-    function initPillDragReorder(container){
+    function initPillDragReorder(container,order,renumber,onChange){
       var dragSrc=null;
 
       function rowId(row){ return parseInt(row.getAttribute('data-arp-idx')); }
@@ -1609,16 +1688,17 @@
         return row&&row.classList.contains('pg-on')?row:null;
       }
       function moveInOrder(src,target,clientY){
-        var from=_arpOrder.indexOf(rowId(src)), toId=rowId(target);
-        if(from<0||_arpOrder.indexOf(toId)<0) return;
+        var from=order.indexOf(rowId(src)), toId=rowId(target);
+        if(from<0||order.indexOf(toId)<0) return;
         /* remove the dragged id first so `to` is computed on the shortened array */
-        _arpOrder.splice(from,1);
-        var to=_arpOrder.indexOf(toId);
+        order.splice(from,1);
+        var to=order.indexOf(toId);
         var rect=target.getBoundingClientRect();
         if(clientY>=rect.top+rect.height/2) to++;
-        _arpOrder.splice(to,0,rowId(src));
-        renumberArp();
+        order.splice(to,0,rowId(src));
+        renumber();
         checkDirty();
+        if(onChange) onChange();
       }
 
       container.addEventListener('dragstart',function(e){
@@ -2436,9 +2516,12 @@
       data.alert_voice_muted_1=!!$('alert_voice_muted_0').checked;
       data.alert_voice_muted_2=!!$('alert_voice_muted_1').checked;
       data.alert_voice_muted_3=!!$('alert_voice_muted_2').checked;
-      data.nina_layout_1=parseInt($('nina_layout_0').value)||0;
-      data.nina_layout_2=parseInt($('nina_layout_1').value)||0;
-      data.nina_layout_3=parseInt($('nina_layout_2').value)||0;
+      for(var li=0;li<3;li++){
+        var ll=layoutPostList(li);
+        data['nina_layout_list_'+(li+1)]=ll;
+        data['nina_layout_'+(li+1)]=ll[0];
+        data['nina_layout_cycle_s_'+(li+1)]=layoutCycleValue(li);
+      }
     }
 
     function collectTab_allsky(data){
@@ -2989,24 +3072,22 @@
       $('alert_voice_muted_0').checked=!!data.alert_voice_muted_1;
       $('alert_voice_muted_1').checked=!!data.alert_voice_muted_2;
       $('alert_voice_muted_2').checked=!!data.alert_voice_muted_3;
-      $('nina_layout_0').value=String(data.nina_layout_1||0);
-      $('nina_layout_1').value=String(data.nina_layout_2||0);
-      $('nina_layout_2').value=String(data.nina_layout_3||0);
       /* Each screen shape draws its own set: Halo (2) and Orbit (4) are round
-         designs, Image-forward (1) is a square one. HIDE and DISABLE the ones
-         this screen cannot draw rather than removing them: a removed option
-         blanks the select, and the save path's parseInt('')||0 would then
-         quietly rewrite a value the user picked on the other shape. Both
-         attributes are needed: iOS Safari still lists a hidden option in its
-         native picker, and disabled keeps it unpickable there. The stored value
-         is left alone either way, and the device draws the Dashboard for an
-         option it cannot render. */
+         designs, Image-forward (1) is a square one. A stored id this screen
+         cannot draw is not listed but stays at the end of the posted array,
+         so a panel swap restores it. */
+      for(var li=0;li<3;li++){
+        var ls=data['nina_layout_list_'+(li+1)];
+        if(!Array.isArray(ls)||!ls.length) ls=[data['nina_layout_'+(li+1)]||0];
+        var cy=parseInt(data['nina_layout_cycle_s_'+(li+1)]);
+        _lay[li].all=ls.map(function(x){return parseInt(x)||0;});
+        _lay[li].cycle=(cy>=15&&cy<=3600)?cy:60;
+        var cin=$('nina_layout_cycle_s_'+li); if(cin) cin.value=_lay[li].cycle;
+      }
+      layoutSplitAll();
       fetchJsonMemo('/api/version').then(function(v){
-        var off=(v.shape==='round')?['1']:['2','4'];
-        for(var i=0;i<3;i++){
-          var sel=$('nina_layout_'+i); if(!sel) continue;
-          off.forEach(function(k){var o=sel.querySelector('option[value="'+k+'"]');if(o){o.hidden=true;o.disabled=true;}});
-        }
+        _layShape=v.shape||'';
+        layoutSplitAll();
       }).catch(function(){});
 
       for(var i=0;i<3;i++){

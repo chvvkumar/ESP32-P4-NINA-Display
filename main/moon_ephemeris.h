@@ -25,6 +25,10 @@ typedef struct {
     float       axis_P;       /* position angle of lunar axis P (radians), pre-parallactic */
     bool        have_location;/* false => lat/lon were unset; orient_rad is the
                                  north-up fallback */
+    float       ra_deg;       /* Moon geocentric right ascension, degrees, [0, 360) */
+    float       dec_deg;      /* Moon geocentric declination, degrees */
+    float       sun_ra_deg;   /* Sun right ascension, degrees, [0, 360) */
+    float       sun_dec_deg;  /* Sun declination, degrees */
 } moon_state_t;
 
 /* Compute moon phase + orientation for a UTC time and observer location.

@@ -13,13 +13,24 @@
  * precomputed integer screen coordinates and nothing else. The maths lives in
  * main/sky_scene_math.h.
  *
- * What it draws, back to front: sky gradient, the target's path (travelled
- * part quiet, part to come bright amber), finished-picture beads, the rise and
- * set marks, the flip mark, the target marker, the ground under the horizon
- * outline (plus layout 8's ground band), the telescope on its mount in its true
- * pose, the cyan beam to where it aims, the exposure ring around the target,
- * and amber/cyan edge arrows for a target or aim point outside the frame. It
- * draws NO text: every word belongs to the layout.
+ * What it draws, back to front: sky (24 dithered strips following the Sun,
+ * one strip at full night), haze, stars, star patterns near the target and
+ * the pole marker, the Moon (glow, disc, lit part), the target's path (travelled
+ * part quiet, part to come bright amber, a solid stretch for the time left),
+ * the rise, set and flip marks, the target marker, three
+ * hill layers over the horizon outline (plus layout 8's ground band), compass
+ * letters and ticks, the sweep arc of a pier-side change, the telescope (contact
+ * shadow, then the solid rig model of sky_rig_draw.h replayed as primitives), the
+ * slew trail, the beam to where it aims in the filter colour, the finish pulse,
+ * the ring round the target (guiding outline plus the exposure arc), and
+ * amber/cyan edge arrows for a target or aim point outside the frame. It draws
+ * two kinds of text only, the compass letters and the word Unsafe; every other
+ * word belongs to the layout.
+ *
+ * TIMER. One 33 ms lv_timer runs only while the camera flies, the aim settles,
+ * the mount slews or flips, the finish pulse runs, the tube eases through the
+ * pole, or the sweep arc or slew trail fades. Every animation ends on elapsed
+ * time, so the timer stops and an idle scene costs nothing.
  *
  * Words are the layout's job; this module answers where things are
  * (nina_sky_scene_anchor()) and what the rig is doing (nina_sky_scene_info()).
@@ -30,8 +41,8 @@
  * every field it needs out of @p d. The scene's own lv_timer runs in the LVGL
  * task and NEVER touches nina_client_t, so it can never invert that order.
  *
- * MEMORY. The scene state (path, bead log, projected coordinates, about 5 KB)
- * is one heap_caps_malloc(MALLOC_CAP_SPIRAM) block, freed from the object's
+ * MEMORY. The scene state (path, draw list, sky strips, Moon glow picture, star vectors, about 170 KB)
+ * is one heap_caps_calloc(MALLOC_CAP_SPIRAM) block, freed from the object's
  * LV_EVENT_DELETE together with the timer. Deleting the page root (any slot
  * rebuild) therefore frees everything; there is no destroy call.
  */
@@ -74,7 +85,7 @@ lv_obj_t *nina_sky_scene_obj(const nina_sky_scene_t *s);
 /**
  * Push one poll's data. Copies target coordinates, site, sidereal time,
  * mount pose inputs, flip minutes, horizon, plan counts, filter and exposure
- * state out of @p d; rebuilds the path; logs a bead when the done count went
+ * state out of @p d; rebuilds the path; starts the finish pulse when the done count went
  * up; re-decides the camera goal; re-projects; invalidates ONLY when a
  * projected coordinate or colour actually changed (the panel is full refresh:
  * every invalidate repaints the whole screen); starts the animation timer
@@ -84,7 +95,7 @@ lv_obj_t *nina_sky_scene_obj(const nina_sky_scene_t *s);
 void nina_sky_scene_update(nina_sky_scene_t *s, const nina_client_t *d, int instance, int gb);
 
 /**
- * Exposure ring around the target, from the layout's p->alt.elapsed_cb
+ * Exposure arc on the guiding ring round the target, from the layout's p->alt.elapsed_cb
  * (spine 200 ms tick). @p frac in [0,1] fills clockwise from twelve o'clock;
  * frac < 0 hides it. @p color is final (already Red Night and brightness
  * mapped by the layout). Drawn only while the scene judges the mount on
@@ -130,7 +141,8 @@ bool nina_sky_scene_box_fits(const nina_sky_scene_t *s, const lv_area_t *box);
 
 /** True when @p box overlaps a drawn mark a label must not cover: the bright
  *  part of the path (sample points, 10 px slack), the target marker (r 24),
- *  the flip mark, or the beam (sampled every 16 px). */
+ *  the flip mark, the beam (sampled every 16 px), the Moon, the wider guiding
+ *  ring or the Unsafe word. */
 bool nina_sky_scene_box_hits_marks(const nina_sky_scene_t *s, const lv_area_t *box);
 
 /** Derived state for the words, refreshed by nina_sky_scene_update(). */
