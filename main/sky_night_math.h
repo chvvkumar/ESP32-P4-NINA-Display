@@ -15,7 +15,6 @@
 
 #define SKY_PULSE_S          0.9f
 #define SKY_ARRIVE_S         0.6f
-#define SKY_FLARE_S          1.1f
 #define SKY_DRAIN_S          0.45f
 #define SKY_TRAIL_S          1.2f
 #define SKY_SWEEP_FADE_S     1.0f

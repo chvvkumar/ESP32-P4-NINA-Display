@@ -215,6 +215,10 @@ bool nina_dashboard_page_is_available(int page_idx);
  *  one slot at a time. No full dashboard teardown. Call under display lock. */
 void nina_dashboard_rebuild_slot(int instance);
 
+/** Put an instance's layout cycle back on the first list entry with a fresh
+ *  dwell. RAM only. Call under display lock, then nina_dashboard_rebuild_slot(). */
+void nina_dashboard_layout_cycle_reset(int instance);
+
 /** True iff NINA instance `instance` currently has an allocated, navigable page. */
 bool nina_dashboard_slot_available(int instance);
 

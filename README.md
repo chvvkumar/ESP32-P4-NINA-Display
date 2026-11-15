@@ -213,7 +213,7 @@ Every section on an instance page is tappable:
 
 Polling: the visible instance is polled every 5 s by default (1-10 s); the others get a 10 s heartbeat. The Summary page polls all instances at full rate; non-NINA pages drop every instance to a slow idle poll.
 
-Each instance page can also use one of a few alternate layouts, chosen per instance in Pages > N.I.N.A. > Page Layout; a panel only offers the designs it can draw, and a design picked on the other panel shape is kept and used again if the panel is ever swapped.
+Each instance page can also use one of a few alternate layouts, chosen per instance in Pages > N.I.N.A. by ticking layouts and dragging them into order, with a time on each layout in seconds (15 to 3600, default 60). One ticked layout stays fixed; two or more make the page switch between them in list order while that page is on screen, restarting at the first after a reboot. A panel only offers the designs it can draw, and a design picked on the other panel shape is kept and used again if the panel is ever swapped.
 
 - **Dashboard** (default): the grid described above, with the exposure arc, guider, focuser and sequence tiles. On a round panel, Dashboard also fills the circle with the captured image the same way Halo and Orbit do, keeping its familiar dials for its own readings view.
 - **Image-forward** (square panels only): the captured image fills the middle of the screen, with the target name and exposure progress above it and the guiding, timing and filter readings below. Tap the image to open the full-screen preview.

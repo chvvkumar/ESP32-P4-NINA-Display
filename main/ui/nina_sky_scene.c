@@ -65,7 +65,6 @@ static const char *TAG = "sky_scene";
 
 /* ---- sizes and fixed style -------------------------------------------------- */
 
-#define SCN_BEADS_MAX   256
 #define SCN_SEG_MAX     76     /* one arc of the path: at most 74 points */
 #define SCN_HZ_PTS      181    /* smooth horizon outline: yaw -180..+180 every 2 degrees
                                 * (a camera pitched up with the wide lens sees hills more
@@ -240,7 +239,6 @@ static const uint32_t PAL_RAW[PAL_N] = {
 /* ---- the draw list ---------------------------------------------------------- */
 
 typedef struct { int16_t x1, y1, x2, y2; } seg_px_t;
-typedef struct { int16_t x, y; uint32_t color; } bead_px_t;
 /* One telescope primitive. Line: points 0 and 1, w = width. Triangle: three
  * points, w 0. Dot: point 0, w = radius. tone indexes rig_tone[]. No padding. */
 typedef struct { int16_t x[3], y[3]; uint8_t kind, w, tone, round; } rig_px_t;
@@ -261,7 +259,7 @@ typedef struct { int16_t x, y; uint8_t r2, a, tint, halo; } star_px_t;
  * hash over its bytes is deterministic. Panel coordinates relative to the
  * scene object, which sits at (0,0) of the page root. */
 typedef struct {
-    uint16_t  n_trav, n_fut, n_hz, n_beads, n_rig, n_beam, n_cols, n_grass, n_compass;
+    uint16_t  n_trav, n_fut, n_hz, n_rig, n_beam, n_cols, n_grass, n_compass;
     seg_px_t  trav[SCN_SEG_MAX];
     seg_px_t  fut[SCN_SEG_MAX];
     seg_px_t  hz[SCN_HZ_MAX];
@@ -271,7 +269,6 @@ typedef struct {
     int16_t   floor_y;            /* first row of the yard floor (level horizon), 0..size */
     int16_t   glow_y;             /* row where the sky reaches its glow colour */
     seg_px_t  beam[SCN_BEAM_MAX];
-    bead_px_t beads[SCN_BEADS_MAX];
     seg_px_t  flip;
     tri_px_t  tarrow, aarrow;
     int16_t   target_x, target_y;
@@ -313,13 +310,12 @@ typedef struct {
     uint16_t  n_left;
     uint8_t   left_tick_in, guide_in;
     uint8_t   n_ring_pts;         /* 0 = round outline, else SCN_RING_N + 1 points */
-    uint8_t   ring_w, ring_arc_n, bead_new_in;
+    uint8_t   ring_w, ring_arc_n;
     uint8_t   gather_r, gather_a, tgt_r, tgt_a;
     uint8_t   tgt_core_a, pulse_stage, pulse_r, pulse_a;   /* stage 0 none, 1 travelling, 2 arriving */
-    uint8_t   flare_in, flare_r, flare_a, pad_tgt;
     int16_t   ring_tip_x, ring_tip_y;
-    int16_t   pulse_x, pulse_y, flare_x, flare_y;
-    uint32_t  ring_rgb, ring_tip_rgb, pulse_rgb, flare_rgb;   /* final colours */
+    int16_t   pulse_x, pulse_y;
+    uint32_t  ring_rgb, ring_tip_rgb, pulse_rgb;   /* final colours */
     seg_px_t  left_tick;
     seg_px_t  left[SCN_LEFT_MAX];
     int16_t   ring_pts[SCN_RING_N + 1][2];
@@ -398,7 +394,7 @@ struct nina_sky_scene_s {
     /* finish pulse: set in update() when a picture is logged, dropped on age */
     bool     pulse_on;
     int64_t  pulse_t0_us;
-    uint32_t pulse_rgb;           /* the bead colour (brightness mapped, not Red Night mapped) */
+    uint32_t pulse_rgb;           /* the filter colour of the finished picture (brightness mapped, not Red Night mapped) */
 
     /* Slew trail, and the ease through the pole on a change of pier side with
      * its sweep arc. Written by update(), tick_cb() and pose_now(); every flag
@@ -426,9 +422,6 @@ struct nina_sky_scene_s {
     float    ha_now;
     sky_v3_t target_vec;
 
-    /* bead log, ring of SCN_BEADS_MAX */
-    struct { float ha; uint32_t color; } beads[SCN_BEADS_MAX];
-    int     bead_head, bead_count;
     int     prev_done;
     bool    have_prev_done;
     char    prev_filter[sizeof(((nina_client_t *)0)->current_filter)];
@@ -1049,8 +1042,6 @@ void nina_sky_scene_update(nina_sky_scene_t *s, const nina_client_t *d, int inst
         target_changed = dra > 0.01f || fabsf(s->dec_deg - s->prev_dec) > 0.1f;
     }
     if (target_changed) {
-        s->bead_head = 0;
-        s->bead_count = 0;
         s->have_prev_done = false;
         s->pulse_on = false;
     }
@@ -1070,25 +1061,13 @@ void nina_sky_scene_update(nina_sky_scene_t *s, const nina_client_t *d, int inst
         sky_path_build(&s->path, s->dec_deg, s->lat, s->ha_now, s->horizon, s->horizon_valid);
     }
 
-    /* Counts and beads. */
+    /* Counts. */
     int done = 0, total = 0;
     sky_plan_counts(&d->plan, d->exposure_count, d->exposure_iterations, &done, &total);
     if (s->have_target && s->have_prev_done && done > s->prev_done) {
-        int add = done - s->prev_done;
-        if (add > 4) {
-            add = 4;
-        }
         const uint32_t col = app_config_get_filter_color(s->prev_filter, instance);
-        for (int i = 0; i < add; i++) {
-            s->beads[s->bead_head].ha = s->ha_now;
-            s->beads[s->bead_head].color = col;
-            s->bead_head = (s->bead_head + 1) % SCN_BEADS_MAX;
-            if (s->bead_count < SCN_BEADS_MAX) {
-                s->bead_count++;
-            }
-        }
-        /* Finish pulse: the light of the picture runs down the beam and the
-         * new bead flares once. Ends on age alone (tick_cb(), and above). */
+        /* Finish pulse: the light of the picture runs down the beam. Ends on
+         * age alone (tick_cb(), and above). */
         s->pulse_on = true;
         s->pulse_t0_us = now_us;
         s->pulse_rgb = col;
@@ -1278,7 +1257,7 @@ static void sky_inputs_copy(nina_sky_scene_t *s, const nina_client_t *d, const a
     s->left_min = sky_parse_minutes(d->target_time_remaining);
 
     /* Accent: the filter colour (already brightness mapped by app_config, so
-     * only the Red Night step is applied here, as for the beads), cyan when
+     * only the Red Night step is applied here, as for the finish pulse), cyan when
      * parked or with no filter name. */
     if (d->current_filter[0] != '\0' && !d->mount_at_park) {
         s->accent = pal_red_only(app_config_get_filter_color(d->current_filter, instance));
@@ -1634,21 +1613,6 @@ static void project(nina_sky_scene_t *s)
             dl->set_in = 1;
             dl->set_x = to_px(x);
             dl->set_y = to_px(y);
-        }
-    }
-
-    /* Beads. */
-    if (s->have_target) {
-        for (int i = 0; i < s->bead_count && dl->n_beads < SCN_BEADS_MAX; i++) {
-            const int k = (s->bead_head - s->bead_count + i + SCN_BEADS_MAX) % SCN_BEADS_MAX;
-            if (proj_dir(&cam, sky_hadec_to_vec(s->beads[k].ha, s->dec_deg, s->lat), &x, &y) &&
-                sky_frame_contains(fr, x, y, 0.0f)) {
-                bead_px_t *bp = &dl->beads[dl->n_beads++];
-                bp->x = to_px(x);
-                bp->y = to_px(y);
-                bp->color = pal_red_only(s->beads[k].color);
-                dl->bead_new_in = (i == s->bead_count - 1) ? 1 : 0;
-            }
         }
     }
 
@@ -2444,11 +2408,10 @@ static void project_ring(nina_sky_scene_t *s)
     ring_fill(s);
 }
 
-/* The finish pulse, by age since the picture was logged. Travelling: a point
+/* The finish pulse, by age since the picture finished. Travelling: a point
  * runs from the aim end of the beam back to the tube mouth. Arriving: a ring
- * opens at the mouth. Flare: a ring opens once round the newest bead. With no
- * beam (parked, or no pointing) only the flare is drawn. Every stage ends on
- * age alone. */
+ * opens at the mouth. With no beam (parked, or no pointing) nothing is drawn.
+ * Every stage ends on age alone. */
 static void project_pulse(nina_sky_scene_t *s, int64_t now_us)
 {
     dl_t *dl = &s->dl;
@@ -2498,16 +2461,6 @@ static void project_pulse(nina_sky_scene_t *s, int64_t now_us)
         dl->pulse_r = (uint8_t)(8.0f + 22.0f * u + 0.5f);
         dl->pulse_a = (uint8_t)(0.5f * (1.0f - u) * 255.0f + 0.5f);
         dl->pulse_rgb = pc;
-    }
-    if (dl->bead_new_in && dl->n_beads > 0 && age < SKY_FLARE_S) {
-        const bead_px_t *bp = &dl->beads[dl->n_beads - 1];
-        const float k = age / SKY_FLARE_S;
-        dl->flare_in = 1;
-        dl->flare_x = bp->x;
-        dl->flare_y = bp->y;
-        dl->flare_r = (uint8_t)(5.0f + 16.0f * k + 0.5f);
-        dl->flare_a = (uint8_t)(0.6f * (1.0f - k) * 255.0f + 0.5f);
-        dl->flare_rgb = bp->color;
     }
 }
 
@@ -3725,14 +3678,6 @@ static void draw_cb(lv_event_t *e)
     if (dl->left_tick_in) {
         draw_line(&c, dl->left_tick.x1, dl->left_tick.y1, dl->left_tick.x2, dl->left_tick.y2,
                   P[PAL_X_LEFT_TICK], 3, LV_OPA_COVER, true);
-    }
-    /* 4 beads, and one opening ring round the newest when a picture finishes */
-    for (int i = 0; i < dl->n_beads; i++) {
-        draw_dot(&c, dl->beads[i].x, dl->beads[i].y, 4, dl->beads[i].color, LV_OPA_COVER);
-    }
-    if (dl->flare_in) {
-        draw_ring(&c, dl->flare_x, dl->flare_y, dl->flare_r, dl->flare_rgb, 2, dl->flare_a,
-                  0, 360, false);
     }
     /* 5 rise and set */
     if (dl->rise_in) {

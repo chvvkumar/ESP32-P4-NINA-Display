@@ -279,6 +279,7 @@ static nina_page_change_cb_t page_change_cb = NULL;
 void nina_dashboard_invalidate_disconnect_gate(int instance);
 
 static void update_indicators(void);
+static void layout_cycle_tick_cb(lv_timer_t *t);
 static void fade_anim_cb(void *obj, int32_t v);
 static bool layout_uses_round_overlay(uint8_t layout);
 static void rms_click_cb(lv_event_t *e);
@@ -735,6 +736,43 @@ static uint8_t layout_for_family(uint8_t stored) {
 #endif
 }
 
+/* Layout cycle: per-instance position in nina_layout_list[] and the seconds
+ * that layout has been on screen. RAM only, 0 at boot, never saved. Touched
+ * only under the LVGL lock (the cycle timer, rebuild_slot and the reset). */
+static uint8_t  s_cycle_pos[MAX_NINA_INSTANCES];
+static uint16_t s_cycle_elapsed_s[MAX_NINA_INSTANCES];
+static lv_timer_t *s_cycle_timer = NULL;
+
+/* Fill @p out with the list entries this family can draw, in list order, and
+ * return how many there are. An entry is drawable when layout_for_family()
+ * keeps it as is; 0xFF (empty) never is. */
+static int layout_cycle_drawable(const app_config_t *cfg, int inst,
+                                 uint8_t out[NINA_LAYOUT_LIST_MAX]) {
+    int n = 0;
+    for (int k = 0; k < NINA_LAYOUT_LIST_MAX; k++) {
+        uint8_t e = cfg->nina_layout_list[inst][k];
+        if (e == NINA_LAYOUT_LIST_EMPTY) continue;
+        if (layout_for_family(e) == e) out[n++] = e;
+    }
+    return n;
+}
+
+/* The one place that decides which layout an instance page is built with. */
+static uint8_t layout_for_instance(int inst) {
+    const app_config_t *cfg = app_config_get();
+    if (!cfg || inst < 0 || inst >= MAX_NINA_INSTANCES) return 0;
+    uint8_t d[NINA_LAYOUT_LIST_MAX];
+    int n = layout_cycle_drawable(cfg, inst, d);
+    if (n == 0) return layout_for_family(cfg->nina_layout_list[inst][0]);
+    return d[s_cycle_pos[inst] % n];
+}
+
+void nina_dashboard_layout_cycle_reset(int instance) {
+    if (instance < 0 || instance >= MAX_NINA_INSTANCES) return;
+    s_cycle_pos[instance] = 0;
+    s_cycle_elapsed_s[instance] = 0;
+}
+
 /* True for a layout the shared round picture overlay is built for. Always false
  * on the square family, which has no overlay module. */
 static bool layout_uses_round_overlay(uint8_t layout) {
@@ -756,14 +794,7 @@ static bool layout_uses_round_overlay(uint8_t layout) {
 static void create_dashboard_page(dashboard_page_t *p, lv_obj_t *parent, int page_index) {
     memset(p, 0, sizeof(dashboard_page_t));
 
-    {
-        const app_config_t *cfg = app_config_get();
-        uint8_t want = 0;
-        if (cfg && page_index >= 0 && page_index < MAX_NINA_INSTANCES) {
-            want = cfg->nina_layout[page_index];
-        }
-        p->layout = layout_for_family(want);
-    }
+    p->layout = layout_for_instance(page_index);
 
     p->page = lv_obj_create(parent);
     lv_obj_remove_style_all(p->page);
@@ -1806,6 +1837,10 @@ void create_nina_dashboard(lv_obj_t *parent, int instance_count) {
         }
     }
 
+    /* One layout-cycle timer for every instance page, created once: an LVGL
+     * timer is not tied to any object, so a re-entry keeps the first one. */
+    if (!s_cycle_timer) s_cycle_timer = lv_timer_create(layout_cycle_tick_cb, 1000, NULL);
+
     nina_dashboard_apply_theme(cfg->theme_index);
 }
 
@@ -1821,17 +1856,27 @@ void nina_dashboard_rebuild_slot(int instance) {
     /* Layout change on the page being shown: rebuild in place and fade the new
      * layout in, with no detour through the Summary page. */
     bool swap_in_place = false;
+    /* Layout swap on a slot that stays available: the dot count and the
+     * Summary card set do not change. */
+    bool layout_swap = false;
 
     /* A nina_layout change keeps the slot available but replaces the whole
      * widget tree, so it has to tear down and rebuild rather than no-op.
      * Recurse once through the destroy path, then fall through to create. */
     if (want && have) {
-        const app_config_t *lcfg = app_config_get();
-        uint8_t want_layout = layout_for_family(lcfg ? lcfg->nina_layout[instance] : 0);
-        if (want_layout == pages[instance].layout) return;   /* nothing to do */
+        const uint8_t old_layout = pages[instance].layout;
+        uint8_t want_layout = layout_for_instance(instance);
+        if (want_layout == old_layout) return;   /* nothing to do */
         have = false;
+        layout_swap = true;
         swap_in_place = (active_page == NINA_PAGE_OFFSET + instance);
-        if (nina_layout_uses_capture(pages[instance].layout)) {
+        /* Keep the retained picture when the new layout shows it with the same
+         * fit, so it appears at once. The store owns only the buffer and its
+         * descriptor, no widget pointer, and the new tree reattaches it inside
+         * create_dashboard_page() (nina_layout_image_reattach_capture()). */
+        if (nina_layout_uses_capture(old_layout) &&
+            !(nina_layout_uses_capture(want_layout) &&
+              nina_layout_capture_fit(old_layout) == nina_layout_capture_fit(want_layout))) {
             nina_layout_image_release_capture(instance);
         }
         if (pages[instance].arc_timer) {
@@ -1905,9 +1950,12 @@ void nina_dashboard_rebuild_slot(int instance) {
 
     /* page_count (band width) and total_page_count are CONSTANT under the
      * reserved band, so SETTINGS/SYSINFO indices do not move. Only the dot
-     * strip (sized to the available count) and the summary need a refresh. */
-    create_page_indicator(scr_dashboard, nina_available_count);  /* rebuilds dots */
-    summary_page_rebuild();                                      /* Task 1.3c */
+     * strip (sized to the available count) and the summary need a refresh.
+     * A layout swap changes neither, only whether the dots show. */
+    if (!layout_swap) {
+        create_page_indicator(scr_dashboard, nina_available_count);  /* rebuilds dots */
+        summary_page_rebuild();                                      /* Task 1.3c */
+    }
     update_indicators();
 }
 
@@ -2048,6 +2096,43 @@ static void fade_anim_cb(void *obj, int32_t v)
 static void slide_x_anim_cb(void *obj, int32_t v)
 {
     lv_obj_set_style_translate_x((lv_obj_t *)obj, v, 0);
+}
+
+/* A touch this recent restarts the dwell of the layout on screen. */
+#define LAYOUT_CYCLE_TOUCH_MS 1500
+
+/* 1 s layout-cycle tick, LVGL lock held. Counts only while a NINA instance page
+ * is the page on screen with no page transition and no modal surface open, so
+ * the dwell pauses off screen and resumes with the time it had left. */
+static void layout_cycle_tick_cb(lv_timer_t *t) {
+    LV_UNUSED(t);
+    int inst = abs_page_to_instance(active_page);
+    if (inst < 0 || !nina_slot_available[inst] || !pages[inst].page) return;
+    /* Never rebuild a page an in-flight transition is still animating. */
+    if (next_page_index >= 0 || slide_old_page_idx >= 0) return;
+    if (nina_wait_overlay_visible()) return;
+    if (thumbnail_overlay && !lv_obj_has_flag(thumbnail_overlay, LV_OBJ_FLAG_HIDDEN)) return;
+    if (nina_graph_visible()) return;
+    if (nina_info_overlay_visible()) return;
+    if (nina_ota_prompt_visible()) return;
+
+    const app_config_t *cfg = app_config_get();
+    if (!cfg) return;
+    uint8_t d[NINA_LAYOUT_LIST_MAX];
+    int n = layout_cycle_drawable(cfg, inst, d);
+    if (n < 2) return;
+
+    if (lv_display_get_inactive_time(NULL) < LAYOUT_CYCLE_TOUCH_MS) {
+        s_cycle_elapsed_s[inst] = 0;
+        return;
+    }
+    uint16_t dwell = cfg->nina_layout_cycle_s[inst];
+    if (dwell < 15) dwell = 15;
+    if (++s_cycle_elapsed_s[inst] < dwell) return;
+
+    s_cycle_elapsed_s[inst] = 0;
+    s_cycle_pos[inst] = (uint8_t)((s_cycle_pos[inst] + 1) % n);
+    nina_dashboard_rebuild_slot(inst);   /* rebuilds in place with a fade */
 }
 
 static void update_indicators(void)

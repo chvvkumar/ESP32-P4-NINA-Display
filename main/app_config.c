@@ -1200,6 +1200,11 @@ static void set_defaults(app_config_t *cfg) {
     // SETTINGS_TABLE row (the table keys one scalar per name); clamped by hand
     // in validate_config() the same way instance_enabled[] is.
     memset(cfg->nina_layout, 0, sizeof(cfg->nina_layout));  // 0 = Dashboard (arc)
+    memset(cfg->nina_layout_list, NINA_LAYOUT_LIST_EMPTY, sizeof(cfg->nina_layout_list));
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        cfg->nina_layout_list[i][0] = 0;   // v82: single Dashboard entry
+        cfg->nina_layout_cycle_s[i] = 60;
+    }
 
     // v77 addition (global audio mute). Also a SETTINGS_TABLE row.
     cfg->audio_muted = false;           // sound on by default
@@ -3341,6 +3346,17 @@ static void migrate_from_v73(const void *raw, size_t raw_size, app_config_t *cfg
     ESP_LOGI(TAG, "Migrated config from v73 to v%d", APP_CONFIG_VERSION);
 }
 
+/* Migrations from v75..v80 copy nina_layout[] through but leave the v82 list
+ * at set_defaults() values, which would clobber it in validate_config. Seed
+ * the list from the copied layout instead. */
+static void seed_layout_list_from_layout(app_config_t *cfg)
+{
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        memset(cfg->nina_layout_list[i], NINA_LAYOUT_LIST_EMPTY, NINA_LAYOUT_LIST_MAX);
+        cfg->nina_layout_list[i][0] = cfg->nina_layout[i];
+    }
+}
+
 /* --- v74 -> v75 migration: appends nina_layout[MAX_NINA_INSTANCES], the
  *     per-instance NINA page layout choice (0 Dashboard/arc, 1 Image-forward).
  *     Additive and at the very end, so this stays a plain
@@ -3392,6 +3408,7 @@ static void migrate_from_v75(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->voice_notify_mask |= 0x7FFF000u;   /* bits 12-26 */
 
     cfg->config_version = APP_CONFIG_VERSION;
+    seed_layout_list_from_layout(cfg);
     ESP_LOGI(TAG, "Migrated config from v75 to v%d", APP_CONFIG_VERSION);
 }
 
@@ -3414,6 +3431,7 @@ static void migrate_from_v76(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->audio_muted = false;
 
     cfg->config_version = APP_CONFIG_VERSION;
+    seed_layout_list_from_layout(cfg);
     ESP_LOGI(TAG, "Migrated config from v76 to v%d", APP_CONFIG_VERSION);
 }
 
@@ -3433,6 +3451,7 @@ static void migrate_from_v78(const void *raw, size_t raw_size, app_config_t *cfg
     memcpy(cfg, raw, copy);
     cfg->moon_round_size_pct = 100;
     cfg->config_version = APP_CONFIG_VERSION;
+    seed_layout_list_from_layout(cfg);
     ESP_LOGI(TAG, "Migrated config from v78 to v%d", APP_CONFIG_VERSION);
 }
 
@@ -3447,6 +3466,7 @@ static void migrate_from_v79(const void *raw, size_t raw_size, app_config_t *cfg
     memcpy(cfg, raw, copy);
     cfg->nina_notify_scope = 0;
     cfg->config_version = APP_CONFIG_VERSION;
+    seed_layout_list_from_layout(cfg);
     ESP_LOGI(TAG, "Migrated config from v79 to v%d", APP_CONFIG_VERSION);
 }
 
@@ -3464,7 +3484,26 @@ static void migrate_from_v80(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->radar_zoom    = 6;
     cfg->radar_palette = 6;
     cfg->config_version = APP_CONFIG_VERSION;
+    seed_layout_list_from_layout(cfg);
     ESP_LOGI(TAG, "Migrated config from v80 to v%d", APP_CONFIG_VERSION);
+}
+
+/* --- v81 -> v82 migration: appends nina_layout_list[][] and
+ * nina_layout_cycle_s[]. The prefix through radar_palette is the v81 layout
+ * byte for byte. --- */
+static void migrate_from_v81(const void *raw, size_t raw_size, app_config_t *cfg)
+{
+    set_defaults(cfg);
+    size_t v81_size = offsetof(app_config_t, nina_layout_list);
+    size_t copy = raw_size < v81_size ? raw_size : v81_size;
+    memcpy(cfg, raw, copy);
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        memset(cfg->nina_layout_list[i], NINA_LAYOUT_LIST_EMPTY, NINA_LAYOUT_LIST_MAX);
+        cfg->nina_layout_list[i][0] = cfg->nina_layout[i];
+        cfg->nina_layout_cycle_s[i] = 60;
+    }
+    cfg->config_version = APP_CONFIG_VERSION;
+    ESP_LOGI(TAG, "Migrated config from v81 to v%d", APP_CONFIG_VERSION);
 }
 
 static void migrate_from_v77(const void *raw, size_t raw_size, app_config_t *cfg)
@@ -3480,6 +3519,7 @@ static void migrate_from_v77(const void *raw, size_t raw_size, app_config_t *cfg
     cfg->telemetry_enabled = false;
 
     cfg->config_version = APP_CONFIG_VERSION;
+    seed_layout_list_from_layout(cfg);
     ESP_LOGI(TAG, "Migrated config from v77 to v%d", APP_CONFIG_VERSION);
 }
 
@@ -4320,6 +4360,38 @@ static bool validate_config(app_config_t *cfg) {
         }
     }
 
+    /* v82 layout cycle list: keep valid unique ids in order, compact to the
+     * front, pad with the empty marker. An empty result is seeded from the
+     * (just clamped) nina_layout[i]. The list is authoritative, so
+     * nina_layout[i] mirrors entry 0 afterwards. */
+    for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
+        uint8_t out[NINA_LAYOUT_LIST_MAX];
+        int n = 0;
+        for (int k = 0; k < NINA_LAYOUT_LIST_MAX; k++) {
+            uint8_t v = cfg->nina_layout_list[i][k];
+            if (v > 9 || v == 3 || v == 6) continue;
+            bool dup = false;
+            for (int j = 0; j < n; j++) {
+                if (out[j] == v) { dup = true; break; }
+            }
+            if (!dup) out[n++] = v;
+        }
+        if (n == 0) out[n++] = cfg->nina_layout[i];
+        while (n < NINA_LAYOUT_LIST_MAX) out[n++] = NINA_LAYOUT_LIST_EMPTY;
+        if (memcmp(out, cfg->nina_layout_list[i], sizeof(out)) != 0) {
+            memcpy(cfg->nina_layout_list[i], out, sizeof(out));
+            fixed = true;
+        }
+        if (cfg->nina_layout[i] != out[0]) {
+            cfg->nina_layout[i] = out[0];
+            fixed = true;
+        }
+        if (cfg->nina_layout_cycle_s[i] < 15 || cfg->nina_layout_cycle_s[i] > 3600) {
+            cfg->nina_layout_cycle_s[i] = 60;
+            fixed = true;
+        }
+    }
+
     /* Global audio mute (v77): canonicalize a stale blob byte to a strict
      * 0/1, same shape as the flights_enabled bools below. Its SETTINGS_TABLE
      * BOOL row handles default + web parse; the clamp there is a no-op. */
@@ -4465,6 +4537,13 @@ void app_config_init(void) {
             nvs_commit(handle);
         }
         /* tiles_loaded stays false -> tail loads "json_tiles"/"ha_tiles" keys */
+    } else if (version_check == 81) {
+        /* v81 -> v82: appended nina_layout_list and nina_layout_cycle_s.
+         * tiles_loaded stays false: the tiles already live in NVS keys. */
+        migrate_from_v81(raw, stored_size, &s_config);
+        validate_config(&s_config);
+        nvs_set_blob(handle, "config", &s_config, sizeof(app_config_t));
+        nvs_commit(handle);
     } else if (version_check == 80) {
         /* v80 -> v81: appended radar_zoom and radar_palette. tiles_loaded stays
          * false: a v80 device already keeps its tiles in the

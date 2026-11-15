@@ -144,10 +144,10 @@ static void test_scale_knob(void)
         }
     }
     printf("  lowest part end at SKY_RIG_SCALE: %.3f m\n", (double)low);
-    /* Zenith: the camera end clears the ground by 0.07 m. */
+    /* Zenith: the camera end clears the ground by 0.07 m plus the forward shift. */
     const sky_pose_t up = sky_mount_pose(LAT, sky_v3(0.0f, 0.0f, 1.0f), SKY_PIER_EAST, 0.0f);
     sky_rig_model_fit_points(&up, SKY_RIG_SCALE, fit);
-    CHECK(feq(fit[3].z, 0.07f, 1e-4f));
+    CHECK(feq(fit[3].z, 0.07f + SKY_RIG_TUBE_SHIFT * SKY_RIG_SCALE, 1e-4f));
     CHECK(feq(sky_rig_model_mouth_r(SKY_RIG_SCALE), 0.135f, 1e-6f));
 }
 
@@ -163,8 +163,8 @@ static void test_fit_points(void)
     CHECK(v3_near(fit[0], sky_v3(0.0f, 0.0f, 0.0f), 1e-6f));
     CHECK(v3_near(fit[1], o, 1e-6f));
     CHECK(v3_near(fit[2], sky_rig_model_front(&pose, k), 1e-6f));
-    CHECK(v3_near(fit[2], sky_v3_add(s, sky_v3_scale(pose.tube, 0.55f * k)), 1e-5f));
-    CHECK(v3_near(fit[3], sky_v3_sub(s, sky_v3_scale(pose.tube, 0.70f * k)), 1e-5f));
+    CHECK(v3_near(fit[2], sky_v3_add(s, sky_v3_scale(pose.tube, SKY_RIG_MOUTH * k)), 1e-5f));
+    CHECK(v3_near(fit[3], sky_v3_sub(s, sky_v3_scale(pose.tube, SKY_RIG_CAM_END * k)), 1e-5f));
     CHECK(v3_near(fit[4], sky_v3_add(o, sky_v3_scale(pose.weight, 0.29f * k)), 1e-5f));
 }
 

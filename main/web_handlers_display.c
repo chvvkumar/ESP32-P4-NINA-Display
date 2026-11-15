@@ -70,6 +70,12 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
     for (int i = 0; i < MAX_NINA_INSTANCES; i++) {
         bool enable_changed = (new_cfg->instance_enabled[i] != old_cfg->instance_enabled[i]);
         bool url_changed = (strcmp(new_cfg->api_url[i], old_cfg->api_url[i]) != 0);
+        /* A changed layout list or dwell restarts that page's cycle from the
+         * first entry. */
+        bool cycle_changed =
+            memcmp(new_cfg->nina_layout_list[i], old_cfg->nina_layout_list[i],
+                   sizeof(new_cfg->nina_layout_list[i])) != 0 ||
+            new_cfg->nina_layout_cycle_s[i] != old_cfg->nina_layout_cycle_s[i];
         if (enable_changed || url_changed) {
             if (!new_cfg->instance_enabled[i]) {
                 /* User turned it off — offline now, no timeout window. */
@@ -80,6 +86,7 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
             }
             /* Lazily create/destroy the slot to match the new config. */
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                if (cycle_changed) nina_dashboard_layout_cycle_reset(i);
                 nina_dashboard_rebuild_slot(i);
                 bsp_display_unlock();
             }
@@ -90,8 +97,9 @@ void config_trigger_side_effects(const app_config_t *old_cfg, const app_config_t
          * topology change: the slot keeps its availability, only its widgets
          * differ. Skipped when the block above already rebuilt this slot. */
         if (!enable_changed && !url_changed &&
-            new_cfg->nina_layout[i] != old_cfg->nina_layout[i]) {
+            (cycle_changed || new_cfg->nina_layout[i] != old_cfg->nina_layout[i])) {
             if (bsp_display_lock(LVGL_LOCK_TIMEOUT_MS)) {
+                if (cycle_changed) nina_dashboard_layout_cycle_reset(i);
                 nina_dashboard_rebuild_slot(i);
                 bsp_display_unlock();
             }
