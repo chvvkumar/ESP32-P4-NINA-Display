@@ -33,8 +33,10 @@
 #define SKY_POLE_EASE_MS  1500    /* ease through the pole on a pier-side change */
 
 #define SKY_RIG_SADDLE    0.22f   /* head centre to the tube axis, along decl */
-#define SKY_RIG_MOUTH     0.55f   /* saddle to the mouth, along the tube */
-#define SKY_RIG_CAM_END   0.70f   /* saddle to the camera end, against the tube */
+#define SKY_RIG_TUBE_SHIFT 0.12f  /* whole tube assembly slid forward in the saddle;
+                                   * 0 hangs 0.70 behind and 0.55 ahead */
+#define SKY_RIG_MOUTH     (0.55f + SKY_RIG_TUBE_SHIFT)   /* saddle to the mouth, along the tube */
+#define SKY_RIG_CAM_END   (0.70f - SKY_RIG_TUBE_SHIFT)   /* saddle to the camera end, against the tube */
 #define SKY_RIG_SHAFT_END 0.29f   /* head centre to the shaft end, along weight */
 #define SKY_RIG_MOUTH_R   0.09f   /* dew shield radius */
 
@@ -163,6 +165,7 @@ static inline int sky_rig_parts(const sky_pose_t *pose, float scale, sky_rig_par
         const sky_rig_row_t_ *r = &SKY_RIG_ROWS_[i];
         sky_rig_part_t *p = &out[i];
         sky_v3_t org = o, dir = up;
+        float shift = 0.0f;
         switch (r->frame) {
         case SKY_RIGF_POLAR_:
             dir = pose->polar;
@@ -176,12 +179,13 @@ static inline int sky_rig_parts(const sky_pose_t *pose, float scale, sky_rig_par
         case SKY_RIGF_TUBE_:
             org = sky_v3_add(s, sky_v3_scale(pose->decl, r->side * scale));
             dir = pose->tube;
+            shift = SKY_RIG_TUBE_SHIFT;
             break;
         default:
             break;
         }
-        p->a = sky_v3_add(org, sky_v3_scale(dir, r->from * scale));
-        p->b = sky_v3_add(org, sky_v3_scale(dir, r->to * scale));
+        p->a = sky_v3_add(org, sky_v3_scale(dir, (r->from + shift) * scale));
+        p->b = sky_v3_add(org, sky_v3_scale(dir, (r->to + shift) * scale));
         p->r0 = r->r0 * scale;
         p->r1 = r->r1 * scale;
         p->id = (uint8_t)i;
