@@ -1686,6 +1686,8 @@ static void project(nina_sky_scene_t *s)
             }
             s->hz_ok[i] = proj_dir(&cam, sky_altaz_to_vec(alt, az), &s->hz_x[i], &s->hz_y[i]);
         }
+        float zen_x = 0.0f, zen_y = 0.0f;
+        const bool zen_ok = proj_dir(&cam, sky_altaz_to_vec(90.0f, yaw), &zen_x, &zen_y);
         for (int i = 1; i < SCN_HZ_PTS; i++) {
             if (!s->hz_ok[i - 1] || !s->hz_ok[i]) {
                 continue;
@@ -1725,7 +1727,14 @@ static void project(nina_sky_scene_t *s)
              * becomes a cap from row 0 down to the line instead.
              * ponytail: a column the outline folds short of gets neither fill;
              * count crossings per column if a sliver of sky ever shows there. */
-            const bool behind = fabsf(az0 + 0.5f * SCN_HZ_STEP_DEG - yaw) > 90.0f;
+            bool behind = fabsf(az0 + 0.5f * SCN_HZ_STEP_DEG - yaw) > 90.0f;
+            /* Sky is the side of the outline the zenith is on. A steep folded
+             * run (a tall obstruction near the frame edge) still has the zenith
+             * above it, so its land is below like any other column top. */
+            if (behind && zen_ok && fabsf(hdx) > 1e-6f &&
+                zen_y < hy0 + (hy1 - hy0) * (zen_x - hx0) / hdx) {
+                behind = false;
+            }
             for (int c = c0; c <= c1; c++) {
                 const float xc = (float)(c * SCN_COL_W) + 0.5f * (float)SCN_COL_W;
                 const float k = (fabsf(hdx) > 1e-6f) ? (xc - hx0) / hdx : 0.0f;
